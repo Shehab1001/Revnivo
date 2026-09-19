@@ -1,0 +1,551 @@
+from datetime import datetime, time, timezone
+from decimal import Decimal
+import base64
+import binascii
+import json
+from time import monotonic
+from urllib.request import urlopen
+
+from bson import ObjectId
+from bson.decimal128 import Decimal128
+from django.conf import settings
+from django.contrib.auth.hashers import check_password, make_password
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
+from pymongo import ASCENDING, DESCENDING
+from pymongo.errors import DuplicateKeyError, PyMongoError
+from rest_framework import status
+from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+
+from .authentication import create_access_token
+from .mongo import ensure_indexes, get_db
+from .serializers import EarningSerializer, LoginSerializer, PlatformSerializer, RegisterSerializer
+from .utils import (
+    decimal128,
+    decimal_to_float,
+    delete_logo,
+    oid,
+    save_logo,
+    serialize_note,
+    serialize_earning,
+    serialize_platform,
+    utcnow,
+)
+
+
+def owner_oid(request):
+    return ObjectId(request.user.id)
+
+
+def serialize_user(doc, request):
+    avatar = doc.get("profile_image") or ""
+    avatar_url = ""
+    if avatar:
+        path = f"{settings.MEDIA_URL}{avatar}".replace("//", "/")
+        avatar_url = request.build_absolute_uri(path)
+    return {"id": str(doc["_id"]), "name": doc.get("name", ""), "email": doc.get("email", ""), "profile_image_url": avatar_url}
+
+
+_egp_rate_cache = {"value": None, "expires_at": 0}
+
+
+def current_egp_per_usd():
+    now = monotonic()
+    if _egp_rate_cache["value"] is not None and now < _egp_rate_cache["expires_at"]:
+        return _egp_rate_cache["value"]
+
+    try:
+        with urlopen(settings.EGP_RATE_API_URL, timeout=3) as response:
+            payload = json.load(response)
+        rate = Decimal(str(payload["rates"]["EGP"]))
+        if rate <= 0:
+            raise ValueError("Invalid EGP exchange rate")
+        _egp_rate_cache.update({"value": rate, "expires_at": now + settings.EGP_RATE_CACHE_SECONDS})
+        return rate
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return settings.EGP_PER_USD
+
+
+def dashboard_currency_query(currency):
+    if currency == "EGP":
+        return {"currency": {"$in": ["USD", "EGP"]}}
+    return {"currency": currency}
+
+
+def dashboard_amount_expression(currency, egp_per_usd):
+    if currency != "EGP":
+        return "$amount"
+    return {
+        "$cond": [
+            {"$eq": ["$currency", "USD"]},
+            {"$multiply": ["$amount", Decimal128(str(egp_per_usd))]},
+            "$amount",
+        ]
+    }
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def health(request):
+    try:
+        get_db().command("ping")
+        mongo = "ok"
+    except Exception:
+        mongo = "unavailable"
+    return Response({"status": "ok", "mongodb": mongo})
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def register(request):
+    serializer = RegisterSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    db = get_db()
+    ensure_indexes()
+    email = data["email"].strip().lower()
+    try:
+        result = db.users.insert_one({
+            "name": data["name"].strip(),
+            "email": email,
+            "password_hash": make_password(data["password"]),
+            "created_at": utcnow(),
+        })
+    except DuplicateKeyError:
+        return Response({"detail": "An account with this email already exists."}, status=status.HTTP_409_CONFLICT)
+    doc = {"_id": result.inserted_id, "name": data["name"].strip(), "email": email}
+    token = create_access_token(str(result.inserted_id), email)
+    return Response({
+        "token": token,
+        "user": serialize_user(doc, request),
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def login(request):
+    serializer = LoginSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    email = serializer.validated_data["email"].strip().lower()
+    doc = get_db().users.find_one({"email": email})
+    if not doc or not check_password(serializer.validated_data["password"], doc.get("password_hash", "")):
+        return Response({"detail": "Invalid email or password."}, status=status.HTTP_401_UNAUTHORIZED)
+    token = create_access_token(str(doc["_id"]), email)
+    return Response({"token": token, "user": serialize_user(doc, request)})
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def google_login(request):
+    credential = request.data.get("credential")
+    if not settings.GOOGLE_CLIENT_ID:
+        return Response({"detail": "Google sign-in is not configured."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    if not credential:
+        return Response({"detail": "Google credential is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        google_user = id_token.verify_oauth2_token(
+            credential,
+            google_requests.Request(),
+            settings.GOOGLE_CLIENT_ID,
+            clock_skew_in_seconds=300,
+        )
+    except ValueError as exc:
+        detail = "Invalid Google credential."
+        if settings.DEBUG:
+            try:
+                payload = json.loads(base64.urlsafe_b64decode(credential.split(".")[1] + "=="))
+                if payload.get("aud") != settings.GOOGLE_CLIENT_ID:
+                    detail = "Google credential audience does not match GOOGLE_CLIENT_ID. Restart both servers and verify the same Web client ID is used."
+                elif payload.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+                    detail = "Google credential has an invalid issuer."
+                elif payload.get("exp", 0) <= int(datetime.now(timezone.utc).timestamp()):
+                    detail = "Google credential has expired. Refresh the page and try again."
+                elif payload.get("iat", 0) > int(datetime.now(timezone.utc).timestamp()) + 300:
+                    detail = "Google credential starts in the future. Check your computer date and time."
+                else:
+                    detail = f"Google credential rejected: {type(exc).__name__}. Restart the backend and try again."
+            except (IndexError, TypeError, ValueError, binascii.Error, json.JSONDecodeError):
+                detail = "Google credential is malformed. Refresh the page and try again."
+        return Response({"detail": detail}, status=status.HTTP_401_UNAUTHORIZED)
+
+    email = google_user.get("email", "").strip().lower()
+    if not email or not google_user.get("email_verified"):
+        return Response({"detail": "Google account email is not verified."}, status=status.HTTP_401_UNAUTHORIZED)
+
+    db = get_db()
+    doc = db.users.find_one({"email": email})
+    if not doc:
+        name = google_user.get("name") or email.split("@", 1)[0]
+        try:
+            result = db.users.insert_one({
+                "name": name[:120],
+                "email": email,
+                "password_hash": "",
+                "auth_provider": "google",
+                "created_at": utcnow(),
+            })
+            doc = {"_id": result.inserted_id, "name": name[:120], "email": email}
+        except DuplicateKeyError:
+            doc = db.users.find_one({"email": email})
+
+    token = create_access_token(str(doc["_id"]), email)
+    return Response({"token": token, "user": serialize_user(doc, request)})
+
+
+@api_view(["GET"])
+def me(request):
+    doc = get_db().users.find_one({"_id": ObjectId(request.user.id)})
+    return Response(serialize_user(doc, request))
+
+
+@api_view(["PATCH"])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def profile(request):
+    db = get_db()
+    owner = owner_oid(request)
+    doc = db.users.find_one({"_id": owner})
+    if not doc:
+        return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+    updates = {"updated_at": utcnow()}
+    if "name" in request.data:
+        name = str(request.data["name"]).strip()
+        if not name:
+            return Response({"detail": "Name is required."}, status=status.HTTP_400_BAD_REQUEST)
+        updates["name"] = name[:120]
+    if request.FILES.get("profile_image"):
+        if doc.get("profile_image"):
+            delete_logo(doc["profile_image"])
+        updates["profile_image"] = save_logo(request.FILES["profile_image"], "profiles")
+    db.users.update_one({"_id": owner}, {"$set": updates})
+    doc.update(updates)
+    return Response(serialize_user(doc, request))
+
+
+@api_view(["GET", "POST"])
+@parser_classes([JSONParser])
+def notes(request):
+    db = get_db()
+    owner = owner_oid(request)
+    if request.method == "GET":
+        page = max(int(request.query_params.get("page", 1)), 1)
+        page_size = 10
+        query = {"owner_id": owner}
+        search = request.query_params.get("search", "").strip()
+        if search:
+            query["$or"] = [
+                {"title": {"$regex": search, "$options": "i"}},
+                {"content": {"$regex": search, "$options": "i"}},
+            ]
+        total = db.notes.count_documents(query)
+        docs = db.notes.find(query).sort("updated_at", DESCENDING).skip((page - 1) * page_size).limit(page_size)
+        return Response({
+            "results": [serialize_note(doc) for doc in docs],
+            "pagination": {"page": page, "page_size": page_size, "total": total, "pages": max((total + page_size - 1) // page_size, 1)},
+        })
+
+    title = str(request.data.get("title", "")).strip()
+    content = str(request.data.get("content", "")).strip()
+    if not content:
+        return Response({"detail": "Note content is required."}, status=status.HTTP_400_BAD_REQUEST)
+    now = utcnow()
+    result = db.notes.insert_one({"owner_id": owner, "title": title[:160], "content": content[:5000], "created_at": now, "updated_at": now})
+    return Response(serialize_note({"_id": result.inserted_id, "title": title[:160], "content": content[:5000], "created_at": now, "updated_at": now}), status=status.HTTP_201_CREATED)
+
+
+@api_view(["DELETE"])
+def note_detail(request, note_id):
+    note_oid = oid(note_id)
+    if not note_oid:
+        return Response({"detail": "Invalid note id."}, status=status.HTTP_400_BAD_REQUEST)
+    result = get_db().notes.delete_one({"_id": note_oid, "owner_id": owner_oid(request)})
+    if not result.deleted_count:
+        return Response({"detail": "Note not found."}, status=status.HTTP_404_NOT_FOUND)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET", "POST"])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def platforms(request):
+    db = get_db()
+    owner = owner_oid(request)
+    if request.method == "GET":
+        docs = db.platforms.find({"owner_id": owner, "is_archived": {"$ne": True}}).sort("created_at", DESCENDING)
+        return Response([serialize_platform(d, request) for d in docs])
+
+    serializer = PlatformSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    logo_path = save_logo(data["logo"]) if data.get("logo") else ""
+    doc = {
+        "owner_id": owner,
+        "name": data["name"].strip(),
+        "website": data.get("website", "").strip(),
+        "default_currency": data.get("default_currency", "USD").upper(),
+        "logo": logo_path,
+        "is_archived": False,
+        "created_at": utcnow(),
+        "updated_at": utcnow(),
+    }
+    result = db.platforms.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return Response(serialize_platform(doc, request), status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def platform_detail(request, platform_id):
+    db = get_db()
+    owner = owner_oid(request)
+    platform_oid = oid(platform_id)
+    if not platform_oid:
+        return Response({"detail": "Invalid platform id."}, status=status.HTTP_400_BAD_REQUEST)
+    doc = db.platforms.find_one({"_id": platform_oid, "owner_id": owner})
+    if not doc:
+        return Response({"detail": "Platform not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "GET":
+        return Response(serialize_platform(doc, request))
+
+    if request.method == "DELETE":
+        # Archive the platform instead of destroying historical income records.
+        db.platforms.update_one({"_id": platform_oid, "owner_id": owner}, {"$set": {"is_archived": True, "updated_at": utcnow()}})
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    serializer = PlatformSerializer(data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    updates = {"updated_at": utcnow()}
+    for key in ("name", "website", "default_currency"):
+        if key in data:
+            updates[key] = data[key].strip() if isinstance(data[key], str) else data[key]
+    if "default_currency" in updates:
+        updates["default_currency"] = updates["default_currency"].upper()
+    if data.get("logo"):
+        delete_logo(doc.get("logo"))
+        updates["logo"] = save_logo(data["logo"])
+    db.platforms.update_one({"_id": platform_oid, "owner_id": owner}, {"$set": updates})
+    doc.update(updates)
+    return Response(serialize_platform(doc, request))
+
+
+@api_view(["GET", "POST"])
+def earnings(request):
+    db = get_db()
+    owner = owner_oid(request)
+    if request.method == "GET":
+        query = {"owner_id": owner}
+        currency = request.query_params.get("currency")
+        platform_id = request.query_params.get("platform_id")
+        year = request.query_params.get("year")
+        page = max(int(request.query_params.get("page", 1)), 1)
+        page_size = 10
+        if currency:
+            query["currency"] = currency.upper()
+        if platform_id:
+            p_oid = oid(platform_id)
+            if p_oid:
+                query["platform_id"] = p_oid
+        if year and year.isdigit():
+            y = int(year)
+            start = datetime(y, 1, 1, tzinfo=timezone.utc)
+            end = datetime(y + 1, 1, 1, tzinfo=timezone.utc)
+            query["earned_at"] = {"$gte": start, "$lt": end}
+
+        search = request.query_params.get("search", "").strip()
+        if search:
+            query["$or"] = [
+                {"note": {"$regex": search, "$options": "i"}},
+                {"category": {"$regex": search, "$options": "i"}},
+                {"currency": {"$regex": search, "$options": "i"}},
+            ]
+        total = db.earnings.count_documents(query)
+        docs = list(db.earnings.find(query).sort("earned_at", DESCENDING).skip((page - 1) * page_size).limit(page_size))
+        platform_ids = list({d.get("platform_id") for d in docs if d.get("platform_id")})
+        pmap = {p["_id"]: p for p in db.platforms.find({"_id": {"$in": platform_ids}, "owner_id": owner})}
+        rate = float(current_egp_per_usd())
+        return Response({
+            "results": [serialize_earning(d, pmap.get(d.get("platform_id")), rate) for d in docs],
+            "pagination": {"page": page, "page_size": page_size, "total": total, "pages": max((total + page_size - 1) // page_size, 1)},
+        })
+
+    serializer = EarningSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    platform_oid = oid(data["platform_id"])
+    platform = db.platforms.find_one({"_id": platform_oid, "owner_id": owner}) if platform_oid else None
+    if not platform:
+        return Response({"detail": "Platform not found."}, status=status.HTTP_400_BAD_REQUEST)
+    earned_dt = datetime.combine(data["earned_at"], time.min, tzinfo=timezone.utc)
+    doc = {
+        "owner_id": owner,
+        "platform_id": platform_oid,
+        "amount": decimal128(data["amount"]),
+        "currency": data["currency"].upper(),
+        "earned_at": earned_dt,
+        "note": data.get("note", "").strip(),
+        "category": data.get("category", "").strip(),
+        "created_at": utcnow(),
+        "updated_at": utcnow(),
+    }
+    result = db.earnings.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return Response(serialize_earning(doc, platform, float(current_egp_per_usd())), status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+def earning_detail(request, earning_id):
+    db = get_db()
+    owner = owner_oid(request)
+    earning_oid = oid(earning_id)
+    if not earning_oid:
+        return Response({"detail": "Invalid earning id."}, status=status.HTTP_400_BAD_REQUEST)
+    doc = db.earnings.find_one({"_id": earning_oid, "owner_id": owner})
+    if not doc:
+        return Response({"detail": "Earning not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "DELETE":
+        db.earnings.delete_one({"_id": earning_oid, "owner_id": owner})
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    if request.method == "GET":
+        platform = db.platforms.find_one({"_id": doc.get("platform_id"), "owner_id": owner})
+        return Response(serialize_earning(doc, platform, float(current_egp_per_usd())))
+
+    serializer = EarningSerializer(data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    updates = {"updated_at": utcnow()}
+    platform = None
+    if "platform_id" in data:
+        p_oid = oid(data["platform_id"])
+        platform = db.platforms.find_one({"_id": p_oid, "owner_id": owner}) if p_oid else None
+        if not platform:
+            return Response({"detail": "Platform not found."}, status=status.HTTP_400_BAD_REQUEST)
+        updates["platform_id"] = p_oid
+    if "amount" in data:
+        updates["amount"] = decimal128(data["amount"])
+    if "currency" in data:
+        updates["currency"] = data["currency"].upper()
+    if "earned_at" in data:
+        updates["earned_at"] = datetime.combine(data["earned_at"], time.min, tzinfo=timezone.utc)
+    for key in ("note", "category"):
+        if key in data:
+            updates[key] = data[key].strip()
+
+    db.earnings.update_one({"_id": earning_oid, "owner_id": owner}, {"$set": updates})
+    doc.update(updates)
+    if platform is None:
+        platform = db.platforms.find_one({"_id": doc.get("platform_id"), "owner_id": owner})
+    return Response(serialize_earning(doc, platform, float(current_egp_per_usd())))
+
+
+@api_view(["GET"])
+def dashboard(request):
+    db = get_db()
+    owner = owner_oid(request)
+    currency = request.query_params.get("currency", "USD").upper()
+    year = request.query_params.get("year", "all")
+    platform_id = request.query_params.get("platform_id", "all")
+    egp_per_usd = current_egp_per_usd()
+
+    match = {"owner_id": owner, **dashboard_currency_query(currency)}
+    if platform_id != "all":
+        platform_oid = oid(platform_id)
+        if platform_oid and db.platforms.find_one({"_id": platform_oid, "owner_id": owner, "is_archived": {"$ne": True}}):
+            match["platform_id"] = platform_oid
+        else:
+            platform_id = "all"
+    if year != "all" and str(year).isdigit():
+        y = int(year)
+        match["earned_at"] = {
+            "$gte": datetime(y, 1, 1, tzinfo=timezone.utc),
+            "$lt": datetime(y + 1, 1, 1, tzinfo=timezone.utc),
+        }
+
+    total_doc = next(db.earnings.aggregate([
+        {"$match": match},
+        {"$group": {"_id": None, "total": {"$sum": dashboard_amount_expression(currency, egp_per_usd)}, "count": {"$sum": 1}}},
+    ]), None)
+    total = decimal_to_float(total_doc.get("total")) if total_doc else 0.0
+    count = total_doc.get("count", 0) if total_doc else 0
+
+    monthly = list(db.earnings.aggregate([
+        {"$match": match},
+        {"$group": {
+            "_id": {"year": {"$year": "$earned_at"}, "month": {"$month": "$earned_at"}},
+            "total": {"$sum": dashboard_amount_expression(currency, egp_per_usd)},
+        }},
+        {"$sort": {"_id.year": 1, "_id.month": 1}},
+    ]))
+
+    yearly = list(db.earnings.aggregate([
+        {"$match": {**match, **dashboard_currency_query(currency)}},
+        {"$group": {
+            "_id": {"year": {"$year": "$earned_at"}, "month": {"$month": "$earned_at"}},
+            "total": {"$sum": dashboard_amount_expression(currency, egp_per_usd)},
+        }},
+        {"$sort": {"_id.year": 1, "_id.month": 1}},
+    ]))
+
+    by_platform = list(db.earnings.aggregate([
+        {"$match": match},
+        {"$group": {"_id": "$platform_id", "total": {"$sum": dashboard_amount_expression(currency, egp_per_usd)}, "count": {"$sum": 1}}},
+        {"$sort": {"total": -1}},
+    ]))
+    pids = [x["_id"] for x in by_platform if x.get("_id")]
+    pmap = {p["_id"]: p for p in db.platforms.find({"_id": {"$in": pids}, "owner_id": owner})}
+    platform_breakdown = [
+        {
+            "platform_id": str(row["_id"]),
+            "name": pmap.get(row["_id"], {}).get("name", "Deleted platform"),
+            "total": decimal_to_float(row["total"]),
+            "count": row["count"],
+        }
+        for row in by_platform
+    ]
+
+    recent_docs = list(db.earnings.find(match).sort("earned_at", DESCENDING).limit(6))
+    recent_pids = list({d.get("platform_id") for d in recent_docs if d.get("platform_id")})
+    recent_pmap = {p["_id"]: p for p in db.platforms.find({"_id": {"$in": recent_pids}, "owner_id": owner})}
+
+    currencies = sorted(set(db.earnings.distinct("currency", {"owner_id": owner})) | {"EGP"})
+    year_rows = list(db.earnings.aggregate([
+        {"$match": {"owner_id": owner}},
+        {"$group": {"_id": {"$year": "$earned_at"}}},
+        {"$sort": {"_id": -1}},
+    ]))
+    years = [r["_id"] for r in year_rows]
+    platform_rows = db.platforms.find(
+        {"owner_id": owner, "is_archived": {"$ne": True}},
+        {"name": 1},
+    ).sort("name", ASCENDING)
+    platforms = [{"id": str(p["_id"]), "name": p.get("name", "")} for p in platform_rows]
+
+    return Response({
+        "currency": currency,
+        "year": year,
+        "platform_id": platform_id,
+        "exchange_rate": float(egp_per_usd) if currency == "EGP" else None,
+        "summary": {
+            "total_income": total,
+            "transactions": count,
+            "platforms": db.platforms.count_documents({"owner_id": owner, "is_archived": {"$ne": True}}),
+            "best_platform": platform_breakdown[0]["name"] if platform_breakdown else None,
+            "best_platform_total": platform_breakdown[0]["total"] if platform_breakdown else 0,
+        },
+        "monthly": [
+            {"year": r["_id"]["year"], "month": r["_id"]["month"], "total": decimal_to_float(r["total"])}
+            for r in monthly
+        ],
+        "yearly": [
+            {"year": r["_id"]["year"], "month": r["_id"]["month"], "total": decimal_to_float(r["total"])}
+            for r in yearly
+        ],
+        "platform_breakdown": platform_breakdown,
+        "recent": [serialize_earning(d, None if platform_id != "all" else recent_pmap.get(d.get("platform_id")), float(current_egp_per_usd())) for d in recent_docs],
+        "filters": {"currencies": currencies, "years": years, "platforms": platforms},
+    })

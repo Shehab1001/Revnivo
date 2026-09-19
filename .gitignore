@@ -1,0 +1,18 @@
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.env
+backend/media/platforms/*
+!backend/media/platforms/.gitkeep
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# IDE/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
