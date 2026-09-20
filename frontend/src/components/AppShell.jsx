@@ -39,6 +39,7 @@ export default function AppShell() {
   const linkClass = ({ isActive }) => `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${isActive ? 'bg-[#e8f8ed] text-[#16843d] dark:bg-[#23462e] dark:text-[#7bea9d]' : 'text-slate-600 hover:bg-[#fffbea] dark:text-slate-300 dark:hover:bg-[#3b3e42]'}`
   const unread = notifications.filter((notification) => !notification.read).length
   const markRead = async (notification) => { await api.patch('/notifications/', { id: notification.id }).catch(() => {}); setNotifications(notifications.map((item) => item.id === notification.id ? { ...item, read: true } : item)) }
+  const openNotifications = async () => { const nextOpen = !noticeOpen; setNoticeOpen(nextOpen); if (nextOpen && unread) { await api.patch('/notifications/', { all: true }).catch(() => {}); setNotifications(notifications.map((item) => ({ ...item, read: true }))) } }
 
   const Sidebar = () => (
     <aside className={`${collapsed ? 'w-19' : 'w-64'} flex h-full flex-col border-r border-slate-200 bg-[#fffdf5] p-4 transition-all dark:border-[#45484d] dark:bg-[#333538]`}>

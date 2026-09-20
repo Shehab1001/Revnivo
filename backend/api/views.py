@@ -288,8 +288,16 @@ def admin_users(request):
         if role not in ("admin", "user"):
             return Response({"detail": "Role must be admin or user."}, status=status.HTTP_400_BAD_REQUEST)
         db.users.update_one({"_id": user_id}, {"$set": {"role": role}})
-    docs = db.users.find({}).sort("created_at", DESCENDING)
-    return Response([serialize_user(doc, request) for doc in docs])
+    docs = list(db.users.find({}).sort("created_at", DESCENDING))
+    return Response({
+        "stats": {
+            "total": len(docs),
+            "admins": sum(1 for doc in docs if is_admin_doc(doc)),
+            "users": sum(1 for doc in docs if not is_admin_doc(doc)),
+            "active_trials": sum(1 for doc in docs if doc.get("trial_ends_at") and doc["trial_ends_at"] > utcnow()),
+        },
+        "users": [serialize_user(doc, request) for doc in docs],
+    })
 
 
 @api_view(["GET", "PATCH"])
@@ -297,7 +305,15 @@ def subscriptions(request):
     if not require_admin(request):
         return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
     db = get_db()
-    if request.method == "PATCH":
+    if request.method == "PATCH" and request.data.get("plan_price") is not None:
+        try:
+            plan_price = round(float(request.data["plan_price"]), 2)
+            if plan_price <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response({"detail": "Plan price must be a positive number."}, status=status.HTTP_400_BAD_REQUEST)
+        db.settings.update_one({"key": "subscription_plan"}, {"$set": {"key": "subscription_plan", "price": plan_price, "updated_at": utcnow()}}, upsert=True)
+    elif request.method == "PATCH":
         user_id = oid(request.data.get("user_id"))
         if not user_id:
             return Response({"detail": "Invalid user id."}, status=status.HTTP_400_BAD_REQUEST)
@@ -309,7 +325,8 @@ def subscriptions(request):
     for doc in docs:
         trial_ends = doc.get("trial_ends_at")
         result.append({**serialize_user(doc, request), "trial_active": bool(trial_ends and trial_ends > now), "payment_method": doc.get("payment_method"), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None})
-    return Response(result)
+    plan = db.settings.find_one({"key": "subscription_plan"}) or {"price": 3.0}
+    return Response({"plan": {"price": float(plan.get("price", 3.0)), "currency": "USD", "trial_days": 30}, "users": result})
 
 
 @api_view(["GET", "PATCH"])
@@ -318,9 +335,12 @@ def notifications(request):
     owner = owner_oid(request)
     query = {"$or": [{"owner_id": None}, {"owner_id": owner}]}
     if request.method == "PATCH":
-        notification_id = oid(request.data.get("id"))
-        if notification_id:
-            db.notifications.update_one({"_id": notification_id, **query}, {"$set": {"read": True}})
+        if request.data.get("all"):
+            db.notifications.update_many(query, {"$set": {"read": True}})
+        else:
+            notification_id = oid(request.data.get("id"))
+            if notification_id:
+                db.notifications.update_one({"_id": notification_id, **query}, {"$set": {"read": True}})
     docs = db.notifications.find(query).sort("created_at", DESCENDING).limit(50)
     return Response([{**{key: doc.get(key) for key in ("kind", "title", "message", "read")}, "id": str(doc["_id"]), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None} for doc in docs])
 
@@ -345,6 +365,8 @@ def support_chat(request):
         db.chat_messages.insert_one(message)
         if message["sender"] == "user":
             create_notification("chat", "New support message", f"{user_doc.get('name', user_doc.get('email'))} sent a support message.")
+        else:
+            create_notification("chat", "New support reply", "The Revnivo admin replied to your support message.", target_user)
     selected_user = oid(request.query_params.get("user_id")) if is_admin_doc(user_doc) else owner
     query = {"user_id": selected_user} if selected_user else {"user_id": owner}
     docs = db.chat_messages.find(query).sort("created_at", ASCENDING)
