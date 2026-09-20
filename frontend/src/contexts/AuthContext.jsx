@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import api from '../services/api'
 
 const AuthContext = createContext(null)
@@ -48,6 +48,14 @@ export function AuthProvider({ children }) {
   }
 
   const value = useMemo(() => ({ user, login, loginWithGoogle, register, updateProfile, logout, isAuthenticated: !!user }), [user])
+    useEffect(() => {
+      const token = localStorage.getItem('revnivo_token') || localStorage.getItem('incomeflow_token')
+      if (!token) return
+      api.get('/auth/me/').then(({ data }) => {
+        localStorage.setItem('revnivo_user', JSON.stringify(data))
+        setUser(data)
+      }).catch(() => {})
+    }, [])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

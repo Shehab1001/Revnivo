@@ -68,11 +68,7 @@ export default function SupportChat() {
   const active = contacts.find((contact) => contact.id === selectedUser) || contacts[0]
 
   return <div className="space-y-6">
-    <div>
-      <p className="text-sm font-semibold text-[#16843d]">Support</p>
-      <h1 className="mt-1 text-3xl font-black dark:text-white">Chat</h1>
-      <p className="mt-1 text-sm text-slate-500">{user?.role === 'admin' ? 'Choose a user and reply directly.' : 'Contact Revnivo technical support.'}</p>
-    </div>
+
     <div className="card grid min-h-155 overflow-hidden md:grid-cols-[260px_1fr]">
       <aside className="border-b border-slate-200 dark:border-[#45484d] md:border-b-0 md:border-r">
         <div className="flex items-center gap-2 border-b border-slate-200 p-4 font-bold dark:border-[#45484d]"><MessageCircle size={19} className="text-[#23C55E]"/>Contacts</div>

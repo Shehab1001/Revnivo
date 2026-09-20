@@ -1,4 +1,4 @@
-import { Bell, BarChart3, CircleDollarSign, ChevronDown, ChevronLeft, ChevronRight, DollarSign, FileText, LogOut, Menu, Moon, PanelsTopLeft, Settings as SettingsIcon, Sun, Users, WalletCards } from 'lucide-react'
+import { Bell, BarChart3, CircleDollarSign, ChevronDown, ChevronLeft, ChevronRight, DollarSign, FileText, LogOut, Menu, MessageCircle, Moon, PanelsTopLeft, Settings as SettingsIcon, Sun, Users, WalletCards } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
@@ -10,6 +10,7 @@ const baseNav = [
   { to: '/earnings', label: 'Earnings', icon: WalletCards },
   { to: '/notes', label: 'Notes', icon: FileText },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
+  { to: '/support-chat', label: 'Chat', icon: MessageCircle },
 ]
 
 export default function AppShell() {
@@ -51,7 +52,7 @@ export default function AppShell() {
           {dashboardOpen && <div className={collapsed ? 'mt-1 flex flex-col items-center gap-1' : 'ml-5 border-l border-slate-200 pl-3 dark:border-[#555960]'}><NavLink to="/" end className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`} title="Income"><DollarSign size={18}/>{!collapsed && 'Income'}</NavLink><NavLink to="/admin/users" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`} title="Users"><Users size={18}/>{!collapsed && 'Users'}</NavLink></div>}
         </div> : <NavLink to="/" end className={linkClass}><BarChart3 size={18}/>{!collapsed && 'Dashboard'}</NavLink>}
         {baseNav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} onClick={() => setMobileOpen(false)} className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title={label}><Icon size={18}/>{!collapsed && label}</NavLink>)}
-        {user?.role === 'admin' && <><NavLink to="/admin/subscriptions" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title="Subscriptions"><WalletCards size={18}/>{!collapsed && 'Subscriptions'}</NavLink><NavLink to="/support-chat" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title="Support chat"><FileText size={18}/>{!collapsed && 'Support chat'}</NavLink></>}
+        {user?.role === 'admin' && <NavLink to="/admin/subscriptions" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title="Subscriptions"><WalletCards size={18}/>{!collapsed && 'Subscriptions'}</NavLink>}
       </nav>
       <div className="mt-auto border-t border-slate-200 pt-4 dark:border-[#45484d]">
         {!collapsed && <div className="mb-3 flex items-center gap-2 px-2"><div className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full bg-[#e8f8ed] font-bold text-[#16843d]">{user?.profile_image_url ? <img src={user.profile_image_url} alt="Profile" className="h-full w-full object-cover"/> : user?.name?.slice(0, 2).toUpperCase()}</div><div className="min-w-0"><div className="truncate text-sm font-semibold">{user?.name}</div><div className="truncate text-xs text-slate-500">{user?.email}</div></div></div>}
