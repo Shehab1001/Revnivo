@@ -8,6 +8,9 @@ import Platforms from './pages/Platforms'
 import Register from './pages/Register'
 import Notes from './pages/Notes'
 import Settings from './pages/Settings'
+import AdminUsers from './pages/AdminUsers'
+import Subscriptions from './pages/Subscriptions'
+import SupportChat from './pages/SupportChat'
 
 function Protected({ children }) {
   const { isAuthenticated } = useAuth()
@@ -30,6 +33,9 @@ export default function App() {
         <Route path="/earnings" element={<Earnings/>}/>
         <Route path="/notes" element={<Notes/>}/>
         <Route path="/settings" element={<Settings/>}/>
+        <Route path="/admin/users" element={<AdminUsers/>}/>
+        <Route path="/admin/subscriptions" element={<Subscriptions/>}/>
+        <Route path="/support-chat" element={<SupportChat/>}/>
       </Route>
       <Route path="*" element={<Navigate to="/" replace/>}/>
     </Routes>

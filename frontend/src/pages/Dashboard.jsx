@@ -1,5 +1,6 @@
 import { ArrowUpRight, CircleDollarSign, Layers3, ReceiptText, Trophy } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import EmptyState from '../components/EmptyState'
 import Loading from '../components/Loading'
@@ -15,6 +16,7 @@ function StatCard({ title, value, helper, icon: Icon }) {
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [currency, setCurrency] = useState('USD')
@@ -71,7 +73,7 @@ export default function Dashboard() {
           {monthly.length ? <div className="h-80"><ResponsiveContainer width="100%" height="100%"><AreaChart data={monthly}><defs><linearGradient id="incomeGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#23C55E" stopOpacity={0.3} /><stop offset="95%" stopColor="#23C55E" stopOpacity={0} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.25} /><XAxis dataKey="label" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} /><Tooltip contentStyle={chartTooltipStyle} labelStyle={chartTooltipLabelStyle} itemStyle={chartTooltipItemStyle} formatter={(v) => formatMoney(v, currency)} /><Area type="monotone" dataKey="total" stroke="#23C55E" fill="url(#incomeGradient)" strokeWidth={3} /></AreaChart></ResponsiveContainer></div> : <EmptyState title="No monthly data" text="Add earnings to see your month-by-month trend." />}
         </div>
 
-        <div className="card p-5"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-bold text-slate-900 dark:text-white">Recent earnings</h2><p className="text-sm text-slate-500">Latest entries for the selected filters.</p></div><ArrowUpRight size={18} className="text-slate-400" /></div>{data?.recent?.length ? <div className="divide-y divide-slate-100 dark:divide-slate-800">{data.recent.map((e) => <div key={e.id} className="flex items-center justify-between py-3"><div className="min-w-0">{platformId === 'all' && <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{e.platform_name}</p>}<p className="truncate text-sm text-slate-600 dark:text-slate-300">{e.description || e.note || 'Earning'}</p><p className="text-xs text-slate-400">{e.earned_at}</p></div><span className="ml-3 text-sm font-bold text-emerald-600 dark:text-emerald-400">+{formatMoney(e.amount, e.currency)}</span></div>)}</div> : <EmptyState title="No earnings yet" text="Add your first payment to start the timeline." />}</div>
+        <div className="card p-5"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-bold text-slate-900 dark:text-white">Recent earnings</h2><p className="text-sm text-slate-500">Latest entries for the selected filters.</p></div><button className="rounded-lg p-2 text-slate-400 hover:bg-slate-100" onClick={() => navigate('/earnings')} title="Open earnings"><ArrowUpRight size={18}/></button></div>{data?.recent?.length ? <div className="divide-y divide-slate-100 dark:divide-slate-800">{data.recent.map((e) => <div key={e.id} className="flex items-center justify-between py-3"><div className="min-w-0">{platformId === 'all' && <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{e.platform_name}</p>}<p className="truncate text-sm text-slate-600 dark:text-slate-300">{e.category || 'Uncategorized'}</p><p className="text-xs text-slate-400">{e.earned_at}</p></div><span className="ml-3 text-sm font-bold text-emerald-600 dark:text-emerald-400">+{formatMoney(e.amount_usd, 'USD')}</span></div>)}</div> : <EmptyState title="No earnings yet" text="Add your first payment to start the timeline." />}</div>
 
 
       </div>

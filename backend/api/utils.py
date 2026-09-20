@@ -52,6 +52,7 @@ def serialize_platform(doc, request=None):
         "name": doc.get("name", ""),
         "website": doc.get("website", ""),
         "default_currency": doc.get("default_currency", "USD"),
+        "status": doc.get("status", "not active"),
         "logo_url": logo_url,
         "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None,
     }
@@ -92,6 +93,10 @@ def serialize_note(doc):
 
 
 def save_logo(uploaded_file, folder="platforms"):
+    return save_upload(uploaded_file, folder)
+
+
+def save_upload(uploaded_file, folder="uploads"):
     ext = Path(uploaded_file.name).suffix.lower() or ".png"
     filename = f"{uuid.uuid4().hex}{ext}"
     rel = Path(folder) / filename

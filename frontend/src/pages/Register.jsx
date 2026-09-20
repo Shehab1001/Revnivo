@@ -27,7 +27,7 @@ export default function Register() {
       <div className="mx-auto flex max-w-6xl justify-end"><button onClick={toggleTheme} className="btn-secondary p-2.5">{theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>}</button></div>
       <div className="mx-auto grid min-h-[calc(100vh-80px)] max-w-6xl place-items-center lg:grid-cols-2 lg:gap-16">
         <div className="hidden lg:block">
-          <div className="mb-6 flex items-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#23C55E] text-white"><CircleDollarSign/></div><span className="text-2xl font-black text-slate-900 dark:text-white">IncomeFlow</span></div>
+          <div className="mb-6 flex items-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#23C55E] text-white"><CircleDollarSign/></div><span className="text-2xl font-black text-slate-900 dark:text-white">Revnivo</span></div>
           <h1 className="max-w-lg text-5xl font-black leading-tight tracking-tight text-slate-950 dark:text-white">Turn scattered payments into a clear income history.</h1>
           <p className="mt-5 max-w-xl text-lg leading-8 text-slate-500 dark:text-slate-400">Add platforms, upload their logos, record earnings, and watch your progress across months and years.</p>
         </div>
