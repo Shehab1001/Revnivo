@@ -19,3 +19,5 @@ def ensure_indexes():
     db.earnings.create_index([("owner_id", ASCENDING), ("platform_id", ASCENDING)])
     db.earnings.create_index([("owner_id", ASCENDING), ("currency", ASCENDING), ("earned_at", DESCENDING)])
     db.notes.create_index([("owner_id", ASCENDING), ("updated_at", DESCENDING)])
+    db.notifications.create_index([("owner_id", ASCENDING), ("created_at", DESCENDING)])
+    db.chat_messages.create_index([("user_id", ASCENDING), ("created_at", ASCENDING)])

@@ -40,7 +40,7 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://127.0.0.1:27017")
-MONGODB_DB = os.getenv("MONGODB_DB", "incomeflow")
+MONGODB_DB = os.getenv("MONGODB_DB", "revnivo")
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY)
 JWT_ALGORITHM = "HS256"
 JWT_EXP_MINUTES = int(os.getenv("JWT_EXP_MINUTES", "10080"))  # 7 days

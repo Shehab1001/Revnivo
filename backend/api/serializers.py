@@ -17,6 +17,7 @@ class PlatformSerializer(serializers.Serializer):
     website = serializers.URLField(required=False, allow_blank=True)
     default_currency = serializers.CharField(max_length=8, default="USD")
     logo = serializers.ImageField(required=False, allow_null=True)
+    status = serializers.ChoiceField(choices=["working", "applied", "not active", "under review"], default="not active")
 
     def validate_default_currency(self, value):
         return value.strip().upper()
@@ -28,7 +29,7 @@ class EarningSerializer(serializers.Serializer):
     currency = serializers.CharField(max_length=8)
     earned_at = serializers.DateField()
     note = serializers.CharField(required=False, allow_blank=True, max_length=500)
-    category = serializers.CharField(required=False, allow_blank=True, max_length=80)
+    category = serializers.CharField(required=True, allow_blank=False, max_length=80)
 
     def validate_currency(self, value):
         return value.strip().upper()

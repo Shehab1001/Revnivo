@@ -1,4 +1,4 @@
-# IncomeFlow — React + Tailwind + Django REST + MongoDB
+# Revnivo — React + Tailwind + Flowbite + Django REST + MongoDB
 
 A full-stack income dashboard for tracking earnings from multiple platforms over months and years.
 
@@ -30,7 +30,7 @@ A full-stack income dashboard for tracking earnings from multiple platforms over
 ## Project structure
 
 ```text
-incomeflow_react_django_mongo/
+revnivo_react_django_mongo/
   backend/        Django REST API + PyMongo
   frontend/       React + Tailwind + Vite
   docker-compose.yml

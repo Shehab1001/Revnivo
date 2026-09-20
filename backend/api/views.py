@@ -1,4 +1,4 @@
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 import base64
 import binascii
@@ -29,6 +29,7 @@ from .utils import (
     delete_logo,
     oid,
     save_logo,
+    save_upload,
     serialize_note,
     serialize_earning,
     serialize_platform,
@@ -40,13 +41,44 @@ def owner_oid(request):
     return ObjectId(request.user.id)
 
 
+ADMIN_EMAIL = "dev.shehabsaid@gmail.com"
+
+
+def is_admin_doc(doc):
+    return bool(doc and (doc.get("role") == "admin" or doc.get("email", "").lower() == ADMIN_EMAIL))
+
+
 def serialize_user(doc, request):
     avatar = doc.get("profile_image") or ""
     avatar_url = ""
     if avatar:
         path = f"{settings.MEDIA_URL}{avatar}".replace("//", "/")
         avatar_url = request.build_absolute_uri(path)
-    return {"id": str(doc["_id"]), "name": doc.get("name", ""), "email": doc.get("email", ""), "profile_image_url": avatar_url}
+    return {
+        "id": str(doc["_id"]),
+        "name": doc.get("name", ""),
+        "email": doc.get("email", ""),
+        "profile_image_url": avatar_url or doc.get("google_picture", ""),
+        "role": "admin" if is_admin_doc(doc) else doc.get("role", "user"),
+        "trial_ends_at": doc.get("trial_ends_at").isoformat() if doc.get("trial_ends_at") else None,
+        "subscription_status": doc.get("subscription_status", "trial"),
+    }
+
+
+def create_user_doc(name, email, password_hash="", google_picture=""):
+    now = utcnow()
+    return {
+        "name": name[:120],
+        "email": email,
+        "password_hash": password_hash,
+        "google_picture": google_picture,
+        "auth_provider": "google" if google_picture else "password",
+        "role": "admin" if email.lower() == ADMIN_EMAIL else "user",
+        "created_at": now,
+        "trial_ends_at": now + timedelta(days=30),
+        "subscription_status": "trial",
+        "payment_method": None,
+    }
 
 
 _egp_rate_cache = {"value": None, "expires_at": 0}
@@ -70,14 +102,22 @@ def current_egp_per_usd():
 
 
 def dashboard_currency_query(currency):
-    if currency == "EGP":
+    if currency in ("EGP", "USD"):
         return {"currency": {"$in": ["USD", "EGP"]}}
     return {"currency": currency}
 
 
 def dashboard_amount_expression(currency, egp_per_usd):
-    if currency != "EGP":
+    if currency not in ("EGP", "USD"):
         return "$amount"
+    if currency == "USD":
+        return {
+            "$cond": [
+                {"$eq": ["$currency", "EGP"]},
+                {"$divide": ["$amount", Decimal128(str(egp_per_usd))]},
+                "$amount",
+            ]
+        }
     return {
         "$cond": [
             {"$eq": ["$currency", "USD"]},
@@ -108,15 +148,11 @@ def register(request):
     ensure_indexes()
     email = data["email"].strip().lower()
     try:
-        result = db.users.insert_one({
-            "name": data["name"].strip(),
-            "email": email,
-            "password_hash": make_password(data["password"]),
-            "created_at": utcnow(),
-        })
+        result = db.users.insert_one(create_user_doc(data["name"].strip(), email, make_password(data["password"])))
     except DuplicateKeyError:
         return Response({"detail": "An account with this email already exists."}, status=status.HTTP_409_CONFLICT)
     doc = {"_id": result.inserted_id, "name": data["name"].strip(), "email": email}
+    create_notification("user", "New user registered", f"{email} created a Revnivo account.")
     token = create_access_token(str(result.inserted_id), email)
     return Response({
         "token": token,
@@ -181,16 +217,15 @@ def google_login(request):
     if not doc:
         name = google_user.get("name") or email.split("@", 1)[0]
         try:
-            result = db.users.insert_one({
-                "name": name[:120],
-                "email": email,
-                "password_hash": "",
-                "auth_provider": "google",
-                "created_at": utcnow(),
-            })
-            doc = {"_id": result.inserted_id, "name": name[:120], "email": email}
+            new_doc = create_user_doc(name, email, google_picture=google_user.get("picture", ""))
+            result = db.users.insert_one(new_doc)
+            doc = {"_id": result.inserted_id, **new_doc}
         except DuplicateKeyError:
             doc = db.users.find_one({"email": email})
+
+    if google_user.get("picture") and doc.get("google_picture") != google_user["picture"]:
+        db.users.update_one({"_id": doc["_id"]}, {"$set": {"google_picture": google_user["picture"]}})
+        doc["google_picture"] = google_user["picture"]
 
     token = create_access_token(str(doc["_id"]), email)
     return Response({"token": token, "user": serialize_user(doc, request)})
@@ -225,6 +260,101 @@ def profile(request):
     return Response(serialize_user(doc, request))
 
 
+def require_admin(request):
+    doc = get_db().users.find_one({"_id": owner_oid(request)})
+    return doc if is_admin_doc(doc) else None
+
+
+def create_notification(kind, title, message, owner_id=None):
+    now = utcnow()
+    get_db().notifications.insert_one({"kind": kind, "title": title, "message": message, "owner_id": owner_id, "read": False, "created_at": now})
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+def admin_users(request):
+    if not require_admin(request):
+        return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
+    db = get_db()
+    if request.method in ("PATCH", "DELETE"):
+        user_id = oid(request.data.get("id") or request.data.get("user_id"))
+        if not user_id:
+            return Response({"detail": "Invalid user id."}, status=status.HTTP_400_BAD_REQUEST)
+        if user_id == owner_oid(request):
+            return Response({"detail": "You cannot change or delete your own admin account."}, status=status.HTTP_400_BAD_REQUEST)
+        if request.method == "DELETE":
+            db.users.delete_one({"_id": user_id})
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        role = request.data.get("role")
+        if role not in ("admin", "user"):
+            return Response({"detail": "Role must be admin or user."}, status=status.HTTP_400_BAD_REQUEST)
+        db.users.update_one({"_id": user_id}, {"$set": {"role": role}})
+    docs = db.users.find({}).sort("created_at", DESCENDING)
+    return Response([serialize_user(doc, request) for doc in docs])
+
+
+@api_view(["GET", "PATCH"])
+def subscriptions(request):
+    if not require_admin(request):
+        return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
+    db = get_db()
+    if request.method == "PATCH":
+        user_id = oid(request.data.get("user_id"))
+        if not user_id:
+            return Response({"detail": "Invalid user id."}, status=status.HTTP_400_BAD_REQUEST)
+        updates = {key: request.data[key] for key in ("subscription_status", "payment_method") if key in request.data}
+        db.users.update_one({"_id": user_id}, {"$set": updates})
+    docs = db.users.find({}).sort("created_at", DESCENDING)
+    now = utcnow()
+    result = []
+    for doc in docs:
+        trial_ends = doc.get("trial_ends_at")
+        result.append({**serialize_user(doc, request), "trial_active": bool(trial_ends and trial_ends > now), "payment_method": doc.get("payment_method"), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None})
+    return Response(result)
+
+
+@api_view(["GET", "PATCH"])
+def notifications(request):
+    db = get_db()
+    owner = owner_oid(request)
+    query = {"$or": [{"owner_id": None}, {"owner_id": owner}]}
+    if request.method == "PATCH":
+        notification_id = oid(request.data.get("id"))
+        if notification_id:
+            db.notifications.update_one({"_id": notification_id, **query}, {"$set": {"read": True}})
+    docs = db.notifications.find(query).sort("created_at", DESCENDING).limit(50)
+    return Response([{**{key: doc.get(key) for key in ("kind", "title", "message", "read")}, "id": str(doc["_id"]), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None} for doc in docs])
+
+
+@api_view(["GET", "POST"])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def support_chat(request):
+    db = get_db()
+    owner = owner_oid(request)
+    user_doc = db.users.find_one({"_id": owner})
+    if request.method == "POST":
+        content = str(request.data.get("content", "")).strip()
+        if not content:
+            return Response({"detail": "Message is required."}, status=status.HTTP_400_BAD_REQUEST)
+        target_user = oid(request.data.get("user_id")) if is_admin_doc(user_doc) else owner
+        if not target_user:
+            return Response({"detail": "Select a user before replying."}, status=status.HTTP_400_BAD_REQUEST)
+        attachment = request.FILES.get("attachment")
+        message = {"user_id": target_user, "content": content[:2000], "sender": "admin" if is_admin_doc(user_doc) else "user", "created_at": utcnow()}
+        if attachment:
+            message["attachment"] = save_upload(attachment, "chat")
+        db.chat_messages.insert_one(message)
+        if message["sender"] == "user":
+            create_notification("chat", "New support message", f"{user_doc.get('name', user_doc.get('email'))} sent a support message.")
+    selected_user = oid(request.query_params.get("user_id")) if is_admin_doc(user_doc) else owner
+    query = {"user_id": selected_user} if selected_user else {"user_id": owner}
+    docs = db.chat_messages.find(query).sort("created_at", ASCENDING)
+    result = []
+    for doc in docs:
+        attachment = doc.get("attachment", "")
+        result.append({**{key: doc.get(key) for key in ("content", "sender")}, "id": str(doc["_id"]), "user_id": str(doc["user_id"]), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None, "attachment_url": request.build_absolute_uri(f"{settings.MEDIA_URL}{attachment}") if attachment else ""})
+    return Response(result)
+
+
 @api_view(["GET", "POST"])
 @parser_classes([JSONParser])
 def notes(request):
@@ -256,12 +386,22 @@ def notes(request):
     return Response(serialize_note({"_id": result.inserted_id, "title": title[:160], "content": content[:5000], "created_at": now, "updated_at": now}), status=status.HTTP_201_CREATED)
 
 
-@api_view(["DELETE"])
+@api_view(["PATCH", "DELETE"])
+@parser_classes([JSONParser])
 def note_detail(request, note_id):
     note_oid = oid(note_id)
     if not note_oid:
         return Response({"detail": "Invalid note id."}, status=status.HTTP_400_BAD_REQUEST)
-    result = get_db().notes.delete_one({"_id": note_oid, "owner_id": owner_oid(request)})
+    db = get_db()
+    if request.method == "PATCH":
+        updates = {key: str(request.data[key]).strip() for key in ("title", "content") if key in request.data}
+        if not updates.get("content"):
+            return Response({"detail": "Note content is required."}, status=status.HTTP_400_BAD_REQUEST)
+        updates["updated_at"] = utcnow()
+        db.notes.update_one({"_id": note_oid, "owner_id": owner_oid(request)}, {"$set": updates})
+        doc = db.notes.find_one({"_id": note_oid, "owner_id": owner_oid(request)})
+        return Response(serialize_note(doc))
+    result = db.notes.delete_one({"_id": note_oid, "owner_id": owner_oid(request)})
     if not result.deleted_count:
         return Response({"detail": "Note not found."}, status=status.HTTP_404_NOT_FOUND)
     return Response(status=status.HTTP_204_NO_CONTENT)
@@ -285,12 +425,14 @@ def platforms(request):
         "name": data["name"].strip(),
         "website": data.get("website", "").strip(),
         "default_currency": data.get("default_currency", "USD").upper(),
+        "status": data.get("status", "not active"),
         "logo": logo_path,
         "is_archived": False,
         "created_at": utcnow(),
         "updated_at": utcnow(),
     }
     result = db.platforms.insert_one(doc)
+    create_notification("platform", "New platform added", f"{doc['name']} was added to an account.")
     doc["_id"] = result.inserted_id
     return Response(serialize_platform(doc, request), status=status.HTTP_201_CREATED)
 
@@ -319,7 +461,7 @@ def platform_detail(request, platform_id):
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
     updates = {"updated_at": utcnow()}
-    for key in ("name", "website", "default_currency"):
+    for key in ("name", "website", "default_currency", "status"):
         if key in data:
             updates[key] = data[key].strip() if isinstance(data[key], str) else data[key]
     if "default_currency" in updates:
@@ -357,10 +499,12 @@ def earnings(request):
 
         search = request.query_params.get("search", "").strip()
         if search:
+            matching_platform_ids = [platform["_id"] for platform in db.platforms.find({"owner_id": owner, "name": {"$regex": search, "$options": "i"}}, {"_id": 1})]
             query["$or"] = [
                 {"note": {"$regex": search, "$options": "i"}},
                 {"category": {"$regex": search, "$options": "i"}},
                 {"currency": {"$regex": search, "$options": "i"}},
+                {"platform_id": {"$in": matching_platform_ids}},
             ]
         total = db.earnings.count_documents(query)
         docs = list(db.earnings.find(query).sort("earned_at", DESCENDING).skip((page - 1) * page_size).limit(page_size))

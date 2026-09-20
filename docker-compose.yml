@@ -1,12 +1,12 @@
 services:
   mongo:
     image: mongo:8.0
-    container_name: incomeflow-mongo
+    container_name: revnivo-mongo
     restart: unless-stopped
     ports:
       - "27017:27017"
     volumes:
-      - incomeflow_mongo_data:/data/db
+      - revnivo_mongo_data:/data/db
 
 volumes:
-  incomeflow_mongo_data:
+  revnivo_mongo_data:
