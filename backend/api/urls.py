@@ -10,6 +10,8 @@ urlpatterns = [
     path("auth/profile/", views.profile),
     path("admin/users/", views.admin_users),
     path("admin/subscriptions/", views.subscriptions),
+    path("admin/plans/", views.admin_plans),
+    path("admin/coupons/", views.admin_coupons),
     path("notifications/", views.notifications),
     path("support-chat/", views.support_chat),
     path("notes/", views.notes),

@@ -39,6 +39,14 @@ def decimal_to_float(value):
     return float(value)
 
 
+def serialize_datetime(value):
+    if not value:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat().replace("+00:00", "Z")
+
+
 def serialize_platform(doc, request=None):
     if not doc:
         return None
@@ -54,7 +62,7 @@ def serialize_platform(doc, request=None):
         "default_currency": doc.get("default_currency", "USD"),
         "status": doc.get("status", "not active"),
         "logo_url": logo_url,
-        "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None,
+        "created_at": serialize_datetime(doc.get("created_at")),
     }
 
 
@@ -88,7 +96,7 @@ def serialize_note(doc):
         "title": doc.get("title", ""),
         "content": doc.get("content", ""),
         "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None,
-        "updated_at": doc.get("updated_at").isoformat() if doc.get("updated_at") else None,
+        "updated_at": serialize_datetime(doc.get("updated_at")),
     }
 
 
