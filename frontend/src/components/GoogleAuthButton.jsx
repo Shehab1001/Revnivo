@@ -53,3 +53,4 @@ export default function GoogleAuthButton() {
     {error && <p className="mt-2 text-center text-sm text-rose-600 dark:text-rose-300">{error}</p>}
   </div>
 }
+// v1.1 branch
