@@ -90,6 +90,7 @@ def is_active_trial(value):
 
 
 _egp_rate_cache = {"value": None, "expires_at": 0}
+_currency_rates_cache = {"value": None, "expires_at": 0}
 
 
 def current_egp_per_usd():
@@ -109,30 +110,38 @@ def current_egp_per_usd():
         return settings.EGP_PER_USD
 
 
+def current_currency_rates():
+    now = monotonic()
+    if _currency_rates_cache["value"] is not None and now < _currency_rates_cache["expires_at"]:
+        return _currency_rates_cache["value"]
+    try:
+        with urlopen(settings.EGP_RATE_API_URL, timeout=3) as response:
+            payload = json.load(response)
+        rates = {"USD": Decimal("1")}
+        rates.update({code.upper(): Decimal(str(value)) for code, value in payload["rates"].items() if Decimal(str(value)) > 0})
+        rates.setdefault("EGP", settings.EGP_PER_USD)
+        _currency_rates_cache.update({"value": rates, "expires_at": now + settings.EGP_RATE_CACHE_SECONDS})
+        return rates
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return {"USD": Decimal("1"), "EGP": settings.EGP_PER_USD}
+
+
 def dashboard_currency_query(currency):
-    if currency in ("EGP", "USD"):
-        return {"currency": {"$in": ["USD", "EGP"]}}
-    return {"currency": currency}
+    return {"currency": {"$exists": True}}
 
 
-def dashboard_amount_expression(currency, egp_per_usd):
-    if currency not in ("EGP", "USD"):
+def dashboard_amount_expression(currency, rates):
+    target_rate = rates.get(currency)
+    if not target_rate:
         return "$amount"
-    if currency == "USD":
-        return {
-            "$cond": [
-                {"$eq": ["$currency", "EGP"]},
-                {"$divide": ["$amount", Decimal128(str(egp_per_usd))]},
-                "$amount",
-            ]
+    branches = [
+        {
+            "case": {"$eq": ["$currency", source_currency]},
+            "then": {"$multiply": ["$amount", Decimal128(str(target_rate / source_rate))]},
         }
-    return {
-        "$cond": [
-            {"$eq": ["$currency", "USD"]},
-            {"$multiply": ["$amount", Decimal128(str(egp_per_usd))]},
-            "$amount",
-        ]
-    }
+        for source_currency, source_rate in rates.items()
+    ]
+    return {"$switch": {"branches": branches, "default": "$amount"}}
 
 
 @api_view(["GET"])
@@ -715,8 +724,11 @@ def dashboard(request):
     owner = owner_oid(request)
     currency = request.query_params.get("currency", "USD").upper()
     year = request.query_params.get("year", "all")
+    period = request.query_params.get("period", "all")
+    date_from = request.query_params.get("date_from", "")
+    date_to = request.query_params.get("date_to", "")
     platform_id = request.query_params.get("platform_id", "all")
-    egp_per_usd = current_egp_per_usd()
+    rates = current_currency_rates()
 
     match = {"owner_id": owner, **dashboard_currency_query(currency)}
     if platform_id != "all":
@@ -725,16 +737,48 @@ def dashboard(request):
             match["platform_id"] = platform_oid
         else:
             platform_id = "all"
-    if year != "all" and str(year).isdigit():
+    if period in {"last_week", "last_month", "last_3_months", "last_year"}:
+        days = {"last_week": 7, "last_month": 30, "last_3_months": 90, "last_year": 365}[period]
+        end = datetime.now(timezone.utc)
+        match["earned_at"] = {"$gte": end - timedelta(days=days), "$lte": end}
+    elif period == "custom" and date_from and date_to:
+        try:
+            start = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
+            end = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc) + timedelta(days=1)
+            if start < end:
+                match["earned_at"] = {"$gte": start, "$lt": end}
+        except ValueError:
+            period = "all"
+    elif year != "all" and str(year).isdigit():
         y = int(year)
         match["earned_at"] = {
             "$gte": datetime(y, 1, 1, tzinfo=timezone.utc),
             "$lt": datetime(y + 1, 1, 1, tzinfo=timezone.utc),
         }
 
+    now = datetime.now(timezone.utc)
+    current_month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    next_month_start = datetime(now.year + (1 if now.month == 12 else 0), 1 if now.month == 12 else now.month + 1, 1, tzinfo=timezone.utc)
+    previous_month_start = datetime(now.year if now.month > 1 else now.year - 1, now.month - 1 if now.month > 1 else 12, 1, tzinfo=timezone.utc)
+    current_month_match = {"owner_id": owner, **dashboard_currency_query(currency), "earned_at": {"$gte": current_month_start, "$lt": next_month_start}}
+    previous_month_match = {"owner_id": owner, **dashboard_currency_query(currency), "earned_at": {"$gte": previous_month_start, "$lt": current_month_start}}
+    if "platform_id" in match:
+        current_month_match["platform_id"] = match["platform_id"]
+        previous_month_match["platform_id"] = match["platform_id"]
+
+    def month_total(month_match):
+        result = next(db.earnings.aggregate([
+            {"$match": month_match},
+            {"$group": {"_id": None, "total": {"$sum": dashboard_amount_expression(currency, rates)}}},
+        ]), None)
+        return decimal_to_float(result["total"]) if result else 0.0
+
+    current_month_income = month_total(current_month_match)
+    previous_month_income = month_total(previous_month_match)
+
     total_doc = next(db.earnings.aggregate([
         {"$match": match},
-        {"$group": {"_id": None, "total": {"$sum": dashboard_amount_expression(currency, egp_per_usd)}, "count": {"$sum": 1}}},
+        {"$group": {"_id": None, "total": {"$sum": dashboard_amount_expression(currency, rates)}, "count": {"$sum": 1}}},
     ]), None)
     total = decimal_to_float(total_doc.get("total")) if total_doc else 0.0
     count = total_doc.get("count", 0) if total_doc else 0
@@ -743,7 +787,20 @@ def dashboard(request):
         {"$match": match},
         {"$group": {
             "_id": {"year": {"$year": "$earned_at"}, "month": {"$month": "$earned_at"}},
-            "total": {"$sum": dashboard_amount_expression(currency, egp_per_usd)},
+            "total": {"$sum": dashboard_amount_expression(currency, rates)},
+        }},
+        {"$sort": {"_id.year": 1, "_id.month": 1}},
+    ]))
+
+    monthly_platform_rows = list(db.earnings.aggregate([
+        {"$match": match},
+        {"$group": {
+            "_id": {
+                "year": {"$year": "$earned_at"},
+                "month": {"$month": "$earned_at"},
+                "platform_id": "$platform_id",
+            },
+            "total": {"$sum": dashboard_amount_expression(currency, rates)},
         }},
         {"$sort": {"_id.year": 1, "_id.month": 1}},
     ]))
@@ -752,14 +809,14 @@ def dashboard(request):
         {"$match": {**match, **dashboard_currency_query(currency)}},
         {"$group": {
             "_id": {"year": {"$year": "$earned_at"}, "month": {"$month": "$earned_at"}},
-            "total": {"$sum": dashboard_amount_expression(currency, egp_per_usd)},
+            "total": {"$sum": dashboard_amount_expression(currency, rates)},
         }},
         {"$sort": {"_id.year": 1, "_id.month": 1}},
     ]))
 
     by_platform = list(db.earnings.aggregate([
         {"$match": match},
-        {"$group": {"_id": "$platform_id", "total": {"$sum": dashboard_amount_expression(currency, egp_per_usd)}, "count": {"$sum": 1}}},
+        {"$group": {"_id": "$platform_id", "total": {"$sum": dashboard_amount_expression(currency, rates)}, "count": {"$sum": 1}}},
         {"$sort": {"total": -1}},
     ]))
     pids = [x["_id"] for x in by_platform if x.get("_id")]
@@ -773,6 +830,12 @@ def dashboard(request):
         }
         for row in by_platform
     ]
+    monthly_platform_map = {}
+    for row in monthly_platform_rows:
+        key = (row["_id"]["year"], row["_id"]["month"])
+        platform_key = str(row["_id"]["platform_id"])
+        monthly_platform_map.setdefault(key, {"year": key[0], "month": key[1]})[platform_key] = decimal_to_float(row["total"])
+    monthly_by_platform = list(monthly_platform_map.values())
 
     recent_docs = list(db.earnings.find(match).sort("earned_at", DESCENDING).limit(6))
     recent_pids = list({d.get("platform_id") for d in recent_docs if d.get("platform_id")})
@@ -794,19 +857,25 @@ def dashboard(request):
     return Response({
         "currency": currency,
         "year": year,
+        "period": period,
+        "date_from": date_from if period == "custom" else None,
+        "date_to": date_to if period == "custom" else None,
         "platform_id": platform_id,
-        "exchange_rate": float(egp_per_usd) if currency == "EGP" else None,
+        "exchange_rate": float(rates[currency]) if currency in rates else None,
         "summary": {
             "total_income": total,
             "transactions": count,
             "platforms": db.platforms.count_documents({"owner_id": owner, "is_archived": {"$ne": True}}),
             "best_platform": platform_breakdown[0]["name"] if platform_breakdown else None,
             "best_platform_total": platform_breakdown[0]["total"] if platform_breakdown else 0,
+            "current_month_income": current_month_income,
+            "previous_month_income": previous_month_income,
         },
         "monthly": [
             {"year": r["_id"]["year"], "month": r["_id"]["month"], "total": decimal_to_float(r["total"])}
             for r in monthly
         ],
+        "monthly_by_platform": monthly_by_platform,
         "yearly": [
             {"year": r["_id"]["year"], "month": r["_id"]["month"], "total": decimal_to_float(r["total"])}
             for r in yearly
