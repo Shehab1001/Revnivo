@@ -35,10 +35,6 @@ export default function AppShell() {
     const closeNotifications = (event) => {
       if (noticeRef.current && !noticeRef.current.contains(event.target)) {
         setNoticeOpen(false)
-        if (notifications.some((notification) => !notification.read)) {
-          api.patch('/notifications/', { all: true }).catch(() => {})
-          setNotifications((items) => items.map((item) => ({ ...item, read: true })))
-        }
       }
     }
     document.addEventListener('mousedown', closeNotifications)
@@ -49,7 +45,7 @@ export default function AppShell() {
   const unread = notifications.filter((notification) => !notification.read).length
   const unreadChat = notifications.filter((notification) => notification.kind === 'chat' && !notification.read).length
   const markRead = async (notification) => { await api.patch('/notifications/', { id: notification.id }).catch(() => {}); setNotifications(notifications.map((item) => item.id === notification.id ? { ...item, read: true } : item)) }
-  const openNotifications = async () => { const nextOpen = !noticeOpen; setNoticeOpen(nextOpen); if (nextOpen && unread) { await api.patch('/notifications/', { all: true }).catch(() => {}); setNotifications(notifications.map((item) => ({ ...item, read: true }))) } }
+  const openNotifications = () => setNoticeOpen((open) => !open)
 
   const Sidebar = () => (
     <aside className={`${collapsed ? 'w-19' : 'w-64'} flex h-full flex-col border-r border-slate-200 bg-[#fffdf5] p-4 transition-all dark:border-[#45484d] dark:bg-[#333538]`}>
