@@ -35,6 +35,10 @@ export default function AppShell() {
     const closeNotifications = (event) => {
       if (noticeRef.current && !noticeRef.current.contains(event.target)) {
         setNoticeOpen(false)
+        if (notifications.some((notification) => !notification.read)) {
+          api.patch('/notifications/', { all: true }).catch(() => {})
+          setNotifications((items) => items.map((item) => ({ ...item, read: true })))
+        }
       }
     }
     document.addEventListener('mousedown', closeNotifications)
@@ -45,7 +49,7 @@ export default function AppShell() {
   const unread = notifications.filter((notification) => !notification.read).length
   const unreadChat = notifications.filter((notification) => notification.kind === 'chat' && !notification.read).length
   const markRead = async (notification) => { await api.patch('/notifications/', { id: notification.id }).catch(() => {}); setNotifications(notifications.map((item) => item.id === notification.id ? { ...item, read: true } : item)) }
-  const openNotifications = () => setNoticeOpen((open) => !open)
+  const openNotifications = async () => { const nextOpen = !noticeOpen; setNoticeOpen(nextOpen); if (nextOpen && unread) { await api.patch('/notifications/', { all: true }).catch(() => {}); setNotifications(notifications.map((item) => ({ ...item, read: true }))) } }
 
   const Sidebar = () => (
     <aside className={`${collapsed ? 'w-19' : 'w-64'} flex h-full flex-col border-r border-slate-200 bg-[#fffdf5] p-4 transition-all dark:border-[#45484d] dark:bg-[#333538]`}>
@@ -72,7 +76,7 @@ export default function AppShell() {
     <div className={`fixed inset-y-0 left-0 z-40 hidden lg:block ${collapsed ? 'w-19' : 'w-64'}`}><Sidebar/></div>
     {mobileOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setMobileOpen(false)}><div className="h-full w-64" onClick={(event) => event.stopPropagation()}><Sidebar/></div></div>}
     <div className={`${collapsed ? 'lg:pl-19' : 'lg:pl-64'} transition-all`}>
-      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-[#fffdf5]/90 px-4 backdrop-blur md:px-6 dark:border-[#45484d] dark:bg-[#333538]/90">
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-transparent bg-transparent px-4 md:px-6 dark:bg-[#0b0c0f]">
         <div className="flex items-center gap-2"><button className="rounded-xl p-2 lg:hidden" onClick={() => setMobileOpen(true)}><Menu size={20}/></button><button className="hidden rounded-xl p-2 lg:block" onClick={() => setCollapsed(!collapsed)} title="Toggle sidebar">{collapsed ? <ChevronRight size={20}/> : <ChevronLeft size={20}/>}</button></div>
         <div ref={noticeRef} className="relative ml-auto flex items-center gap-2"><button onClick={() => setNoticeOpen(!noticeOpen)} className="relative rounded-xl border border-slate-200 bg-white p-2.5 dark:border-[#555960] dark:bg-[#333538]" title="Notifications"><Bell size={18}/>{unread > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-rose-500 px-1 text-[10px] text-white">{unread}</span>}</button><button onClick={toggleTheme} className="rounded-xl border border-slate-200 bg-white p-2.5 dark:border-[#555960] dark:bg-[#333538]" title="Toggle theme">{theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>}</button>{noticeOpen && <div className="absolute right-0 top-12 z-50 w-80 rounded-xl border border-slate-200 bg-white p-2 shadow-xl dark:border-[#555960] dark:bg-[#333538]"><div className="px-3 py-2 font-bold">Notifications</div>{notifications.length ? notifications.slice(0, 6).map((notification) => <button key={notification.id} onClick={() => markRead(notification)} className="block w-full rounded-lg p-3 text-left hover:bg-slate-50"><div className="text-sm font-semibold">{notification.title}</div><div className="text-xs text-slate-500">{notification.message}</div></button>) : <div className="p-3 text-sm text-slate-500">No notifications.</div>}</div>}</div>
       </header>

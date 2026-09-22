@@ -1,5 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Josefin+Sans:ital,wght@0,100..700;1,100..700&display=swap');
 @import "tailwindcss";
+@plugin "../hero-ui.ts";
+@source "../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}";
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
@@ -15,13 +17,33 @@ button, input, select, textarea { font: inherit; }
 body { background: #fffdf5; }
 html.dark body { background: #292b2e; }
 
+.dashboard-currency-flag { width: 1.25rem; height: 0.875rem; flex-shrink: 0; border-radius: 2px; background-size: cover; }
+
+@keyframes dashboard-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dashboard-reveal { animation: dashboard-rise 420ms ease-out both; }
+.dashboard-reveal:nth-child(2) { animation-delay: 50ms; }
+.dashboard-reveal:nth-child(3) { animation-delay: 100ms; }
+.dashboard-reveal:nth-child(4) { animation-delay: 150ms; }
+.dashboard-panel { transition: border-color 180ms ease, transform 180ms ease, background-color 180ms ease; }
+.dashboard-panel:hover { border-color: rgb(255 255 255 / 0.14); transform: translateY(-2px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-reveal { animation: none; }
+  .dashboard-panel { transition: none; }
+  .dashboard-panel:hover { transform: none; }
+}
+
 @layer components {
-  .card { @apply rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-[#45484d] dark:bg-[#333538]; }
-  .input { @apply w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[#23C55E] focus:ring-4 focus:ring-[#23C55E]/10 dark:border-[#555960] dark:bg-[#292b2e] dark:text-slate-100; }
-  .label { @apply mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300; }
-  .btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-xl bg-[#23C55E] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1eaa50] disabled:cursor-not-allowed disabled:opacity-50; }
-  .btn-secondary { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-[#fffbea] dark:border-[#555960] dark:bg-[#333538] dark:text-slate-200 dark:hover:bg-[#3b3e42]; }
-  .btn-danger { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300; }
+  .card { @apply rounded-2xl border border-default-200 bg-content1 shadow-small dark:border-default-100/20 dark:bg-content1; }
+  .input { @apply w-full rounded-xl border border-default-200 bg-default-100/60 px-3.5 py-2.5 text-sm text-foreground outline-none transition placeholder:text-default-500 focus:border-primary focus:ring-4 focus:ring-primary/15 dark:border-default-100/20 dark:bg-default-100/20; }
+  .label { @apply mb-1.5 block text-sm font-medium text-foreground-600; }
+  .btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-small transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-secondary { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-default-200 bg-default-100/60 px-4 py-2.5 text-sm font-semibold text-foreground transition hover:bg-default-200 dark:border-default-100/20 dark:bg-default-100/20 dark:hover:bg-default-100/30; }
+  .btn-danger { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-danger-200 bg-danger-50 px-3 py-2 text-sm font-semibold text-danger-700 transition hover:bg-danger-100 dark:border-danger-900/60 dark:bg-danger-900/20 dark:text-danger-300; }
 }
 
 @layer utilities {
