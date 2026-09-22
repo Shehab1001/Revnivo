@@ -81,6 +81,14 @@ def create_user_doc(name, email, password_hash="", google_picture=""):
     }
 
 
+def is_active_trial(value):
+    if not value:
+        return False
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value > utcnow()
+
+
 _egp_rate_cache = {"value": None, "expires_at": 0}
 
 
@@ -152,7 +160,8 @@ def register(request):
     except DuplicateKeyError:
         return Response({"detail": "An account with this email already exists."}, status=status.HTTP_409_CONFLICT)
     doc = {"_id": result.inserted_id, "name": data["name"].strip(), "email": email}
-    create_notification("user", "New user registered", f"{email} created a Revnivo account.")
+    admin_doc = db.users.find_one({"email": ADMIN_EMAIL}, {"_id": 1})
+    create_notification("user", "New user registered", f"{email} created a Revnivo account.", admin_doc["_id"] if admin_doc else None)
     token = create_access_token(str(result.inserted_id), email)
     return Response({
         "token": token,
@@ -222,6 +231,8 @@ def google_login(request):
             doc = {"_id": result.inserted_id, **new_doc}
         except DuplicateKeyError:
             doc = db.users.find_one({"email": email})
+        admin_doc = db.users.find_one({"email": ADMIN_EMAIL}, {"_id": 1})
+        create_notification("user", "New user registered", f"{email} created a Revnivo account.", admin_doc["_id"] if admin_doc else None)
 
     if google_user.get("picture") and doc.get("google_picture") != google_user["picture"]:
         db.users.update_one({"_id": doc["_id"]}, {"$set": {"google_picture": google_user["picture"]}})
@@ -265,9 +276,12 @@ def require_admin(request):
     return doc if is_admin_doc(doc) else None
 
 
-def create_notification(kind, title, message, owner_id=None):
+def create_notification(kind, title, message, owner_id=None, chat_user_id=None):
     now = utcnow()
-    get_db().notifications.insert_one({"kind": kind, "title": title, "message": message, "owner_id": owner_id, "read": False, "created_at": now})
+    notification = {"kind": kind, "title": title, "message": message, "owner_id": owner_id, "read": False, "created_at": now}
+    if chat_user_id:
+        notification["chat_user_id"] = str(chat_user_id)
+    get_db().notifications.insert_one(notification)
 
 
 @api_view(["GET", "PATCH", "DELETE"])
@@ -294,7 +308,7 @@ def admin_users(request):
             "total": len(docs),
             "admins": sum(1 for doc in docs if is_admin_doc(doc)),
             "users": sum(1 for doc in docs if not is_admin_doc(doc)),
-            "active_trials": sum(1 for doc in docs if doc.get("trial_ends_at") and doc["trial_ends_at"] > utcnow()),
+            "active_trials": sum(1 for doc in docs if is_active_trial(doc.get("trial_ends_at"))),
         },
         "users": [serialize_user(doc, request) for doc in docs],
     })
@@ -324,9 +338,76 @@ def subscriptions(request):
     result = []
     for doc in docs:
         trial_ends = doc.get("trial_ends_at")
-        result.append({**serialize_user(doc, request), "trial_active": bool(trial_ends and trial_ends > now), "payment_method": doc.get("payment_method"), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None})
+        result.append({**serialize_user(doc, request), "trial_active": is_active_trial(trial_ends), "payment_method": doc.get("payment_method"), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None})
     plan = db.settings.find_one({"key": "subscription_plan"}) or {"price": 3.0}
     return Response({"plan": {"price": float(plan.get("price", 3.0)), "currency": "USD", "trial_days": 30}, "users": result})
+
+
+@api_view(["GET", "POST", "PATCH", "DELETE"])
+def admin_plans(request):
+    if not require_admin(request):
+        return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
+    db = get_db()
+    if request.method == "POST":
+        name = str(request.data.get("name", "")).strip()
+        try:
+            price = round(float(request.data.get("price", 0)), 2)
+            trial_days = max(int(request.data.get("trial_days", 30)), 0)
+        except (TypeError, ValueError):
+            return Response({"detail": "Invalid plan values."}, status=status.HTTP_400_BAD_REQUEST)
+        if not name or price <= 0:
+            return Response({"detail": "Plan name and positive price are required."}, status=status.HTTP_400_BAD_REQUEST)
+        now = utcnow()
+        result = db.subscription_plans.insert_one({"name": name[:100], "price": price, "trial_days": trial_days, "active": True, "created_at": now, "updated_at": now})
+        return Response({"id": str(result.inserted_id), "name": name[:100], "price": price, "trial_days": trial_days, "active": True}, status=status.HTTP_201_CREATED)
+    if request.method in ("PATCH", "DELETE"):
+        plan_id = oid(request.data.get("id"))
+        if not plan_id:
+            return Response({"detail": "Invalid plan id."}, status=status.HTTP_400_BAD_REQUEST)
+        if request.method == "DELETE":
+            db.subscription_plans.delete_one({"_id": plan_id})
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        updates = {key: request.data[key] for key in ("name", "price", "trial_days", "active") if key in request.data}
+        if "price" in updates: updates["price"] = round(float(updates["price"]), 2)
+        updates["updated_at"] = utcnow()
+        db.subscription_plans.update_one({"_id": plan_id}, {"$set": updates})
+    plans = []
+    for plan in db.subscription_plans.find({}).sort("created_at", DESCENDING):
+        plans.append({"id": str(plan["_id"]), "name": plan.get("name", ""), "price": float(plan.get("price", 0)), "trial_days": plan.get("trial_days", 0), "active": plan.get("active", True)})
+    coupons = []
+    for coupon in db.subscription_coupons.find({}).sort("created_at", DESCENDING):
+        coupons.append({"id": str(coupon["_id"]), "code": coupon.get("code", ""), "discount_type": coupon.get("discount_type", "percent"), "discount_value": coupon.get("discount_value", 0), "active": coupon.get("active", True)})
+    return Response({"plans": plans, "coupons": coupons})
+
+
+@api_view(["POST", "PATCH", "DELETE"])
+def admin_coupons(request):
+    if not require_admin(request):
+        return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
+    db = get_db()
+    if request.method == "POST":
+        code = str(request.data.get("code", "")).strip().upper()
+        discount_type = request.data.get("discount_type", "percent")
+        try:
+            discount_value = float(request.data.get("discount_value", 0))
+        except (TypeError, ValueError):
+            discount_value = 0
+        if not code or discount_type not in ("percent", "fixed") or discount_value <= 0:
+            return Response({"detail": "Valid coupon code and discount are required."}, status=status.HTTP_400_BAD_REQUEST)
+        now = utcnow()
+        result = db.subscription_coupons.insert_one({"code": code, "discount_type": discount_type, "discount_value": discount_value, "active": True, "created_at": now, "updated_at": now})
+        return Response({"id": str(result.inserted_id), "code": code, "discount_type": discount_type, "discount_value": discount_value, "active": True}, status=status.HTTP_201_CREATED)
+    coupon_id = oid(request.data.get("id"))
+    if not coupon_id:
+        return Response({"detail": "Invalid coupon id."}, status=status.HTTP_400_BAD_REQUEST)
+    if request.method == "DELETE":
+        db.subscription_coupons.delete_one({"_id": coupon_id})
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    updates = {key: request.data[key] for key in ("code", "discount_type", "discount_value", "active") if key in request.data}
+    if "code" in updates: updates["code"] = str(updates["code"]).strip().upper()
+    updates["updated_at"] = utcnow()
+    db.subscription_coupons.update_one({"_id": coupon_id}, {"$set": updates})
+    return Response({"status": "updated"})
 
 
 @api_view(["GET", "PATCH"])
@@ -351,24 +432,40 @@ def support_chat(request):
     db = get_db()
     owner = owner_oid(request)
     user_doc = db.users.find_one({"_id": owner})
+    if request.method == "GET" and is_admin_doc(user_doc) and request.query_params.get("summary"):
+        users = [doc for doc in db.users.find({"role": {"$ne": "admin"}}).sort("created_at", DESCENDING)]
+        summaries = []
+        for contact in users:
+            contact_id = contact["_id"]
+            latest = db.chat_messages.find_one({"user_id": contact_id}, sort=[("created_at", DESCENDING)])
+            unread_count = db.notifications.count_documents({"kind": "chat", "chat_user_id": str(contact_id), "read": False})
+            summaries.append({
+                **serialize_user(contact, request),
+                "unread_count": unread_count,
+                "last_message": latest.get("content", "") if latest else "",
+                "last_message_at": latest.get("created_at").isoformat() if latest and latest.get("created_at") else None,
+            })
+        return Response(summaries)
     if request.method == "POST":
         content = str(request.data.get("content", "")).strip()
-        if not content:
+        attachment = request.FILES.get("attachment")
+        if not content and not attachment:
             return Response({"detail": "Message is required."}, status=status.HTTP_400_BAD_REQUEST)
         target_user = oid(request.data.get("user_id")) if is_admin_doc(user_doc) else owner
         if not target_user:
             return Response({"detail": "Select a user before replying."}, status=status.HTTP_400_BAD_REQUEST)
-        attachment = request.FILES.get("attachment")
         message = {"user_id": target_user, "content": content[:2000], "sender": "admin" if is_admin_doc(user_doc) else "user", "created_at": utcnow()}
         if attachment:
             message["attachment"] = save_upload(attachment, "chat")
         db.chat_messages.insert_one(message)
         if message["sender"] == "user":
-            create_notification("chat", "New support message", f"{user_doc.get('name', user_doc.get('email'))} sent a support message.")
+            create_notification("chat", "New support message", f"{user_doc.get('name', user_doc.get('email'))} sent a support message.", chat_user_id=target_user)
         else:
-            create_notification("chat", "New support reply", "The Revnivo admin replied to your support message.", target_user)
+            create_notification("chat", "New support reply", "The Revnivo admin replied to your support message.", target_user, target_user)
     selected_user = oid(request.query_params.get("user_id")) if is_admin_doc(user_doc) else owner
     query = {"user_id": selected_user} if selected_user else {"user_id": owner}
+    if selected_user:
+        db.notifications.update_many({"kind": "chat", "chat_user_id": str(selected_user), "read": False, "$or": [{"owner_id": None}, {"owner_id": selected_user}]}, {"$set": {"read": True}})
     docs = db.chat_messages.find(query).sort("created_at", ASCENDING)
     result = []
     for doc in docs:
@@ -454,7 +551,7 @@ def platforms(request):
         "updated_at": utcnow(),
     }
     result = db.platforms.insert_one(doc)
-    create_notification("platform", "New platform added", f"{doc['name']} was added to an account.")
+    create_notification("platform", "Platform added", f"{doc['name']} was added to your account.", owner)
     doc["_id"] = result.inserted_id
     return Response(serialize_platform(doc, request), status=status.HTTP_201_CREATED)
 
@@ -493,6 +590,7 @@ def platform_detail(request, platform_id):
         updates["logo"] = save_logo(data["logo"])
     db.platforms.update_one({"_id": platform_oid, "owner_id": owner}, {"$set": updates})
     doc.update(updates)
+    create_notification("platform", "Platform updated", f"{doc['name']} was updated.", owner)
     return Response(serialize_platform(doc, request))
 
 
@@ -559,6 +657,7 @@ def earnings(request):
     }
     result = db.earnings.insert_one(doc)
     doc["_id"] = result.inserted_id
+    create_notification("earning", "Earning added", f"An earning was added for {platform.get('name', 'a platform')}.", owner)
     return Response(serialize_earning(doc, platform, float(current_egp_per_usd())), status=status.HTTP_201_CREATED)
 
 
@@ -606,6 +705,7 @@ def earning_detail(request, earning_id):
     doc.update(updates)
     if platform is None:
         platform = db.platforms.find_one({"_id": doc.get("platform_id"), "owner_id": owner})
+    create_notification("earning", "Earning updated", "An earning was updated.", owner)
     return Response(serialize_earning(doc, platform, float(current_egp_per_usd())))
 
 

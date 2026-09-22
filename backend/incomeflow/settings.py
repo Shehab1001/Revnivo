@@ -31,7 +31,7 @@ ASGI_APPLICATION = "incomeflow.asgi.application"
 DATABASES = {"default": {"ENGINE": "django.db.backends.dummy"}}
 
 LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
+TIME_ZONE = "Africa/Cairo"
 USE_I18N = True
 USE_TZ = True
 
