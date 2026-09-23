@@ -1,3 +1,4 @@
+import { Button, Card, CardBody, Chip, Input, Select, SelectItem } from '@heroui/react'
 import { ExternalLink, List, Pencil, Plus, Square, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import EmptyState from '../components/EmptyState'
@@ -7,6 +8,7 @@ import PlatformAvatar from '../components/PlatformAvatar'
 import api from '../services/api'
 
 const emptyForm = { name: '', website: '', default_currency: 'USD', status: 'not active', logo: null }
+const statusColors = { working: 'success', applied: 'warning', 'under review': 'secondary', 'not active': 'default' }
 
 export default function Platforms() {
   const [items, setItems] = useState([])
@@ -18,37 +20,27 @@ export default function Platforms() {
   const [saving, setSaving] = useState(false)
   const [view, setView] = useState('grid')
 
-  const load = async () => { setLoading(true); try { const {data}=await api.get('/platforms/'); setItems(data) } finally { setLoading(false) } }
+  const load = async () => { setLoading(true); try { const { data } = await api.get('/platforms/'); setItems(data) } finally { setLoading(false) } }
   useEffect(() => { load() }, [])
-
   const openNew = () => { setEditing(null); setForm(emptyForm); setError(''); setModal(true) }
-  const openEdit = (p) => { setEditing(p); setForm({ name:p.name, website:p.website || '', default_currency:p.default_currency || 'USD', status:p.status || 'not active', logo:null }); setError(''); setModal(true) }
-
-  const submit = async (e) => {
-    e.preventDefault(); setSaving(true); setError('')
-    const fd = new FormData(); fd.append('name', form.name); fd.append('website', form.website); fd.append('default_currency', form.default_currency); fd.append('status', form.status); if (form.logo) fd.append('logo', form.logo)
-    try {
-      if (editing) await api.patch(`/platforms/${editing.id}/`, fd)
-      else await api.post('/platforms/', fd)
-      setModal(false); await load()
-    } catch (err) { setError(err.response?.data?.detail || Object.values(err.response?.data || {}).flat().join(' ') || 'Could not save platform.') }
+  const openEdit = (platform) => { setEditing(platform); setForm({ name: platform.name, website: platform.website || '', default_currency: platform.default_currency || 'USD', status: platform.status || 'not active', logo: null }); setError(''); setModal(true) }
+  const submit = async (event) => {
+    event.preventDefault(); setSaving(true); setError('')
+    const formData = new FormData()
+    Object.entries(form).forEach(([key, value]) => { if (value !== null) formData.append(key, value) })
+    try { if (editing) await api.patch(`/platforms/${editing.id}/`, formData); else await api.post('/platforms/', formData); setModal(false); await load() }
+    catch (err) { setError(err.response?.data?.detail || Object.values(err.response?.data || {}).flat().join(' ') || 'Could not save platform.') }
     finally { setSaving(false) }
   }
-
-  const remove = async (p) => {
-    if (!window.confirm(`Remove ${p.name} from your active platforms? Existing earnings will stay in your history.`)) return
-    await api.delete(`/platforms/${p.id}/`); await load()
-  }
-
+  const remove = async (platform) => { if (!window.confirm(`Remove ${platform.name} from your active platforms? Existing earnings will stay in your history.`)) return; await api.delete(`/platforms/${platform.id}/`); await load() }
   if (loading) return <Loading label="Loading platforms..."/>
 
   return <div className="space-y-6">
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-sm font-semibold text-[#16843d] dark:text-[#7bea9d]">Sources</p><h1 className="mt-1 text-3xl font-black tracking-tight text-slate-950 dark:text-white">Platforms</h1><p className="mt-1 text-sm text-slate-500">Add or remove every platform you earn from, including its logo.</p></div><div className="flex gap-2"><button className="btn-secondary p-2.5" onClick={() => setView(view === 'grid' ? 'list' : 'grid')} title="Toggle platform view">{view === 'grid' ? <List size={18}/> : <Square size={18}/>}</button><button className="btn-primary" onClick={openNew}><Plus size={18}/>Add platform</button></div></div>
-    {items.length ? <div className={view === 'grid' ? 'grid gap-4 sm:grid-cols-2 xl:grid-cols-3' : 'space-y-2'}>{items.map((p) => <div key={p.id} className="card p-5"><div className="flex items-start justify-between gap-4"><div className="flex min-w-0 items-center gap-3"><PlatformAvatar platform={p} size="lg"/><div className="min-w-0"><h3 className="truncate font-bold text-slate-900 dark:text-white">{p.name}</h3><p className="text-sm text-slate-500">Default: {p.default_currency}</p><span className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-bold ${p.status === 'working' ? 'bg-emerald-100 text-emerald-700' : p.status === 'applied' ? 'bg-red-100 text-red-800' : p.status === 'under review' ? 'bg-orange-100 text-orange-800' : 'bg-red-100 text-red-700'}`}>{p.status || 'not active'}</span></div></div><div className="flex gap-1"><button onClick={()=>openEdit(p)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><Pencil size={16}/></button><button onClick={()=>remove(p)} className="rounded-lg p-2 text-rose-500 hover:bg-rose-50"><Trash2 size={16}/></button></div></div>{p.website && <a className="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-[#16843d]" href={p.website} target="_blank" rel="noreferrer">Visit website <ExternalLink size={14}/></a>}</div>)}</div> : <EmptyState title="No platforms yet" text="Add Upwork, Fiverr, YouTube, a client portal, or any other income source."/>}
-
-    <Modal open={modal} onClose={()=>setModal(false)} title={editing ? 'Edit platform' : 'Add platform'}>
-      {error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">{error}</div>}
-      <form onSubmit={submit} className="space-y-4"><div><label className="label">Platform name</label><input className="input" required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})} placeholder="Upwork"/></div><div><label className="label">Website</label><input className="input" type="url" value={form.website} onChange={(e)=>setForm({...form,website:e.target.value})} placeholder="https://..."/></div><div><label className="label">Default currency</label><input className="input" maxLength={8} value={form.default_currency} onChange={(e)=>setForm({...form,default_currency:e.target.value.toUpperCase()})} placeholder="USD"/></div><div><label className="label">Status</label><select className="input" value={form.status} onChange={(e)=>setForm({...form,status:e.target.value})}><option>working</option><option>applied</option><option>not active</option><option>under review</option></select></div><div><label className="label">Logo image</label><input className="input" type="file" accept="image/*" onChange={(e)=>setForm({...form,logo:e.target.files?.[0] || null})}/></div><div className="flex justify-end gap-2 pt-2"><button type="button" className="btn-secondary" onClick={()=>setModal(false)}>Cancel</button><button className="btn-primary" disabled={saving}>{saving?'Saving...':'Save platform'}</button></div></form>
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#1688ff]">Sources</p><h1 className="mt-2 text-3xl font-semibold text-foreground">Platforms</h1><p className="mt-1 text-sm text-default-500">Add every platform you earn from and keep your income organized.</p></div><div className="flex gap-2"><Button isIconOnly variant="flat" onPress={() => setView(view === 'grid' ? 'list' : 'grid')} aria-label="Toggle platform view">{view === 'grid' ? <List size={18}/> : <Square size={18}/>}</Button><Button color="primary" onPress={openNew} startContent={<Plus size={18}/>}>Add platform</Button></div></div>
+    {items.length ? <div className={view === 'grid' ? 'grid gap-4 sm:grid-cols-2 xl:grid-cols-3' : 'space-y-3'}>{items.map((platform) => <Card key={platform.id} className="dashboard-panel border-white/8 bg-content1 text-foreground shadow-none"><CardBody className="p-5"><div className="flex items-start justify-between gap-4"><div className="flex min-w-0 items-center gap-3"><PlatformAvatar platform={platform} size="lg"/><div className="min-w-0"><h3 className="truncate font-semibold">{platform.name}</h3><p className="mt-1 text-xs text-default-500">Default currency: {platform.default_currency}</p><div className="mt-2 flex flex-wrap gap-2"><Chip size="sm" variant="flat" color={statusColors[platform.status] || 'default'}>{platform.status || 'not active'}</Chip><Chip size="sm" variant="bordered">{platform.default_currency}</Chip></div></div></div><div className="flex gap-1"><Button isIconOnly size="sm" variant="light" onPress={() => openEdit(platform)} aria-label={`Edit ${platform.name}`}><Pencil size={15}/></Button><Button isIconOnly size="sm" variant="light" color="danger" onPress={() => remove(platform)} aria-label={`Delete ${platform.name}`}><Trash2 size={15}/></Button></div></div>{platform.website && <a className="mt-5 inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline" href={platform.website} target="_blank" rel="noreferrer">Visit website <ExternalLink size={13}/></a>}</CardBody></Card>)}</div> : <EmptyState title="No platforms yet" text="Add Upwork, Fiverr, YouTube, a client portal, or any other income source."/>}
+    <Modal open={modal} onClose={() => setModal(false)} title={editing ? 'Edit platform' : 'Add platform'}>
+      {error && <div className="mb-4 rounded-xl border border-danger-400/30 bg-danger-400/10 p-3 text-sm text-danger-200">{error}</div>}
+      <form onSubmit={submit} className="space-y-4"><Input label="Platform name" isRequired value={form.name} onValueChange={(value) => setForm({ ...form, name: value })} placeholder="Upwork"/><Input label="Website" type="url" value={form.website} onValueChange={(value) => setForm({ ...form, website: value })} placeholder="https://..."/><Input label="Default currency" maxLength={8} value={form.default_currency} onValueChange={(value) => setForm({ ...form, default_currency: value.toUpperCase() })} placeholder="USD"/><Select label="Status" selectedKeys={new Set([form.status])} onSelectionChange={(keys) => setForm({ ...form, status: Array.from(keys)[0] || 'not active' })}><SelectItem key="working">Working</SelectItem><SelectItem key="applied">Applied</SelectItem><SelectItem key="not active">Not active</SelectItem><SelectItem key="under review">Under review</SelectItem></Select><div><label className="mb-1.5 block text-sm font-medium text-foreground-600">Logo image</label><input className="input" type="file" accept="image/*" onChange={(event) => setForm({ ...form, logo: event.target.files?.[0] || null })}/></div><div className="flex justify-end gap-2 pt-2"><Button variant="light" onPress={() => setModal(false)}>Cancel</Button><Button color="primary" type="submit" isLoading={saving}>{saving ? 'Saving...' : 'Save platform'}</Button></div></form>
     </Modal>
   </div>
 }

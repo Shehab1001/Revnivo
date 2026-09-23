@@ -435,12 +435,25 @@ def notifications(request):
     return Response([{**{key: doc.get(key) for key in ("kind", "title", "message", "read")}, "id": str(doc["_id"]), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None} for doc in docs])
 
 
-@api_view(["GET", "POST"])
+@api_view(["GET", "POST", "DELETE"])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def support_chat(request):
     db = get_db()
     owner = owner_oid(request)
     user_doc = db.users.find_one({"_id": owner})
+    db.users.update_one({"_id": owner}, {"$set": {"last_seen": utcnow()}})
+    if request.method == "DELETE":
+        message_id = oid(request.data.get("id"))
+        if not message_id:
+            return Response({"detail": "Invalid message id."}, status=status.HTTP_400_BAD_REQUEST)
+        message = db.chat_messages.find_one({"_id": message_id})
+        if not message:
+            return Response({"detail": "Message not found."}, status=status.HTTP_404_NOT_FOUND)
+        if request.data.get("mode") == "everyone":
+            db.chat_messages.update_one({"_id": message_id}, {"$set": {"deleted": True, "content": "", "attachment": ""}})
+        else:
+            db.chat_messages.update_one({"_id": message_id}, {"$addToSet": {"deleted_for": owner}})
+        return Response({"status": "deleted"})
     if request.method == "GET" and is_admin_doc(user_doc) and request.query_params.get("summary"):
         users = [doc for doc in db.users.find({"role": {"$ne": "admin"}}).sort("created_at", DESCENDING)]
         summaries = []
@@ -448,8 +461,16 @@ def support_chat(request):
             contact_id = contact["_id"]
             latest = db.chat_messages.find_one({"user_id": contact_id}, sort=[("created_at", DESCENDING)])
             unread_count = db.notifications.count_documents({"kind": "chat", "chat_user_id": str(contact_id), "read": False})
+            last_seen = contact.get("last_seen")
+            typing_until = contact.get("typing_until")
+            if last_seen and last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            if typing_until and typing_until.tzinfo is None:
+                typing_until = typing_until.replace(tzinfo=timezone.utc)
             summaries.append({
                 **serialize_user(contact, request),
+                "online": bool(last_seen and utcnow() - last_seen <= timedelta(minutes=2)),
+                "typing": bool(typing_until and utcnow() < typing_until),
                 "unread_count": unread_count,
                 "last_message": latest.get("content", "") if latest else "",
                 "last_message_at": latest.get("created_at").isoformat() if latest and latest.get("created_at") else None,
@@ -463,7 +484,7 @@ def support_chat(request):
         target_user = oid(request.data.get("user_id")) if is_admin_doc(user_doc) else owner
         if not target_user:
             return Response({"detail": "Select a user before replying."}, status=status.HTTP_400_BAD_REQUEST)
-        message = {"user_id": target_user, "content": content[:2000], "sender": "admin" if is_admin_doc(user_doc) else "user", "created_at": utcnow()}
+        message = {"user_id": target_user, "content": content[:2000], "message_type": str(request.data.get("message_type", "text")), "sender": "admin" if is_admin_doc(user_doc) else "user", "created_at": utcnow()}
         if attachment:
             message["attachment"] = save_upload(attachment, "chat")
         db.chat_messages.insert_one(message)
@@ -478,9 +499,46 @@ def support_chat(request):
     docs = db.chat_messages.find(query).sort("created_at", ASCENDING)
     result = []
     for doc in docs:
+        if owner in doc.get("deleted_for", []):
+            continue
         attachment = doc.get("attachment", "")
-        result.append({**{key: doc.get(key) for key in ("content", "sender")}, "id": str(doc["_id"]), "user_id": str(doc["user_id"]), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None, "attachment_url": request.build_absolute_uri(f"{settings.MEDIA_URL}{attachment}") if attachment else ""})
+        result.append({**{key: doc.get(key) for key in ("content", "sender", "message_type")}, "deleted": bool(doc.get("deleted")), "id": str(doc["_id"]), "user_id": str(doc["user_id"]), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None, "attachment_url": request.build_absolute_uri(f"{settings.MEDIA_URL}{attachment}") if attachment else ""})
     return Response(result)
+
+
+@api_view(["GET", "POST"])
+@parser_classes([JSONParser])
+def chat_presence(request):
+    db = get_db()
+    owner = owner_oid(request)
+    if request.method == "POST":
+        if request.data.get("offline"):
+            db.users.update_one({"_id": owner}, {"$set": {"last_seen": None, "typing_until": None, "typing_for": None}})
+            return Response({"status": "offline"})
+        typing_for = request.data.get("user_id") if request.data.get("user_id") else "admin"
+        updates = {"typing_until": utcnow() + timedelta(seconds=4), "typing_for": str(typing_for)} if request.data.get("typing") else {"typing_until": None, "typing_for": None}
+        db.users.update_one({"_id": owner}, {"$set": updates})
+        return Response({"status": "typing" if request.data.get("typing") else "idle"})
+    db.users.update_one({"_id": owner}, {"$set": {"last_seen": utcnow()}})
+    viewer = db.users.find_one({"_id": owner})
+    query = {"role": "admin"} if not is_admin_doc(viewer) else {"role": {"$ne": "admin"}}
+    people = []
+    for person in db.users.find(query).sort("created_at", DESCENDING):
+        last_seen = person.get("last_seen")
+        typing_until = person.get("typing_until")
+        if last_seen and last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        if typing_until and typing_until.tzinfo is None:
+            typing_until = typing_until.replace(tzinfo=timezone.utc)
+        typing_for = str(person.get("typing_for") or "")
+        is_typing = bool(typing_until and utcnow() < typing_until and (is_admin_doc(viewer) or typing_for in ("admin", str(owner))))
+        people.append({
+            "id": str(person["_id"]),
+            "name": person.get("name") or person.get("email", ""),
+            "online": bool(last_seen and utcnow() - last_seen <= timedelta(minutes=2)),
+            "typing": is_typing,
+        })
+    return Response(people)
 
 
 @api_view(["GET", "POST"])
