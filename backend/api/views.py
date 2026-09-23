@@ -554,7 +554,7 @@ def notes(request):
     owner = owner_oid(request)
     if request.method == "GET":
         page = max(int(request.query_params.get("page", 1)), 1)
-        page_size = 10
+        page_size = 8
         query = {"owner_id": owner}
         search = request.query_params.get("search", "").strip()
         if search:
@@ -677,7 +677,7 @@ def earnings(request):
         platform_id = request.query_params.get("platform_id")
         year = request.query_params.get("year")
         page = max(int(request.query_params.get("page", 1)), 1)
-        page_size = 10
+        page_size = 8
         if currency:
             query["currency"] = currency.upper()
         if platform_id:
@@ -802,9 +802,21 @@ def dashboard(request):
         else:
             platform_id = "all"
     if period in {"last_week", "last_month", "last_3_months", "last_year"}:
-        days = {"last_week": 7, "last_month": 30, "last_3_months": 90, "last_year": 365}[period]
-        end = datetime.now(timezone.utc)
-        match["earned_at"] = {"$gte": end - timedelta(days=days), "$lte": end}
+        now = datetime.now(timezone.utc)
+        current_week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        current_month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+        current_year_start = datetime(now.year, 1, 1, tzinfo=timezone.utc)
+        previous_month_start = datetime(now.year if now.month > 1 else now.year - 1, now.month - 1 if now.month > 1 else 12, 1, tzinfo=timezone.utc)
+        previous_three_months_start = datetime(now.year if now.month > 3 else now.year - 1, now.month - 3 if now.month > 3 else now.month + 9, 1, tzinfo=timezone.utc)
+        previous_year_start = datetime(now.year - 1, 1, 1, tzinfo=timezone.utc)
+        if period == "last_week":
+            match["earned_at"] = {"$gte": current_week_start - timedelta(days=7), "$lt": current_week_start}
+        elif period == "last_month":
+            match["earned_at"] = {"$gte": previous_month_start, "$lt": current_month_start}
+        elif period == "last_3_months":
+            match["earned_at"] = {"$gte": previous_three_months_start, "$lt": current_month_start}
+        else:
+            match["earned_at"] = {"$gte": previous_year_start, "$lt": current_year_start}
     elif period == "custom" and date_from and date_to:
         try:
             start = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
