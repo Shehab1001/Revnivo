@@ -423,6 +423,7 @@ def admin_coupons(request):
 def notifications(request):
     db = get_db()
     owner = owner_oid(request)
+    viewer = db.users.find_one({"_id": owner})
     query = {"$or": [{"owner_id": None}, {"owner_id": owner}]}
     if request.method == "PATCH":
         if request.data.get("all"):
@@ -432,16 +433,21 @@ def notifications(request):
             if notification_id:
                 db.notifications.update_one({"_id": notification_id, **query}, {"$set": {"read": True}})
     docs = db.notifications.find(query).sort("created_at", DESCENDING).limit(50)
-    return Response([{**{key: doc.get(key) for key in ("kind", "title", "message", "read")}, "id": str(doc["_id"]), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None} for doc in docs])
+    return Response([{**{key: doc.get(key) for key in ("kind", "title", "message", "read", "chat_user_id")}, "id": str(doc["_id"]), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None} for doc in docs])
 
 
-@api_view(["GET", "POST", "DELETE"])
+@api_view(["GET", "POST", "PATCH", "DELETE"])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def support_chat(request):
     db = get_db()
     owner = owner_oid(request)
     user_doc = db.users.find_one({"_id": owner})
     db.users.update_one({"_id": owner}, {"$set": {"last_seen": utcnow()}})
+    if request.method == "PATCH":
+        chat_user_id = oid(request.data.get("user_id")) if is_admin_doc(user_doc) else owner
+        if chat_user_id:
+            db.notifications.update_many({"kind": "chat", "chat_user_id": str(chat_user_id), "read": False, "$or": [{"owner_id": None}, {"owner_id": owner}]}, {"$set": {"read": True}})
+        return Response({"status": "read"})
     if request.method == "DELETE":
         message_id = oid(request.data.get("id"))
         if not message_id:
@@ -460,7 +466,7 @@ def support_chat(request):
         for contact in users:
             contact_id = contact["_id"]
             latest = db.chat_messages.find_one({"user_id": contact_id}, sort=[("created_at", DESCENDING)])
-            unread_count = db.notifications.count_documents({"kind": "chat", "chat_user_id": str(contact_id), "read": False})
+            unread_count = db.notifications.count_documents({"kind": "chat", "chat_user_id": str(contact_id), "$or": [{"owner_id": None}, {"owner_id": owner}], "read": False})
             last_seen = contact.get("last_seen")
             typing_until = contact.get("typing_until")
             if last_seen and last_seen.tzinfo is None:
@@ -489,13 +495,13 @@ def support_chat(request):
             message["attachment"] = save_upload(attachment, "chat")
         db.chat_messages.insert_one(message)
         if message["sender"] == "user":
-            create_notification("chat", "New support message", f"{user_doc.get('name', user_doc.get('email'))} sent a support message.", chat_user_id=target_user)
+            admin_ids = [admin["_id"] for admin in db.users.find({"$or": [{"role": "admin"}, {"email": ADMIN_EMAIL}]}, {"_id": 1})]
+            for admin_id in admin_ids:
+                create_notification("chat", "New support message", f"{user_doc.get('name', user_doc.get('email'))} sent a support message.", admin_id, target_user)
         else:
             create_notification("chat", "New support reply", "The Revnivo admin replied to your support message.", target_user, target_user)
     selected_user = oid(request.query_params.get("user_id")) if is_admin_doc(user_doc) else owner
     query = {"user_id": selected_user} if selected_user else {"user_id": owner}
-    if selected_user:
-        db.notifications.update_many({"kind": "chat", "chat_user_id": str(selected_user), "read": False, "$or": [{"owner_id": None}, {"owner_id": selected_user}]}, {"$set": {"read": True}})
     docs = db.chat_messages.find(query).sort("created_at", ASCENDING)
     result = []
     for doc in docs:

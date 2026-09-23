@@ -24,6 +24,7 @@ html.dark body { background: #292b2e; }
 .typing-dots i:nth-child(3) { animation-delay: 300ms; }
 textarea[aria-label="Message"] { padding-left: 5rem !important; padding-right: 3.25rem !important; }
 .chat-contact-new { animation: chat-contact-pulse 1.8s ease-in-out infinite; }
+.chat-contact-new time { color: #4aa3ff !important; font-weight: 600; }
 
 @keyframes chat-contact-pulse {
   0%, 100% { background-color: transparent; }
