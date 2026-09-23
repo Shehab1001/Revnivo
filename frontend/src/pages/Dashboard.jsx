@@ -1,4 +1,4 @@
-import { ArrowUpRight, CalendarDays, CircleDollarSign, Download, Layers3, ReceiptText, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react'
+import { ArrowUpRight, CalendarDays, CircleDollarSign, Download, Eye, EyeOff, Layers3, ReceiptText, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react'
 import { Autocomplete, AutocompleteItem, Button, Card, CardBody, Input, Select, SelectItem } from '@heroui/react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -7,30 +7,16 @@ import EmptyState from '../components/EmptyState'
 import Loading from '../components/Loading'
 import api from '../services/api'
 import { formatMoney, monthLabel } from '../utils/format'
+import { currencyCountry, currencyOption, detectLocalCurrency, getCurrencyOptions } from '../utils/currencies'
 import 'flag-icons/css/flag-icons.min.css'
 
 const tooltipStyle = { backgroundColor: '#18191d', border: '1px solid #303239', borderRadius: 12, color: '#fff' }
 const axisStyle = { fill: '#747780', fontSize: 11 }
 const platformLineColors = ['#48a4ff', '#b993ff', '#28d8e9', '#37dc8d', '#ffb020', '#ff7096']
 
-const fallbackCurrencies = ['AED', 'AUD', 'BRL', 'CAD', 'CHF', 'CNY', 'EGP', 'EUR', 'GBP', 'HKD', 'INR', 'JPY', 'KRW', 'MXN', 'NOK', 'NZD', 'PLN', 'QAR', 'SAR', 'SEK', 'SGD', 'TRY', 'USD', 'ZAR']
-const supportedCurrencyCodes = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('currency') : fallbackCurrencies
-const currencyNames = typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames(['en'], { type: 'currency' }) : null
-const currencyCountries = {
-  AED: 'AE', AUD: 'AU', BGN: 'BG', BRL: 'BR', CAD: 'CA', CHF: 'CH', CNY: 'CN', CZK: 'CZ', DKK: 'DK', EGP: 'EG', EUR: 'EU', GBP: 'GB', HKD: 'HK', HUF: 'HU', IDR: 'ID', ILS: 'IL', INR: 'IN', JPY: 'JP', KRW: 'KR', KWD: 'KW', MAD: 'MA', MXN: 'MX', MYR: 'MY', NGN: 'NG', NOK: 'NO', NZD: 'NZ', PHP: 'PH', PKR: 'PK', PLN: 'PL', QAR: 'QA', RON: 'RO', RUB: 'RU', SAR: 'SA', SEK: 'SE', SGD: 'SG', THB: 'TH', TRY: 'TR', UAH: 'UA', USD: 'US', VND: 'VN', ZAR: 'ZA', XAF: 'CM', XOF: 'SN', XPF: 'PF', BHD: 'BH', OMR: 'OM', JOD: 'JO', TWD: 'TW', CLP: 'CL', COP: 'CO', PEN: 'PE', ARS: 'AR', ISK: 'IS', KES: 'KE', GHS: 'GH', TZS: 'TZ', UGX: 'UG', ETB: 'ET', DZD: 'DZ', TND: 'TN', LKR: 'LK', BDT: 'BD', NPR: 'NP', MMK: 'MM', KHR: 'KH', LAK: 'LA', MNT: 'MN', BOB: 'BO', PYG: 'PY', UYU: 'UY', CRC: 'CR', DOP: 'DO', GTQ: 'GT', HNL: 'HN', NIO: 'NI', PAB: 'PA', JMD: 'JM', TTD: 'TT', BSD: 'BS', BBD: 'BB', XCD: 'AG', FJD: 'FJ', WST: 'WS', TOP: 'TO', VUV: 'VU', SBD: 'SB', PGK: 'PG', MUR: 'MU', SCR: 'SC', NAD: 'NA', BWP: 'BW', SZL: 'SZ', MZN: 'MZ', ZMW: 'ZM', RWF: 'RW', SOS: 'SO', SDG: 'SD', LYD: 'LY', IQD: 'IQ', IRR: 'IR', AFN: 'AF', KZT: 'KZ', UZS: 'UZ', AZN: 'AZ', GEL: 'GE', AMD: 'AM', BYN: 'BY', MDL: 'MD', ALL: 'AL', BAM: 'BA', RSD: 'RS', MKD: 'MK'
-}
-
-function currencyOption(code) {
-  let name = code
-  try { name = currencyNames?.of(code) || code } catch { name = code }
-  return { code, name }
-}
-
-function currencyCountry(code) {
-  return (currencyCountries[code] || 'XX').toLowerCase()
-}
 
 function Metric({ label, value, note, icon: Icon, accent, trend }) {
+  const [visible, setVisible] = useState(true)
   const accents = {
     blue: 'bg-[#1688ff]/12 text-[#4aa3ff]',
     violet: 'bg-[#a679ff]/12 text-[#b993ff]',
@@ -42,10 +28,10 @@ function Metric({ label, value, note, icon: Icon, accent, trend }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-medium text-[#858891]">{label}</p>
-          <p className="mt-2 truncate text-2xl font-semibold tracking-tight sm:text-[28px]">{value}</p>
-          <div className="mt-2 flex items-center gap-2"><p className="truncate text-[11px] text-[#676a73]">{note}</p>{trend && <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${trend.direction === 'up' ? 'bg-[#25d17f]/12 text-[#37dc8d]' : 'bg-[#ff5d73]/12 text-[#ff8090]'}`}>{trend.direction === 'up' ? <TrendingUp size={11}/> : <TrendingDown size={11}/>} {trend.label}</span>}</div>
+          <p className="mt-2 truncate text-2xl font-semibold tracking-tight sm:text-[28px]">{visible ? value : '* * * * *'}</p>
+          <div className="mt-2 flex items-center gap-2"><p className="truncate text-[11px] text-[#676a73]">{visible ? note : '*****'}</p>{visible && trend && <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${trend.direction === 'up' ? 'bg-[#25d17f]/12 text-[#37dc8d]' : 'bg-[#ff5d73]/12 text-[#ff8090]'}`}>{trend.direction === 'up' ? <TrendingUp size={11}/> : <TrendingDown size={11}/>} {trend.label}</span>}</div>
         </div>
-        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${accents[accent]}`}><Icon size={17}/></span>
+        <div className="flex shrink-0 items-center gap-2"><Button isIconOnly size="sm" variant="light" className="h-8 w-8 min-w-8 text-[#858891] hover:text-white" onPress={() => setVisible((current) => !current)} aria-label={visible ? `Hide ${label}` : `Show ${label}`} title={visible ? 'Hide data' : 'Show data'}>{visible ? <Eye size={16}/> : <EyeOff size={16}/>}</Button><span className={`grid h-9 w-9 place-items-center rounded-xl ${accents[accent]}`}><Icon size={17}/></span></div>
       </div>
     </CardBody>
   </Card>
@@ -68,13 +54,14 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [currency, setCurrency] = useState('USD')
+  const [currency, setCurrency] = useState(detectLocalCurrency)
   const [period, setPeriod] = useState('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [platformId, setPlatformId] = useState('all')
   const [activeTab, setActiveTab] = useState('Overview')
   const [error, setError] = useState('')
+  const localCurrency = useMemo(() => detectLocalCurrency(), [])
 
   const load = async (selectedCurrency = currency, selectedPeriod = period, selectedPlatform = platformId, selectedFrom = dateFrom, selectedTo = dateTo) => {
     setLoading(true)
@@ -105,7 +92,7 @@ export default function Dashboard() {
   const monthlyByPlatform = useMemo(() => (data?.monthly_by_platform || []).map((item) => ({ ...item, label: `${monthLabel(item.month, item.year)} ${String(item.year).slice(-2)}` })), [data])
   const platformLines = useMemo(() => platformBreakdown.map((platform, index) => ({ ...platform, dataKey: platform.platform_id, color: platformLineColors[index % platformLineColors.length] })), [platformBreakdown])
   const summary = data?.summary || {}
-  const currencyOptions = useMemo(() => Array.from(new Set([...(data?.filters?.currencies || []), ...supportedCurrencyCodes])).sort().map(currencyOption), [data])
+  const currencyOptions = useMemo(() => getCurrencyOptions(data?.filters?.currencies || []), [data])
   const currentMonthIncome = Number(summary.current_month_income || 0)
   const previousMonthIncome = Number(summary.previous_month_income || 0)
   const monthTrend = previousMonthIncome > 0
@@ -125,7 +112,7 @@ export default function Dashboard() {
         <div><p className="text-xs font-medium uppercase tracking-[0.22em] text-[#1688ff]">{activeTab}</p><h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">Good morning, welcome back</h1><p className="mt-1 text-sm text-[#777a84]">Here is what is happening with your income today.</p></div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
           <Select aria-label="Platform" className="w-full sm:w-36" size="sm" variant="bordered" selectedKeys={new Set([String(platformId)])} onSelectionChange={(keys) => setPlatformId(Array.from(keys)[0] || 'all')}><SelectItem key="all">All platforms</SelectItem>{(data?.filters?.platforms || []).map((platform) => <SelectItem key={String(platform.id)}>{platform.name}</SelectItem>)}</Select>
-          <Autocomplete aria-label="Currency" className="w-full sm:w-44" size="sm" variant="bordered" selectedKey={currency} onSelectionChange={(key) => key && setCurrency(String(key))} allowsCustomValue={false} placeholder="Currency"><AutocompleteItem key="USD" textValue="USD United States Dollar"><span className="inline-flex items-center gap-2"><span aria-hidden="true" className={`fi fi-${currencyCountry('USD')} dashboard-currency-flag`}/><span>USD</span></span></AutocompleteItem>{currencyOptions.filter((item) => item.code !== 'USD').map((item) => <AutocompleteItem key={item.code} textValue={`${item.code} ${item.name}`}><span className="inline-flex items-center gap-2"><span aria-hidden="true" className={`fi fi-${currencyCountry(item.code)} dashboard-currency-flag`}/><span>{item.code}</span></span></AutocompleteItem>)}</Autocomplete>
+          <Autocomplete aria-label="Currency" className="w-full sm:w-52" size="sm" variant="bordered" selectedKey={currency} onSelectionChange={(key) => key && setCurrency(String(key))} onFocus={(event) => event.target.select()} onClick={(event) => event.target.select()} allowsCustomValue={false} placeholder="Currency"><AutocompleteItem key={localCurrency} textValue={`${localCurrency} ${currencyOption(localCurrency).name}`}><span className="inline-flex items-center gap-2"><span aria-hidden="true" className={`fi fi-${currencyCountry(localCurrency)} dashboard-currency-flag`}/><span>{localCurrency}</span></span></AutocompleteItem>{currencyOptions.filter((item) => item.code !== localCurrency).map((item) => <AutocompleteItem key={item.code} textValue={`${item.code} ${item.name}`}><span className="inline-flex items-center gap-2"><span aria-hidden="true" className={`fi fi-${currencyCountry(item.code)} dashboard-currency-flag`}/><span>{item.code}</span></span></AutocompleteItem>)}</Autocomplete>
           <Select aria-label="Date range" className="col-span-2 w-full sm:col-span-1 sm:w-40" size="sm" variant="bordered" selectedKeys={new Set([period])} onSelectionChange={(keys) => setPeriod(Array.from(keys)[0] || 'all')}>
             <SelectItem key="all">All time</SelectItem>
             <SelectItem key="last_week">Last week</SelectItem>
@@ -141,9 +128,9 @@ export default function Dashboard() {
       {error && <div className="rounded-xl border border-danger-400/30 bg-danger-400/10 p-3 text-sm text-danger-200">{error}</div>}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric label="Revenue" value={formatMoney(summary.total_income, currency)} note={period === 'all' ? 'Across all time' : period === 'custom' ? `${dateFrom || 'Start'} to ${dateTo || 'End'}` : period.replaceAll('_', ' ')} icon={CircleDollarSign} accent="blue"/>
+        <Metric label="This month income" value={formatMoney(currentMonthIncome, currency)} note="vs last month" trend={monthTrend} icon={CircleDollarSign} accent="green"/>
         <Metric label="Transactions" value={summary.transactions || 0} note="Recorded payments" icon={ReceiptText} accent="violet"/>
         <Metric label="Platforms" value={summary.platforms || 0} note="Active platform records" icon={Layers3} accent="cyan"/>
-        <Metric label="This month income" value={formatMoney(currentMonthIncome, currency)} note="vs last month" trend={monthTrend} icon={CircleDollarSign} accent="green"/>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.18fr_.82fr]">
