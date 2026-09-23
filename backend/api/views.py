@@ -42,10 +42,15 @@ def owner_oid(request):
 
 
 ADMIN_EMAIL = "dev.shehabsaid@gmail.com"
+SUPERADMIN_EMAIL = ADMIN_EMAIL
 
 
 def is_admin_doc(doc):
     return bool(doc and (doc.get("role") == "admin" or doc.get("email", "").lower() == ADMIN_EMAIL))
+
+
+def is_superadmin_doc(doc):
+    return bool(doc and doc.get("email", "").lower() == SUPERADMIN_EMAIL)
 
 
 def serialize_user(doc, request):
@@ -90,6 +95,7 @@ def is_active_trial(value):
 
 
 _egp_rate_cache = {"value": None, "expires_at": 0}
+_currency_rates_cache = {"value": None, "expires_at": 0}
 
 
 def current_egp_per_usd():
@@ -109,30 +115,38 @@ def current_egp_per_usd():
         return settings.EGP_PER_USD
 
 
+def current_currency_rates():
+    now = monotonic()
+    if _currency_rates_cache["value"] is not None and now < _currency_rates_cache["expires_at"]:
+        return _currency_rates_cache["value"]
+    try:
+        with urlopen(settings.EGP_RATE_API_URL, timeout=3) as response:
+            payload = json.load(response)
+        rates = {"USD": Decimal("1")}
+        rates.update({code.upper(): Decimal(str(value)) for code, value in payload["rates"].items() if Decimal(str(value)) > 0})
+        rates.setdefault("EGP", settings.EGP_PER_USD)
+        _currency_rates_cache.update({"value": rates, "expires_at": now + settings.EGP_RATE_CACHE_SECONDS})
+        return rates
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return {"USD": Decimal("1"), "EGP": settings.EGP_PER_USD}
+
+
 def dashboard_currency_query(currency):
-    if currency in ("EGP", "USD"):
-        return {"currency": {"$in": ["USD", "EGP"]}}
-    return {"currency": currency}
+    return {"currency": {"$exists": True}}
 
 
-def dashboard_amount_expression(currency, egp_per_usd):
-    if currency not in ("EGP", "USD"):
+def dashboard_amount_expression(currency, rates):
+    target_rate = rates.get(currency)
+    if not target_rate:
         return "$amount"
-    if currency == "USD":
-        return {
-            "$cond": [
-                {"$eq": ["$currency", "EGP"]},
-                {"$divide": ["$amount", Decimal128(str(egp_per_usd))]},
-                "$amount",
-            ]
+    branches = [
+        {
+            "case": {"$eq": ["$currency", source_currency]},
+            "then": {"$multiply": ["$amount", Decimal128(str(target_rate / source_rate))]},
         }
-    return {
-        "$cond": [
-            {"$eq": ["$currency", "USD"]},
-            {"$multiply": ["$amount", Decimal128(str(egp_per_usd))]},
-            "$amount",
-        ]
-    }
+        for source_currency, source_rate in rates.items()
+    ]
+    return {"$switch": {"branches": branches, "default": "$amount"}}
 
 
 @api_view(["GET"])
@@ -295,6 +309,9 @@ def admin_users(request):
             return Response({"detail": "Invalid user id."}, status=status.HTTP_400_BAD_REQUEST)
         if user_id == owner_oid(request):
             return Response({"detail": "You cannot change or delete your own admin account."}, status=status.HTTP_400_BAD_REQUEST)
+        target = db.users.find_one({"_id": user_id})
+        if is_superadmin_doc(target):
+            return Response({"detail": "The super admin account cannot be changed or deleted."}, status=status.HTTP_403_FORBIDDEN)
         if request.method == "DELETE":
             db.users.delete_one({"_id": user_id})
             return Response(status=status.HTTP_204_NO_CONTENT)
@@ -333,7 +350,7 @@ def subscriptions(request):
             return Response({"detail": "Invalid user id."}, status=status.HTTP_400_BAD_REQUEST)
         updates = {key: request.data[key] for key in ("subscription_status", "payment_method") if key in request.data}
         db.users.update_one({"_id": user_id}, {"$set": updates})
-    docs = db.users.find({}).sort("created_at", DESCENDING)
+    docs = (doc for doc in db.users.find({}).sort("created_at", DESCENDING) if not is_admin_doc(doc))
     now = utcnow()
     result = []
     for doc in docs:
@@ -414,6 +431,7 @@ def admin_coupons(request):
 def notifications(request):
     db = get_db()
     owner = owner_oid(request)
+    viewer = db.users.find_one({"_id": owner})
     query = {"$or": [{"owner_id": None}, {"owner_id": owner}]}
     if request.method == "PATCH":
         if request.data.get("all"):
@@ -423,24 +441,50 @@ def notifications(request):
             if notification_id:
                 db.notifications.update_one({"_id": notification_id, **query}, {"$set": {"read": True}})
     docs = db.notifications.find(query).sort("created_at", DESCENDING).limit(50)
-    return Response([{**{key: doc.get(key) for key in ("kind", "title", "message", "read")}, "id": str(doc["_id"]), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None} for doc in docs])
+    return Response([{**{key: doc.get(key) for key in ("kind", "title", "message", "read", "chat_user_id")}, "id": str(doc["_id"]), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None} for doc in docs])
 
 
-@api_view(["GET", "POST"])
+@api_view(["GET", "POST", "PATCH", "DELETE"])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def support_chat(request):
     db = get_db()
     owner = owner_oid(request)
     user_doc = db.users.find_one({"_id": owner})
+    db.users.update_one({"_id": owner}, {"$set": {"last_seen": utcnow()}})
+    if request.method == "PATCH":
+        chat_user_id = oid(request.data.get("user_id")) if is_admin_doc(user_doc) else owner
+        if chat_user_id:
+            db.notifications.update_many({"kind": "chat", "chat_user_id": str(chat_user_id), "read": False, "$or": [{"owner_id": None}, {"owner_id": owner}]}, {"$set": {"read": True}})
+        return Response({"status": "read"})
+    if request.method == "DELETE":
+        message_id = oid(request.data.get("id"))
+        if not message_id:
+            return Response({"detail": "Invalid message id."}, status=status.HTTP_400_BAD_REQUEST)
+        message = db.chat_messages.find_one({"_id": message_id})
+        if not message:
+            return Response({"detail": "Message not found."}, status=status.HTTP_404_NOT_FOUND)
+        if request.data.get("mode") == "everyone":
+            db.chat_messages.update_one({"_id": message_id}, {"$set": {"deleted": True, "content": "", "attachment": ""}})
+        else:
+            db.chat_messages.update_one({"_id": message_id}, {"$addToSet": {"deleted_for": owner}})
+        return Response({"status": "deleted"})
     if request.method == "GET" and is_admin_doc(user_doc) and request.query_params.get("summary"):
         users = [doc for doc in db.users.find({"role": {"$ne": "admin"}}).sort("created_at", DESCENDING)]
         summaries = []
         for contact in users:
             contact_id = contact["_id"]
             latest = db.chat_messages.find_one({"user_id": contact_id}, sort=[("created_at", DESCENDING)])
-            unread_count = db.notifications.count_documents({"kind": "chat", "chat_user_id": str(contact_id), "read": False})
+            unread_count = db.notifications.count_documents({"kind": "chat", "chat_user_id": str(contact_id), "$or": [{"owner_id": None}, {"owner_id": owner}], "read": False})
+            last_seen = contact.get("last_seen")
+            typing_until = contact.get("typing_until")
+            if last_seen and last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            if typing_until and typing_until.tzinfo is None:
+                typing_until = typing_until.replace(tzinfo=timezone.utc)
             summaries.append({
                 **serialize_user(contact, request),
+                "online": bool(last_seen and utcnow() - last_seen <= timedelta(minutes=2)),
+                "typing": bool(typing_until and utcnow() < typing_until),
                 "unread_count": unread_count,
                 "last_message": latest.get("content", "") if latest else "",
                 "last_message_at": latest.get("created_at").isoformat() if latest and latest.get("created_at") else None,
@@ -454,24 +498,61 @@ def support_chat(request):
         target_user = oid(request.data.get("user_id")) if is_admin_doc(user_doc) else owner
         if not target_user:
             return Response({"detail": "Select a user before replying."}, status=status.HTTP_400_BAD_REQUEST)
-        message = {"user_id": target_user, "content": content[:2000], "sender": "admin" if is_admin_doc(user_doc) else "user", "created_at": utcnow()}
+        message = {"user_id": target_user, "content": content[:2000], "message_type": str(request.data.get("message_type", "text")), "sender": "admin" if is_admin_doc(user_doc) else "user", "created_at": utcnow()}
         if attachment:
             message["attachment"] = save_upload(attachment, "chat")
         db.chat_messages.insert_one(message)
         if message["sender"] == "user":
-            create_notification("chat", "New support message", f"{user_doc.get('name', user_doc.get('email'))} sent a support message.", chat_user_id=target_user)
+            admin_ids = [admin["_id"] for admin in db.users.find({"$or": [{"role": "admin"}, {"email": ADMIN_EMAIL}]}, {"_id": 1})]
+            for admin_id in admin_ids:
+                create_notification("chat", "New support message", f"{user_doc.get('name', user_doc.get('email'))} sent a support message.", admin_id, target_user)
         else:
             create_notification("chat", "New support reply", "The Revnivo admin replied to your support message.", target_user, target_user)
     selected_user = oid(request.query_params.get("user_id")) if is_admin_doc(user_doc) else owner
     query = {"user_id": selected_user} if selected_user else {"user_id": owner}
-    if selected_user:
-        db.notifications.update_many({"kind": "chat", "chat_user_id": str(selected_user), "read": False, "$or": [{"owner_id": None}, {"owner_id": selected_user}]}, {"$set": {"read": True}})
     docs = db.chat_messages.find(query).sort("created_at", ASCENDING)
     result = []
     for doc in docs:
+        if owner in doc.get("deleted_for", []):
+            continue
         attachment = doc.get("attachment", "")
-        result.append({**{key: doc.get(key) for key in ("content", "sender")}, "id": str(doc["_id"]), "user_id": str(doc["user_id"]), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None, "attachment_url": request.build_absolute_uri(f"{settings.MEDIA_URL}{attachment}") if attachment else ""})
+        result.append({**{key: doc.get(key) for key in ("content", "sender", "message_type")}, "deleted": bool(doc.get("deleted")), "id": str(doc["_id"]), "user_id": str(doc["user_id"]), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None, "attachment_url": request.build_absolute_uri(f"{settings.MEDIA_URL}{attachment}") if attachment else ""})
     return Response(result)
+
+
+@api_view(["GET", "POST"])
+@parser_classes([JSONParser])
+def chat_presence(request):
+    db = get_db()
+    owner = owner_oid(request)
+    if request.method == "POST":
+        if request.data.get("offline"):
+            db.users.update_one({"_id": owner}, {"$set": {"last_seen": None, "typing_until": None, "typing_for": None}})
+            return Response({"status": "offline"})
+        typing_for = request.data.get("user_id") if request.data.get("user_id") else "admin"
+        updates = {"typing_until": utcnow() + timedelta(seconds=4), "typing_for": str(typing_for)} if request.data.get("typing") else {"typing_until": None, "typing_for": None}
+        db.users.update_one({"_id": owner}, {"$set": updates})
+        return Response({"status": "typing" if request.data.get("typing") else "idle"})
+    db.users.update_one({"_id": owner}, {"$set": {"last_seen": utcnow()}})
+    viewer = db.users.find_one({"_id": owner})
+    query = {"role": "admin"} if not is_admin_doc(viewer) else {"role": {"$ne": "admin"}}
+    people = []
+    for person in db.users.find(query).sort("created_at", DESCENDING):
+        last_seen = person.get("last_seen")
+        typing_until = person.get("typing_until")
+        if last_seen and last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        if typing_until and typing_until.tzinfo is None:
+            typing_until = typing_until.replace(tzinfo=timezone.utc)
+        typing_for = str(person.get("typing_for") or "")
+        is_typing = bool(typing_until and utcnow() < typing_until and (is_admin_doc(viewer) or typing_for in ("admin", str(owner))))
+        people.append({
+            "id": str(person["_id"]),
+            "name": person.get("name") or person.get("email", ""),
+            "online": bool(last_seen and utcnow() - last_seen <= timedelta(minutes=2)),
+            "typing": is_typing,
+        })
+    return Response(people)
 
 
 @api_view(["GET", "POST"])
@@ -481,7 +562,7 @@ def notes(request):
     owner = owner_oid(request)
     if request.method == "GET":
         page = max(int(request.query_params.get("page", 1)), 1)
-        page_size = 10
+        page_size = 8
         query = {"owner_id": owner}
         search = request.query_params.get("search", "").strip()
         if search:
@@ -604,7 +685,7 @@ def earnings(request):
         platform_id = request.query_params.get("platform_id")
         year = request.query_params.get("year")
         page = max(int(request.query_params.get("page", 1)), 1)
-        page_size = 10
+        page_size = 8
         if currency:
             query["currency"] = currency.upper()
         if platform_id:
@@ -630,7 +711,7 @@ def earnings(request):
         docs = list(db.earnings.find(query).sort("earned_at", DESCENDING).skip((page - 1) * page_size).limit(page_size))
         platform_ids = list({d.get("platform_id") for d in docs if d.get("platform_id")})
         pmap = {p["_id"]: p for p in db.platforms.find({"_id": {"$in": platform_ids}, "owner_id": owner})}
-        rate = float(current_egp_per_usd())
+        rate = current_currency_rates()
         return Response({
             "results": [serialize_earning(d, pmap.get(d.get("platform_id")), rate) for d in docs],
             "pagination": {"page": page, "page_size": page_size, "total": total, "pages": max((total + page_size - 1) // page_size, 1)},
@@ -658,7 +739,7 @@ def earnings(request):
     result = db.earnings.insert_one(doc)
     doc["_id"] = result.inserted_id
     create_notification("earning", "Earning added", f"An earning was added for {platform.get('name', 'a platform')}.", owner)
-    return Response(serialize_earning(doc, platform, float(current_egp_per_usd())), status=status.HTTP_201_CREATED)
+    return Response(serialize_earning(doc, platform, current_currency_rates()), status=status.HTTP_201_CREATED)
 
 
 @api_view(["GET", "PATCH", "DELETE"])
@@ -678,7 +759,7 @@ def earning_detail(request, earning_id):
 
     if request.method == "GET":
         platform = db.platforms.find_one({"_id": doc.get("platform_id"), "owner_id": owner})
-        return Response(serialize_earning(doc, platform, float(current_egp_per_usd())))
+        return Response(serialize_earning(doc, platform, current_currency_rates()))
 
     serializer = EarningSerializer(data=request.data, partial=True)
     serializer.is_valid(raise_exception=True)
@@ -706,7 +787,7 @@ def earning_detail(request, earning_id):
     if platform is None:
         platform = db.platforms.find_one({"_id": doc.get("platform_id"), "owner_id": owner})
     create_notification("earning", "Earning updated", "An earning was updated.", owner)
-    return Response(serialize_earning(doc, platform, float(current_egp_per_usd())))
+    return Response(serialize_earning(doc, platform, current_currency_rates()))
 
 
 @api_view(["GET"])
@@ -715,8 +796,11 @@ def dashboard(request):
     owner = owner_oid(request)
     currency = request.query_params.get("currency", "USD").upper()
     year = request.query_params.get("year", "all")
+    period = request.query_params.get("period", "all")
+    date_from = request.query_params.get("date_from", "")
+    date_to = request.query_params.get("date_to", "")
     platform_id = request.query_params.get("platform_id", "all")
-    egp_per_usd = current_egp_per_usd()
+    rates = current_currency_rates()
 
     match = {"owner_id": owner, **dashboard_currency_query(currency)}
     if platform_id != "all":
@@ -725,16 +809,60 @@ def dashboard(request):
             match["platform_id"] = platform_oid
         else:
             platform_id = "all"
-    if year != "all" and str(year).isdigit():
+    if period in {"last_week", "last_month", "last_3_months", "last_year"}:
+        now = datetime.now(timezone.utc)
+        current_week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        current_month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+        current_year_start = datetime(now.year, 1, 1, tzinfo=timezone.utc)
+        previous_month_start = datetime(now.year if now.month > 1 else now.year - 1, now.month - 1 if now.month > 1 else 12, 1, tzinfo=timezone.utc)
+        previous_three_months_start = datetime(now.year if now.month > 3 else now.year - 1, now.month - 3 if now.month > 3 else now.month + 9, 1, tzinfo=timezone.utc)
+        previous_year_start = datetime(now.year - 1, 1, 1, tzinfo=timezone.utc)
+        if period == "last_week":
+            match["earned_at"] = {"$gte": current_week_start - timedelta(days=7), "$lt": current_week_start}
+        elif period == "last_month":
+            match["earned_at"] = {"$gte": previous_month_start, "$lt": current_month_start}
+        elif period == "last_3_months":
+            match["earned_at"] = {"$gte": previous_three_months_start, "$lt": current_month_start}
+        else:
+            match["earned_at"] = {"$gte": previous_year_start, "$lt": current_year_start}
+    elif period == "custom" and date_from and date_to:
+        try:
+            start = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
+            end = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc) + timedelta(days=1)
+            if start < end:
+                match["earned_at"] = {"$gte": start, "$lt": end}
+        except ValueError:
+            period = "all"
+    elif year != "all" and str(year).isdigit():
         y = int(year)
         match["earned_at"] = {
             "$gte": datetime(y, 1, 1, tzinfo=timezone.utc),
             "$lt": datetime(y + 1, 1, 1, tzinfo=timezone.utc),
         }
 
+    now = datetime.now(timezone.utc)
+    current_month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    next_month_start = datetime(now.year + (1 if now.month == 12 else 0), 1 if now.month == 12 else now.month + 1, 1, tzinfo=timezone.utc)
+    previous_month_start = datetime(now.year if now.month > 1 else now.year - 1, now.month - 1 if now.month > 1 else 12, 1, tzinfo=timezone.utc)
+    current_month_match = {"owner_id": owner, **dashboard_currency_query(currency), "earned_at": {"$gte": current_month_start, "$lt": next_month_start}}
+    previous_month_match = {"owner_id": owner, **dashboard_currency_query(currency), "earned_at": {"$gte": previous_month_start, "$lt": current_month_start}}
+    if "platform_id" in match:
+        current_month_match["platform_id"] = match["platform_id"]
+        previous_month_match["platform_id"] = match["platform_id"]
+
+    def month_total(month_match):
+        result = next(db.earnings.aggregate([
+            {"$match": month_match},
+            {"$group": {"_id": None, "total": {"$sum": dashboard_amount_expression(currency, rates)}}},
+        ]), None)
+        return decimal_to_float(result["total"]) if result else 0.0
+
+    current_month_income = month_total(current_month_match)
+    previous_month_income = month_total(previous_month_match)
+
     total_doc = next(db.earnings.aggregate([
         {"$match": match},
-        {"$group": {"_id": None, "total": {"$sum": dashboard_amount_expression(currency, egp_per_usd)}, "count": {"$sum": 1}}},
+        {"$group": {"_id": None, "total": {"$sum": dashboard_amount_expression(currency, rates)}, "count": {"$sum": 1}}},
     ]), None)
     total = decimal_to_float(total_doc.get("total")) if total_doc else 0.0
     count = total_doc.get("count", 0) if total_doc else 0
@@ -743,7 +871,20 @@ def dashboard(request):
         {"$match": match},
         {"$group": {
             "_id": {"year": {"$year": "$earned_at"}, "month": {"$month": "$earned_at"}},
-            "total": {"$sum": dashboard_amount_expression(currency, egp_per_usd)},
+            "total": {"$sum": dashboard_amount_expression(currency, rates)},
+        }},
+        {"$sort": {"_id.year": 1, "_id.month": 1}},
+    ]))
+
+    monthly_platform_rows = list(db.earnings.aggregate([
+        {"$match": match},
+        {"$group": {
+            "_id": {
+                "year": {"$year": "$earned_at"},
+                "month": {"$month": "$earned_at"},
+                "platform_id": "$platform_id",
+            },
+            "total": {"$sum": dashboard_amount_expression(currency, rates)},
         }},
         {"$sort": {"_id.year": 1, "_id.month": 1}},
     ]))
@@ -752,14 +893,14 @@ def dashboard(request):
         {"$match": {**match, **dashboard_currency_query(currency)}},
         {"$group": {
             "_id": {"year": {"$year": "$earned_at"}, "month": {"$month": "$earned_at"}},
-            "total": {"$sum": dashboard_amount_expression(currency, egp_per_usd)},
+            "total": {"$sum": dashboard_amount_expression(currency, rates)},
         }},
         {"$sort": {"_id.year": 1, "_id.month": 1}},
     ]))
 
     by_platform = list(db.earnings.aggregate([
         {"$match": match},
-        {"$group": {"_id": "$platform_id", "total": {"$sum": dashboard_amount_expression(currency, egp_per_usd)}, "count": {"$sum": 1}}},
+        {"$group": {"_id": "$platform_id", "total": {"$sum": dashboard_amount_expression(currency, rates)}, "count": {"$sum": 1}}},
         {"$sort": {"total": -1}},
     ]))
     pids = [x["_id"] for x in by_platform if x.get("_id")]
@@ -773,6 +914,12 @@ def dashboard(request):
         }
         for row in by_platform
     ]
+    monthly_platform_map = {}
+    for row in monthly_platform_rows:
+        key = (row["_id"]["year"], row["_id"]["month"])
+        platform_key = str(row["_id"]["platform_id"])
+        monthly_platform_map.setdefault(key, {"year": key[0], "month": key[1]})[platform_key] = decimal_to_float(row["total"])
+    monthly_by_platform = list(monthly_platform_map.values())
 
     recent_docs = list(db.earnings.find(match).sort("earned_at", DESCENDING).limit(6))
     recent_pids = list({d.get("platform_id") for d in recent_docs if d.get("platform_id")})
@@ -794,24 +941,30 @@ def dashboard(request):
     return Response({
         "currency": currency,
         "year": year,
+        "period": period,
+        "date_from": date_from if period == "custom" else None,
+        "date_to": date_to if period == "custom" else None,
         "platform_id": platform_id,
-        "exchange_rate": float(egp_per_usd) if currency == "EGP" else None,
+        "exchange_rate": float(rates[currency]) if currency in rates else None,
         "summary": {
             "total_income": total,
             "transactions": count,
             "platforms": db.platforms.count_documents({"owner_id": owner, "is_archived": {"$ne": True}}),
             "best_platform": platform_breakdown[0]["name"] if platform_breakdown else None,
             "best_platform_total": platform_breakdown[0]["total"] if platform_breakdown else 0,
+            "current_month_income": current_month_income,
+            "previous_month_income": previous_month_income,
         },
         "monthly": [
             {"year": r["_id"]["year"], "month": r["_id"]["month"], "total": decimal_to_float(r["total"])}
             for r in monthly
         ],
+        "monthly_by_platform": monthly_by_platform,
         "yearly": [
             {"year": r["_id"]["year"], "month": r["_id"]["month"], "total": decimal_to_float(r["total"])}
             for r in yearly
         ],
         "platform_breakdown": platform_breakdown,
-        "recent": [serialize_earning(d, None if platform_id != "all" else recent_pmap.get(d.get("platform_id")), float(current_egp_per_usd())) for d in recent_docs],
+        "recent": [serialize_earning(d, None if platform_id != "all" else recent_pmap.get(d.get("platform_id")), rates) for d in recent_docs],
         "filters": {"currencies": currencies, "years": years, "platforms": platforms},
     })

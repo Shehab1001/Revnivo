@@ -39,7 +39,8 @@ export function AuthProvider({ children }) {
     return data
   }
 
-  const logout = () => {
+  const logout = async () => {
+    await api.post('/chat-presence/', { offline: true }).catch(() => {})
     localStorage.removeItem('revnivo_token')
     localStorage.removeItem('revnivo_user')
     localStorage.removeItem('incomeflow_token')

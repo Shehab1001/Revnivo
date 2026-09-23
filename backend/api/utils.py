@@ -74,7 +74,11 @@ def serialize_earning(doc, platform=None, usd_rate=None):
         earned_at = earned_at.date()
     amount = decimal_to_float(doc.get("amount"))
     currency = doc.get("currency", "USD")
-    amount_usd = amount if currency == "USD" else (amount / usd_rate if usd_rate else amount)
+    if isinstance(usd_rate, dict):
+        source_rate = usd_rate.get(currency)
+        amount_usd = amount / float(source_rate) if source_rate else amount
+    else:
+        amount_usd = amount if currency == "USD" else (amount / usd_rate if usd_rate else amount)
     return {
         "id": str(doc["_id"]),
         "platform_id": str(doc.get("platform_id")) if doc.get("platform_id") else None,
