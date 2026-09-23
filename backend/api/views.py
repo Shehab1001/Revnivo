@@ -613,7 +613,7 @@ def platforms(request):
     db = get_db()
     owner = owner_oid(request)
     if request.method == "GET":
-        docs = db.platforms.find({"owner_id": owner, "is_archived": {"$ne": True}}).sort("created_at", DESCENDING)
+        docs = db.platforms.find({"owner_id": owner, "is_archived": {"$ne": True}}).sort([("display_order", ASCENDING), ("created_at", DESCENDING)])
         return Response([serialize_platform(d, request) for d in docs])
 
     serializer = PlatformSerializer(data=request.data)
@@ -626,6 +626,7 @@ def platforms(request):
         "website": data.get("website", "").strip(),
         "default_currency": data.get("default_currency", "USD").upper(),
         "status": data.get("status", "not active"),
+        "display_order": data.get("display_order", 0),
         "logo": logo_path,
         "is_archived": False,
         "created_at": utcnow(),
@@ -661,7 +662,7 @@ def platform_detail(request, platform_id):
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
     updates = {"updated_at": utcnow()}
-    for key in ("name", "website", "default_currency", "status"):
+    for key in ("name", "website", "default_currency", "status", "display_order"):
         if key in data:
             updates[key] = data[key].strip() if isinstance(data[key], str) else data[key]
     if "default_currency" in updates:
