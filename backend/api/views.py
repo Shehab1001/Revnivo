@@ -711,7 +711,7 @@ def earnings(request):
         docs = list(db.earnings.find(query).sort("earned_at", DESCENDING).skip((page - 1) * page_size).limit(page_size))
         platform_ids = list({d.get("platform_id") for d in docs if d.get("platform_id")})
         pmap = {p["_id"]: p for p in db.platforms.find({"_id": {"$in": platform_ids}, "owner_id": owner})}
-        rate = float(current_egp_per_usd())
+        rate = current_currency_rates()
         return Response({
             "results": [serialize_earning(d, pmap.get(d.get("platform_id")), rate) for d in docs],
             "pagination": {"page": page, "page_size": page_size, "total": total, "pages": max((total + page_size - 1) // page_size, 1)},
@@ -739,7 +739,7 @@ def earnings(request):
     result = db.earnings.insert_one(doc)
     doc["_id"] = result.inserted_id
     create_notification("earning", "Earning added", f"An earning was added for {platform.get('name', 'a platform')}.", owner)
-    return Response(serialize_earning(doc, platform, float(current_egp_per_usd())), status=status.HTTP_201_CREATED)
+    return Response(serialize_earning(doc, platform, current_currency_rates()), status=status.HTTP_201_CREATED)
 
 
 @api_view(["GET", "PATCH", "DELETE"])
@@ -759,7 +759,7 @@ def earning_detail(request, earning_id):
 
     if request.method == "GET":
         platform = db.platforms.find_one({"_id": doc.get("platform_id"), "owner_id": owner})
-        return Response(serialize_earning(doc, platform, float(current_egp_per_usd())))
+        return Response(serialize_earning(doc, platform, current_currency_rates()))
 
     serializer = EarningSerializer(data=request.data, partial=True)
     serializer.is_valid(raise_exception=True)
@@ -787,7 +787,7 @@ def earning_detail(request, earning_id):
     if platform is None:
         platform = db.platforms.find_one({"_id": doc.get("platform_id"), "owner_id": owner})
     create_notification("earning", "Earning updated", "An earning was updated.", owner)
-    return Response(serialize_earning(doc, platform, float(current_egp_per_usd())))
+    return Response(serialize_earning(doc, platform, current_currency_rates()))
 
 
 @api_view(["GET"])
@@ -965,6 +965,6 @@ def dashboard(request):
             for r in yearly
         ],
         "platform_breakdown": platform_breakdown,
-        "recent": [serialize_earning(d, None if platform_id != "all" else recent_pmap.get(d.get("platform_id")), float(current_egp_per_usd())) for d in recent_docs],
+        "recent": [serialize_earning(d, None if platform_id != "all" else recent_pmap.get(d.get("platform_id")), rates) for d in recent_docs],
         "filters": {"currencies": currencies, "years": years, "platforms": platforms},
     })
