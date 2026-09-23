@@ -48,11 +48,21 @@ export default function AppShell() {
     return () => document.removeEventListener('mousedown', closeNotifications)
   }, [notifications])
 
+  useEffect(() => {
+    const markChatReadLocally = (event) => {
+      const chatUserId = String(event.detail?.chatUserId || '')
+      if (!chatUserId) return
+      setNotifications((items) => items.map((item) => String(item.chat_user_id || '') === chatUserId ? { ...item, read: true } : item))
+    }
+    window.addEventListener('chat-read', markChatReadLocally)
+    return () => window.removeEventListener('chat-read', markChatReadLocally)
+  }, [])
+
   const linkClass = ({ isActive }) => `group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${isActive ? 'bg-[#1688ff]/12 text-[#1688ff] shadow-[inset_3px_0_0_#1688ff] dark:bg-[#1688ff]/15 dark:text-[#65b5ff]' : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-950 dark:text-[#9da0a8] dark:hover:bg-white/6 dark:hover:text-white'}`
   const unread = notifications.filter((notification) => !notification.read).length
   const unreadChat = notifications.filter((notification) => notification.kind === 'chat' && !notification.read).length
   const markRead = async (notification) => { await api.patch('/notifications/', { id: notification.id }).catch(() => {}); setNotifications(notifications.map((item) => item.id === notification.id ? { ...item, read: true } : item)) }
-  const openNotifications = async () => { const nextOpen = !noticeOpen; setNoticeOpen(nextOpen); if (nextOpen && unread) { await api.patch('/notifications/', { all: true }).catch(() => {}); setNotifications(notifications.map((item) => ({ ...item, read: true }))) } }
+  const openNotifications = () => setNoticeOpen((open) => !open)
 
   const Sidebar = () => (
     <aside className={`${collapsed ? 'w-19' : 'w-64'} flex h-full flex-col border-r border-slate-200/80 bg-white/90 p-3 shadow-[8px_0_30px_rgb(15_23_42_/_.03)] backdrop-blur-xl transition-all dark:border-white/8 dark:bg-[#101114]/95 dark:shadow-none`}>

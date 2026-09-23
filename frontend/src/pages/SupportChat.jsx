@@ -53,12 +53,19 @@ export default function SupportChat() {
       const { data } = await api.get('/support-chat/', { params: user?.role === 'admin' && userId ? { user_id: userId } : {} })
       setMessages(data)
       if (user?.role !== 'admin') setContacts((items) => items.map((item) => ({ ...item, last_message: data.at(-1)?.content || '' })))
+      if (user?.role === 'admin' ? userId : user) {
+        api.patch('/support-chat/', { user_id: user?.role === 'admin' ? userId : 'support' }).catch(() => {})
+        if (user?.role === 'admin' && userId) setContacts((items) => items.map((item) => item.id === userId ? { ...item, unread_count: 0 } : item))
+      }
     } finally { setLoading(false) }
   }
 
   useEffect(() => {
     if (user?.role === 'admin') loadContacts().catch(() => setLoading(false))
-    else loadMessages()
+    else {
+      window.dispatchEvent(new CustomEvent('chat-read', { detail: { chatUserId: String(user?.id) } }))
+      api.patch('/support-chat/', { user_id: 'support' }).catch(() => {}).finally(() => loadMessages())
+    }
     loadPresence().catch(() => {})
   }, [user?.role])
   useEffect(() => { if (selectedUser && user?.role === 'admin') loadMessages(selectedUser) }, [selectedUser])
@@ -113,11 +120,16 @@ export default function SupportChat() {
     setRecording(true)
   }
 
-  const selectContact = (contact) => {
+  const selectContact = async (contact) => {
     setSelectedUser(contact.id)
     setMessages([])
     setContacts((items) => items.map((item) => item.id === contact.id ? { ...item, unread_count: 0 } : item))
-    loadMessages(contact.id)
+    try {
+      await api.patch('/support-chat/', { user_id: contact.id })
+    } finally {
+      window.dispatchEvent(new CustomEvent('chat-read', { detail: { chatUserId: user?.role === 'admin' ? String(contact.id) : String(user?.id) } }))
+      await loadMessages(contact.id)
+    }
   }
 
   const deleteMessage = async (messageId, mode) => {
