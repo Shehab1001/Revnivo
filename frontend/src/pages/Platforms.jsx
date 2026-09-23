@@ -7,7 +7,8 @@ import Modal from '../components/Modal'
 import PlatformAvatar from '../components/PlatformAvatar'
 import api from '../services/api'
 import { currencyCountry, getCurrencyOptions } from '../utils/currencies'
-import { SortableHeader, useSortableData } from '../utils/table.jsx'
+import { useSortableData } from '../utils/useSortableData.js'
+import { SortableHeader } from '../utils/table.jsx'
 import 'flag-icons/css/flag-icons.min.css'
 
 const emptyForm = { name: '', website: '', default_currency: 'USD', status: 'not active', logo: null }

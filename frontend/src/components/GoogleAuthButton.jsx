@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext'
 export default function GoogleAuthButton() {
   const { loginWithGoogle } = useAuth()
   const navigate = useNavigate()
-  const buttonRef = useRef(null)
+  const googleButtonRef = useRef(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim()
@@ -18,6 +18,8 @@ export default function GoogleAuthButton() {
       if (!window.google) return
       window.google.accounts.id.initialize({
         client_id: clientId,
+        auto_select: false,
+        cancel_on_tap_outside: true,
         callback: async ({ credential }) => {
           setError('')
           setLoading(true)
@@ -31,6 +33,18 @@ export default function GoogleAuthButton() {
           }
         },
       })
+      if (googleButtonRef.current) {
+        googleButtonRef.current.replaceChildren()
+        window.google.accounts.id.renderButton(googleButtonRef.current, {
+          type: 'standard',
+          theme: 'outline',
+          size: 'large',
+          text: 'continue_with',
+          shape: 'rectangular',
+          width: 400,
+          logo_alignment: 'left',
+        })
+      }
     }
 
     if (window.google) {
@@ -47,14 +61,9 @@ export default function GoogleAuthButton() {
     return () => { script.onload = null }
   }, [clientId, loginWithGoogle, navigate])
 
-  const signIn = () => {
-    if (!window.google || !clientId) return
-    setError('')
-    window.google.accounts.id.prompt()
-  }
-
   return <div className="mt-5">
-    <Button ref={buttonRef} type="button" variant="bordered" radius="lg" size="lg" fullWidth isDisabled={!clientId} isLoading={loading} onPress={signIn} className="border-slate-300 bg-white text-slate-700 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 dark:border-white/15 dark:bg-white/5 dark:text-white dark:hover:border-white/25 dark:hover:bg-white/10" startContent={!loading && <span className="grid h-5 w-5 place-items-center rounded-full bg-white text-sm font-black shadow-sm"><span className="bg-[conic-gradient(#4285f4_0_25%,#34a853_25%_50%,#fbbc05_50%_75%,#ea4335_75%)] bg-clip-text text-transparent text-lg">G</span></span>}>Continue with Google</Button>
+    {clientId ? <div ref={googleButtonRef} className="flex min-h-10 justify-center overflow-hidden" aria-label="Continue with Google" /> : <Button type="button" variant="bordered" radius="lg" size="lg" fullWidth isDisabled>Continue with Google</Button>}
+    {loading && <p className="mt-2 text-center text-xs text-slate-500 dark:text-slate-400">Signing in with Google...</p>}
     {!clientId && <p className="mt-2 text-center text-xs text-slate-500 dark:text-slate-400">Google sign-in is unavailable until <code>VITE_GOOGLE_CLIENT_ID</code> is configured.</p>}
     {error && <p className="mt-2 text-center text-sm text-rose-600 dark:text-rose-300">{error}</p>}
   </div>
