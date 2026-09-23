@@ -42,10 +42,15 @@ def owner_oid(request):
 
 
 ADMIN_EMAIL = "dev.shehabsaid@gmail.com"
+SUPERADMIN_EMAIL = ADMIN_EMAIL
 
 
 def is_admin_doc(doc):
     return bool(doc and (doc.get("role") == "admin" or doc.get("email", "").lower() == ADMIN_EMAIL))
+
+
+def is_superadmin_doc(doc):
+    return bool(doc and doc.get("email", "").lower() == SUPERADMIN_EMAIL)
 
 
 def serialize_user(doc, request):
@@ -304,6 +309,9 @@ def admin_users(request):
             return Response({"detail": "Invalid user id."}, status=status.HTTP_400_BAD_REQUEST)
         if user_id == owner_oid(request):
             return Response({"detail": "You cannot change or delete your own admin account."}, status=status.HTTP_400_BAD_REQUEST)
+        target = db.users.find_one({"_id": user_id})
+        if is_superadmin_doc(target):
+            return Response({"detail": "The super admin account cannot be changed or deleted."}, status=status.HTTP_403_FORBIDDEN)
         if request.method == "DELETE":
             db.users.delete_one({"_id": user_id})
             return Response(status=status.HTTP_204_NO_CONTENT)
@@ -342,7 +350,7 @@ def subscriptions(request):
             return Response({"detail": "Invalid user id."}, status=status.HTTP_400_BAD_REQUEST)
         updates = {key: request.data[key] for key in ("subscription_status", "payment_method") if key in request.data}
         db.users.update_one({"_id": user_id}, {"$set": updates})
-    docs = db.users.find({}).sort("created_at", DESCENDING)
+    docs = (doc for doc in db.users.find({}).sort("created_at", DESCENDING) if not is_admin_doc(doc))
     now = utcnow()
     result = []
     for doc in docs:
