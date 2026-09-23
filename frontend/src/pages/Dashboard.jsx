@@ -2,16 +2,16 @@ import { ArrowUpRight, CalendarDays, CircleDollarSign, Download, Eye, EyeOff, La
 import { Autocomplete, AutocompleteItem, Button, Card, CardBody, Input, Select, SelectItem } from '@heroui/react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import EmptyState from '../components/EmptyState'
 import Loading from '../components/Loading'
 import api from '../services/api'
+import { useTheme } from '../contexts/ThemeContext'
 import { formatMoney, monthLabel } from '../utils/format'
 import { currencyCountry, currencyOption, detectLocalCurrency, getCurrencyOptions } from '../utils/currencies'
 import 'flag-icons/css/flag-icons.min.css'
 
-const tooltipStyle = { backgroundColor: '#18191d', border: '1px solid #303239', borderRadius: 12, color: '#fff' }
-const axisStyle = { fill: '#747780', fontSize: 11 }
 const platformLineColors = ['#48a4ff', '#b993ff', '#28d8e9', '#37dc8d', '#ffb020', '#ff7096']
 
 
@@ -51,6 +51,13 @@ function PanelHeading({ title, subtitle, action }) {
 }
 
 export default function Dashboard() {
+  const { user } = useAuth()
+  const { theme } = useTheme()
+  const chartTheme = theme === 'dark'
+    ? { tooltip: { backgroundColor: '#18191d', border: '1px solid #303239', borderRadius: 12, color: '#fff' }, axis: { fill: '#c5c7cc', fontSize: 11 }, grid: '#25272c', legend: '#c5c7cc' }
+    : { tooltip: { backgroundColor: '#ffffff', border: '1px solid #d4d8df', borderRadius: 12, color: '#11181c' }, axis: { fill: '#525a65', fontSize: 11 }, grid: '#e4e7eb', legend: '#525a65' }
+  const tooltipStyle = chartTheme.tooltip
+  const axisStyle = chartTheme.axis
   const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -109,11 +116,12 @@ export default function Dashboard() {
       </div>
 
       <div className="dashboard-reveal flex flex-col gap-4 border-b border-white/8 pb-5 md:flex-row md:items-end md:justify-between">
-        <div><p className="text-xs font-medium uppercase tracking-[0.22em] text-[#1688ff]">{activeTab}</p><h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">Good morning, welcome back</h1><p className="mt-1 text-sm text-[#777a84]">Here is what is happening with your income today.</p></div>
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
-          <Select aria-label="Platform" className="w-full sm:w-36" size="sm" variant="bordered" selectedKeys={new Set([String(platformId)])} onSelectionChange={(keys) => setPlatformId(Array.from(keys)[0] || 'all')}><SelectItem key="all">All platforms</SelectItem>{(data?.filters?.platforms || []).map((platform) => <SelectItem key={String(platform.id)}>{platform.name}</SelectItem>)}</Select>
-          <Autocomplete aria-label="Currency" className="w-full sm:w-52" size="sm" variant="bordered" selectedKey={currency} onSelectionChange={(key) => key && setCurrency(String(key))} onFocus={(event) => event.target.select()} onClick={(event) => event.target.select()} allowsCustomValue={false} placeholder="Currency"><AutocompleteItem key={localCurrency} textValue={`${localCurrency} ${currencyOption(localCurrency).name}`}><span className="inline-flex items-center gap-2"><span aria-hidden="true" className={`fi fi-${currencyCountry(localCurrency)} dashboard-currency-flag`}/><span>{localCurrency}</span></span></AutocompleteItem>{currencyOptions.filter((item) => item.code !== localCurrency).map((item) => <AutocompleteItem key={item.code} textValue={`${item.code} ${item.name}`}><span className="inline-flex items-center gap-2"><span aria-hidden="true" className={`fi fi-${currencyCountry(item.code)} dashboard-currency-flag`}/><span>{item.code}</span></span></AutocompleteItem>)}</Autocomplete>
-          <Select aria-label="Date range" className="col-span-2 w-full sm:col-span-1 sm:w-40" size="sm" variant="bordered" selectedKeys={new Set([period])} onSelectionChange={(keys) => setPeriod(Array.from(keys)[0] || 'all')}>
+        <div><p className="text-xs font-medium uppercase tracking-[0.22em] text-[#1688ff]">{activeTab}</p><h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">Welcome back, {user?.name || 'there'}</h1><p className="mt-1 text-sm text-[#777a84]">Here is what is happening with your income today.</p></div>
+        
+        <div className="flex flex-wrap justify-end gap-2">
+          <Select aria-label="Platform" className="w-full sm:w-40" size="md" variant="bordered" selectedKeys={new Set([String(platformId)])} onSelectionChange={(keys) => setPlatformId(Array.from(keys)[0] || 'all')}><SelectItem key="all">All platforms</SelectItem>{(data?.filters?.platforms || []).map((platform) => <SelectItem key={String(platform.id)}>{platform.name}</SelectItem>)}</Select>
+          <Autocomplete aria-label="Currency" className="w-full sm:w-52" size="md" variant="bordered" selectedKey={currency} onSelectionChange={(key) => key && setCurrency(String(key))} onFocus={(event) => event.target.select()} onClick={(event) => event.target.select()} allowsCustomValue={false} placeholder="Currency"><AutocompleteItem key={localCurrency} textValue={`${localCurrency} ${currencyOption(localCurrency).name}`}><span className="inline-flex items-center gap-2"><span aria-hidden="true" className={`fi fi-${currencyCountry(localCurrency)} dashboard-currency-flag`}/><span>{localCurrency}</span></span></AutocompleteItem>{currencyOptions.filter((item) => item.code !== localCurrency).map((item) => <AutocompleteItem key={item.code} textValue={`${item.code} ${item.name}`}><span className="inline-flex items-center gap-2"><span aria-hidden="true" className={`fi fi-${currencyCountry(item.code)} dashboard-currency-flag`}/><span>{item.code}</span></span></AutocompleteItem>)}</Autocomplete>
+          <Select aria-label="Date range" className={period === 'custom' ? 'basis-full' : 'w-full sm:w-40'} size="md" variant="bordered" selectedKeys={new Set([period])} onSelectionChange={(keys) => setPeriod(Array.from(keys)[0] || 'all')}>
             <SelectItem key="all">All time</SelectItem>
             <SelectItem key="last_week">Last week</SelectItem>
             <SelectItem key="last_month">Last month</SelectItem>
@@ -121,7 +129,7 @@ export default function Dashboard() {
             <SelectItem key="last_year">Last year</SelectItem>
             <SelectItem key="custom">Custom</SelectItem>
           </Select>
-          {period === 'custom' && <div className="col-span-2 grid grid-cols-2 gap-2 sm:col-span-3 sm:grid-cols-2"><Input aria-label="From date" type="date" size="sm" variant="bordered" label="From" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)}/><Input aria-label="To date" type="date" size="sm" variant="bordered" label="To" value={dateTo} min={dateFrom} onChange={(event) => setDateTo(event.target.value)}/></div>}
+          {period === 'custom' && <div className="grid basis-full grid-cols-2 gap-2"><Input aria-label="From date" type="date" size="sm" variant="bordered" label="From" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)}/><Input aria-label="To date" type="date" size="sm" variant="bordered" label="To" value={dateTo} min={dateFrom} onChange={(event) => setDateTo(event.target.value)}/></div>}
         </div>
       </div>
 
@@ -139,7 +147,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[.8fr_1.2fr]">
-        <Panel><PanelHeading title="Platform mix" subtitle="Where your selected income comes from"/>{platformBreakdown.length ? <div className="space-y-4">{platformBreakdown.slice(0, 5).map((platform, index) => { const total = platformBreakdown.reduce((sum, item) => sum + Number(item.total || 0), 0); const percent = total ? Math.round((Number(platform.total || 0) / total) * 100) : 0; return <div key={platform.platform_id}><div className="mb-2 flex items-center justify-between text-xs"><span className="truncate text-[#c5c7cc]">{platform.name}</span><span className="text-[#777a84]">{percent}%</span></div><div className="h-2 overflow-hidden rounded-full bg-[#292b30]"><div className={`h-full rounded-full ${['bg-[#1688ff]', 'bg-[#a679ff]', 'bg-[#16c8db]', 'bg-[#25d17f]', 'bg-[#ffb020]'][index % 5]}`} style={{ width: `${percent}%` }}/></div></div>})}</div> : <EmptyState title="No platform totals" text="Your platform mix will appear here."/>}</Panel>
+        <Panel><PanelHeading title="Platform mix" subtitle="Where your selected income comes from"/>{platformBreakdown.length ? <div className="space-y-4">{platformBreakdown.slice(0, 5).map((platform, index) => { const total = platformBreakdown.reduce((sum, item) => sum + Number(item.total || 0), 0); const percent = total ? Math.round((Number(platform.total || 0) / total) * 100) : 0; return <div key={platform.platform_id}><div className="mb-2 flex items-center justify-between text-xs"><span className="truncate text-[#c5c7cc]">{platform.name}</span><span className="text-[#777a84]">{percent}%</span></div><div className="h-3 overflow-hidden rounded-full border border-default-300 bg-content1"><div className={`h-full rounded-full ${['bg-[#1688ff]', 'bg-[#a679ff]', 'bg-[#16c8db]', 'bg-[#25d17f]', 'bg-[#ffb020]'][index % 5]}`} style={{ width: `${percent}%` }}/></div></div>})}</div> : <EmptyState title="No platform totals" text="Your platform mix will appear here."/>}</Panel>
         <Panel><PanelHeading title="Recent earnings" subtitle="Latest entries for the selected filters" action={<Button size="sm" variant="flat" color="primary" onPress={() => navigate('/earnings')} endContent={<ArrowUpRight size={14}/>}>View all</Button>}/>{data?.recent?.length ? <div className="overflow-x-auto"><table className="w-full min-w-130 text-left"><thead><tr className="border-b border-white/8 text-[10px] uppercase tracking-wider text-[#70737c]"><th className="pb-3 font-medium">Description</th><th className="pb-3 font-medium">Platform</th><th className="pb-3 font-medium">Date</th><th className="pb-3 text-right font-medium">Amount</th></tr></thead><tbody className="divide-y divide-white/6">{data.recent.map((item) => <tr key={item.id} className="text-xs transition hover:bg-white/2.5"><td className="py-3 pr-3"><div className="flex items-center gap-2"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#1688ff]/12 text-[#4aa3ff]"><ReceiptText size={13}/></span><span className="truncate text-[#d8d9dd]">{item.category || 'Uncategorized'}</span></div></td><td className="py-3 pr-3 text-[#94979f]">{item.platform_name || '—'}</td><td className="py-3 pr-3 text-[#777a84]">{item.earned_at}</td><td className="py-3 text-right font-semibold text-[#35d989]">+{formatMoney(item.amount_usd, 'USD')}</td></tr>)}</tbody></table></div> : <EmptyState title="No earnings yet" text="Add your first payment to start the timeline."/>}</Panel>
       </div>
 

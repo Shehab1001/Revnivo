@@ -1,4 +1,4 @@
-import { Bell, BarChart3, ChevronDown, ChevronLeft, ChevronRight, DollarSign, FileText, LogOut, Menu, MessageCircle, Moon, PanelsTopLeft, Settings as SettingsIcon, Sun, Users, WalletCards } from 'lucide-react'
+import { Bell, BarChart3, ChevronDown, ChevronLeft, ChevronRight, DollarSign, FileText, LogOut, Menu, MessageCircle, Moon, PanelLeft, PanelsTopLeft, Settings as SettingsIcon, Sun, Users, WalletCards } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
@@ -68,12 +68,10 @@ export default function AppShell() {
   const markRead = async (notification) => { await api.patch('/notifications/', { id: notification.id }).catch(() => { }); setNotifications(notifications.map((item) => item.id === notification.id ? { ...item, read: true } : item)) }
 
   const Sidebar = () => (
-    <aside className={`${collapsed ? 'w-19' : 'w-64'} flex h-full flex-col border-r border-slate-200/80 bg-white/90 p-3 shadow-[8px_0_30px_rgb(15_23_42_/_.03)] backdrop-blur-xl transition-all dark:border-white/8 dark:bg-[#101114]/95 dark:shadow-none`}>
-      <div className={`mb-8 flex items-center rounded-2xl border border-slate-200/80 bg-slate-50/80 ${collapsed ? 'justify-center p-2' : 'gap-3 p-3'} dark:border-white/8 dark:bg-white/4`}>
-        <img src="/logo-mark.svg" alt="Revnivo" className="h-10 w-10 shrink-0 object-contain" />
-        {!collapsed && <div className="min-w-0"><div className="truncate font-bold tracking-tight text-slate-900 dark:text-white">
-          <img src="/logo.svg" alt="Revnivo" className="h-12 w-24 shrink-0 object-contain" />
-        </div><div className="truncate text-[11px] text-slate-500 dark:text-[#777a84]">Income workspace</div></div>}
+    <aside className={`${collapsed ? 'w-19' : 'w-64'} flex h-full flex-col border-r border-default-200 bg-content1/90 p-3 shadow-[8px_0_30px_rgb(15_23_42_/_.03)] backdrop-blur-xl transition-all dark:border-white/8 dark:bg-[#101114]/95 dark:shadow-none`}>
+      <div className={`mb-8 flex rounded-2xl border border-slate-200/80 bg-slate-50/80 ${collapsed ? 'items-center justify-center p-2' : 'flex-col items-start gap-2 p-3'} dark:border-white/8 dark:bg-white/4`}>
+        <img src={collapsed ? '/logo-mark.svg' : '/logo.svg'} alt="Revnivo" className={`${collapsed ? 'h-10 w-10' : 'h-10 w-32'} brand-logo shrink-0 object-contain`} />
+        {!collapsed && <div className="truncate text-[11px] text-slate-500 dark:text-[#777a84]">Income workspace</div>}
       </div>
       <nav className="space-y-1">
         {!collapsed && <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-[#62656e]">Workspace</p>}
@@ -97,13 +95,19 @@ export default function AppShell() {
     </aside>
   )
 
-  return <div className="min-h-screen bg-[#fffdf5] text-slate-900 dark:bg-[#292b2e] dark:text-slate-100">
+  return <div className="min-h-screen bg-background text-foreground">
     <div className={`fixed inset-y-0 left-0 z-40 hidden lg:block ${collapsed ? 'w-19' : 'w-64'}`}><Sidebar /></div>
     {mobileOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setMobileOpen(false)}><div className="h-full w-64" onClick={(event) => event.stopPropagation()}><Sidebar /></div></div>}
     <div className={`${collapsed ? 'lg:pl-19' : 'lg:pl-64'} transition-all`}>
-      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-transparent bg-transparent px-4 md:px-6 dark:bg-[#0b0c0f]">
-        <div className="flex items-center gap-2"><button className="rounded-xl p-2 lg:hidden" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><button className="hidden rounded-xl p-2 lg:block" onClick={() => setCollapsed(!collapsed)} title="Toggle sidebar">{collapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}</button></div>
-        <div ref={noticeRef} className="relative ml-auto flex items-center gap-2"><button onClick={() => setNoticeOpen(!noticeOpen)} className="relative rounded-xl border border-slate-200 bg-white p-2.5 dark:border-[#555960] dark:bg-[#333538]" title="Notifications"><Bell size={18} />{unread > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-rose-500 px-1 text-[10px] text-white">{unread}</span>}</button><button onClick={toggleTheme} className="rounded-xl border border-slate-200 bg-white p-2.5 dark:border-[#555960] dark:bg-[#333538]" title="Toggle theme">{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>{noticeOpen && <div className="absolute right-0 top-12 z-50 w-80 rounded-xl border border-slate-200 bg-white p-2 shadow-xl dark:border-[#555960] dark:bg-[#333538]"><div className="px-3 py-2 font-bold">Notifications</div>{notifications.length ? notifications.slice(0, 6).map((notification) => <button key={notification.id} onClick={() => markRead(notification)} className="block w-full rounded-lg p-3 text-left hover:bg-slate-50"><div className="text-sm font-semibold">{notification.title}</div><div className="text-xs text-slate-500">{notification.message}</div></button>) : <div className="p-3 text-sm text-slate-500">No notifications.</div>}</div>}</div>
+      <header className="light-header-shadow sticky top-0 z-30 flex h-16 items-center justify-between border-b border-default-200 bg-background/90 px-4 backdrop-blur md:px-6">
+        <div className="flex items-center gap-2"><button className="rounded-xl p-2 lg:hidden" onClick={() => setMobileOpen(true)} aria-label="Open menu"><Menu size={20} /></button><button className="hidden rounded-xl p-2 lg:block" onClick={() => setCollapsed(!collapsed)} title="Toggle sidebar" aria-label="Toggle sidebar"><PanelLeft size={20} /></button></div>
+        <div className="flex items-center gap-2">
+          <div ref={noticeRef} className="relative flex items-center gap-2">
+            <button onClick={() => setNoticeOpen(!noticeOpen)} className="relative rounded-xl border border-default-200 bg-content1/90 p-2.5 shadow-small backdrop-blur" title="Notifications" aria-label="Notifications"><Bell size={18} />{unread > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-rose-500 px-1 text-[10px] text-white">{unread}</span>}</button>
+            <button onClick={toggleTheme} className="rounded-xl border border-default-200 bg-content1/90 p-2.5 shadow-small backdrop-blur" title="Toggle theme" aria-label="Toggle theme">{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
+            {noticeOpen && <div className="absolute right-0 top-12 z-50 w-80 rounded-xl border border-default-200 bg-content1 p-2 shadow-xl"><div className="px-3 py-2 font-bold">Notifications</div>{notifications.length ? notifications.slice(0, 6).map((notification) => <button key={notification.id} onClick={() => markRead(notification)} className="block w-full rounded-lg p-3 text-left hover:bg-default-100"><div className="text-sm font-semibold">{notification.title}</div><div className="text-xs text-default-500">{notification.message}</div></button>) : <div className="p-3 text-sm text-default-500">No notifications.</div>}</div>}
+          </div>
+        </div>
       </header>
       <main className="p-4 md:p-6 lg:p-8"><Outlet /></main>
     </div>
