@@ -3,7 +3,7 @@ import { Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import Loading from '../components/Loading'
 import api from '../services/api'
-import { useSortableData } from '../utils/table.jsx'
+import { useSortableData } from '../utils/useSortableData.js'
 
 export default function Subscriptions() {
   const [users, setUsers] = useState([])
