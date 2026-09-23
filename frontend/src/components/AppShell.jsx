@@ -33,6 +33,32 @@ export default function AppShell() {
   }, [])
 
   useEffect(() => {
+    const sortTable = (event) => {
+      const header = event.target.closest('th')
+      const table = header?.closest('table')
+      if (!header || !table || header.cellIndex === table.querySelectorAll('thead th').length - 1) return
+      const tbody = table.tBodies[0]
+      if (!tbody) return
+      const direction = header.dataset.sortDirection === 'desc' ? 'asc' : 'desc'
+      table.querySelectorAll('thead th').forEach((cell) => { delete cell.dataset.sortDirection })
+      header.dataset.sortDirection = direction
+      const rows = [...tbody.rows]
+      rows.sort((left, right) => {
+        const a = left.cells[header.cellIndex]?.textContent.trim() || ''
+        const b = right.cells[header.cellIndex]?.textContent.trim() || ''
+        const aNumber = Number(a.replace(/[^0-9.-]/g, ''))
+        const bNumber = Number(b.replace(/[^0-9.-]/g, ''))
+        const numeric = a !== '' && b !== '' && Number.isFinite(aNumber) && Number.isFinite(bNumber)
+        const result = numeric ? aNumber - bNumber : a.localeCompare(b, undefined, { sensitivity: 'base' })
+        return direction === 'asc' ? result : -result
+      })
+      rows.forEach((row) => tbody.appendChild(row))
+    }
+    document.addEventListener('click', sortTable)
+    return () => document.removeEventListener('click', sortTable)
+  }, [])
+
+  useEffect(() => {
     const heartbeat = () => api.get('/chat-presence/').catch(() => { })
     heartbeat()
     const timer = window.setInterval(heartbeat, 30000)
@@ -60,6 +86,31 @@ export default function AppShell() {
     }
     window.addEventListener('chat-read', markChatReadLocally)
     return () => window.removeEventListener('chat-read', markChatReadLocally)
+  }, [])
+
+  useEffect(() => {
+    const sortTable = (event) => {
+      const header = event.target.closest('th')
+      const table = header?.closest('table')
+      if (!header || !table || header.cellIndex === table.tHead.rows[0].cells.length - 1) return
+      const body = table.tBodies[0]
+      if (!body) return
+      const direction = header.dataset.sortDirection === 'desc' ? 'asc' : 'desc'
+      table.querySelectorAll('thead th').forEach((cell) => delete cell.dataset.sortDirection)
+      header.dataset.sortDirection = direction
+      const rows = [...body.rows]
+      rows.sort((a, b) => {
+        const left = a.cells[header.cellIndex]?.textContent.trim() || ''
+        const right = b.cells[header.cellIndex]?.textContent.trim() || ''
+        const leftNumber = Number(left.replace(/[^0-9.-]/g, ''))
+        const rightNumber = Number(right.replace(/[^0-9.-]/g, ''))
+        const comparison = left && right && Number.isFinite(leftNumber) && Number.isFinite(rightNumber) ? leftNumber - rightNumber : left.localeCompare(right, undefined, { sensitivity: 'base' })
+        return direction === 'asc' ? comparison : -comparison
+      })
+      rows.forEach((row) => body.appendChild(row))
+    }
+    document.addEventListener('click', sortTable)
+    return () => document.removeEventListener('click', sortTable)
   }, [])
 
   const linkClass = ({ isActive }) => `group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${isActive ? 'bg-[#1688ff]/12 text-[#1688ff] shadow-[inset_3px_0_0_#1688ff] dark:bg-[#1688ff]/15 dark:text-[#65b5ff]' : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-950 dark:text-[#9da0a8] dark:hover:bg-white/6 dark:hover:text-white'}`

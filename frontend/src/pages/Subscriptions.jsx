@@ -3,6 +3,7 @@ import { Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import Loading from '../components/Loading'
 import api from '../services/api'
+import { useSortableData } from '../utils/table.jsx'
 
 export default function Subscriptions() {
   const [users, setUsers] = useState([])
@@ -30,6 +31,7 @@ export default function Subscriptions() {
   const filteredUsers = users.filter((user) => `${user.name || ''} ${user.email || ''} ${user.subscription_status || ''}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => (a.name || a.email || '').localeCompare(b.name || b.email || '', undefined, { sensitivity: 'base' }))
   const pageCount = Math.max(1, Math.ceil(filteredUsers.length / pageSize))
   const visibleUsers = filteredUsers.slice((page - 1) * pageSize, page * pageSize)
+  const { sortedItems: sortedVisibleUsers } = useSortableData(visibleUsers, 'name')
 
   const activate = async (user) => {
     await api.patch('/admin/subscriptions/', { user_id: user.id, subscription_status: 'active', payment_method: user.payment_method || 'manual' }); load()
