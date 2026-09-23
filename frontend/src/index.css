@@ -1,27 +1,84 @@
 @import url('https://fonts.googleapis.com/css2?family=Josefin+Sans:ital,wght@0,100..700;1,100..700&display=swap');
 @import "tailwindcss";
+@plugin "../hero-ui.ts";
+@source "../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}";
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   font-family: "Josefin Sans", sans-serif;
   color-scheme: light;
-  background: #fffdf5;
+  background: hsl(var(--heroui-background));
+  color: hsl(var(--heroui-foreground));
 }
 
-html.dark { color-scheme: dark; background: #292b2e; }
+html.dark { color-scheme: dark; background: hsl(var(--heroui-background)); }
 body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input, select, textarea { font: inherit; }
 
-body { background: #fffdf5; }
-html.dark body { background: #292b2e; }
+body { background: hsl(var(--heroui-background)); color: hsl(var(--heroui-foreground)); }
+html.dark body { background: hsl(var(--heroui-background)); }
+
+.brand-logo { filter: brightness(0); }
+html.dark .brand-logo { filter: brightness(0) invert(1); }
+.light-header-shadow { box-shadow: none; }
+html:not(.dark) .light-header-shadow { box-shadow: 0 4px 14px hsl(var(--heroui-foreground) / 0.08); }
+html:not(.dark) [class~="rounded-tr-sm"][class~="bg-[#1688ff]"] { background-color: #1688ff !important; color: #fff !important; }
+html:not(.dark) [class~="rounded-tr-sm"][class~="bg-[#1688ff]"] * { color: #fff !important; }
+html:not(.dark) [class~="rounded-tl-sm"][class~="bg-[#1b1c21]"] { background-color: #64748b !important; color: #fff !important; }
+html:not(.dark) [class~="rounded-tl-sm"][class~="bg-[#1b1c21]"] * { color: #fff !important; }
+html:not(.dark) .rounded-tl-sm { background-color: #64748b !important; color: #fff !important; }
+html:not(.dark) .rounded-tl-sm p,
+html:not(.dark) .rounded-tl-sm a,
+html:not(.dark) .rounded-tl-sm time { color: #fff !important; }
+
+.dashboard-currency-flag { width: 1.25rem; height: 0.875rem; flex-shrink: 0; border-radius: 2px; background-size: cover; }
+.typing-dots { display: inline-flex; gap: 2px; align-items: center; height: 1em; }
+.typing-dots i { width: 3px; height: 3px; border-radius: 999px; background: currentColor; animation: typing-bounce 900ms ease-in-out infinite; }
+.typing-dots i:nth-child(2) { animation-delay: 150ms; }
+.typing-dots i:nth-child(3) { animation-delay: 300ms; }
+textarea[aria-label="Message"] { padding-left: 5rem !important; padding-right: 3.25rem !important; }
+.chat-contact-new { animation: chat-contact-pulse 1.8s ease-in-out infinite; }
+.chat-contact-new time { color: #4aa3ff !important; font-weight: 600; }
+
+@keyframes chat-contact-pulse {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgb(22 136 255 / 0.12); }
+}
+
+@keyframes typing-bounce {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+
+@keyframes dashboard-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dashboard-reveal { animation: dashboard-rise 420ms ease-out both; }
+.dashboard-reveal:nth-child(2) { animation-delay: 50ms; }
+.dashboard-reveal:nth-child(3) { animation-delay: 100ms; }
+.dashboard-reveal:nth-child(4) { animation-delay: 150ms; }
+.dashboard-panel { transition: border-color 180ms ease, transform 180ms ease, background-color 180ms ease; }
+.recharts-cartesian-grid-horizontal line { stroke-width: 0.5; }
+html:not(.dark) .recharts-cartesian-grid-horizontal line { stroke: #e4e7eb !important; }
+.dashboard-page [data-slot="trigger"] { border-radius: 0.75rem; }
+.recharts-cartesian-grid-horizontal line { stroke-width: 0.5; }
+.dashboard-panel:hover { border-color: rgb(255 255 255 / 0.14); transform: translateY(-2px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-reveal { animation: none; }
+  .dashboard-panel { transition: none; }
+  .dashboard-panel:hover { transform: none; }
+}
 
 @layer components {
-  .card { @apply rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-[#45484d] dark:bg-[#333538]; }
-  .input { @apply w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[#23C55E] focus:ring-4 focus:ring-[#23C55E]/10 dark:border-[#555960] dark:bg-[#292b2e] dark:text-slate-100; }
-  .label { @apply mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300; }
-  .btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-xl bg-[#23C55E] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1eaa50] disabled:cursor-not-allowed disabled:opacity-50; }
-  .btn-secondary { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-[#fffbea] dark:border-[#555960] dark:bg-[#333538] dark:text-slate-200 dark:hover:bg-[#3b3e42]; }
-  .btn-danger { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300; }
+  .card { @apply rounded-2xl border border-default-200 bg-content1 shadow-small dark:border-default-100/20 dark:bg-content1; }
+  .input { @apply w-full rounded-xl border border-default-200 bg-default-100/60 px-3.5 py-2.5 text-sm text-foreground outline-none transition placeholder:text-default-500 focus:border-primary focus:ring-4 focus:ring-primary/15 dark:border-default-100/20 dark:bg-default-100/20; }
+  .label { @apply mb-1.5 block text-sm font-medium text-foreground-600; }
+  .btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-small transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-secondary { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-default-200 bg-default-100/60 px-4 py-2.5 text-sm font-semibold text-foreground transition hover:bg-default-200 dark:border-default-100/20 dark:bg-default-100/20 dark:hover:bg-default-100/30; }
+  .btn-danger { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-danger-200 bg-danger-50 px-3 py-2 text-sm font-semibold text-danger-700 transition hover:bg-danger-100 dark:border-danger-900/60 dark:bg-danger-900/20 dark:text-danger-300; }
 }
 
 @layer utilities {
@@ -31,4 +88,39 @@ html.dark body { background: #292b2e; }
   [class~="file:bg-indigo-50"]::file-selector-button { background-color: #e8f8ed !important; }
   [class~="file:text-indigo-700"]::file-selector-button { color: #16843d !important; }
   html.dark [class~="dark:bg-slate-950/60"] { background-color: #292b2e !important; }
+
+  /* Legacy dark surfaces stay readable when the app is switched to light mode. */
+  html:not(.dark) [class~="bg-[#0b0c0f]"],
+  html:not(.dark) [class~="bg-[#101114]"],
+  html:not(.dark) [class~="bg-[#292b2e]"] { background-color: hsl(var(--heroui-background)) !important; }
+  html:not(.dark) [class~="bg-[#15161a]"],
+  html:not(.dark) [class~="bg-[#1b1c21]"] { background-color: hsl(var(--heroui-content1)) !important; }
+  html:not(.dark) [class~="bg-[#242527]"],
+  html:not(.dark) [class~="bg-[#333538]"] { background-color: hsl(var(--heroui-content2)) !important; }
+  html:not(.dark) [class~="border-white/8"],
+  html:not(.dark) [class~="border-white/10"],
+  html:not(.dark) [class~="border-white/6"] { border-color: rgb(15 23 42 / 0.12) !important; }
+  html:not(.dark) .card,
+  html:not(.dark) .dashboard-panel,
+  html:not(.dark) [data-slot="base"].shadow-none,
+  html:not(.dark) [class~="bg-[#15161a]"].shadow-none { border-color: hsl(var(--heroui-default-200)) !important; box-shadow: 0 6px 18px hsl(var(--heroui-foreground) / 0.08) !important; }
+  html:not(.dark) [class~="bg-[#101114]"].shadow-none { box-shadow: none !important; }
+  html:not(.dark) [class~="divide-white/6"] > :not([hidden]) ~ :not([hidden]) { border-color: rgb(15 23 42 / 0.08) !important; }
+  html:not(.dark) [class~="bg-[#0b0c0f]"] [class~="text-white"],
+  html:not(.dark) [class~="bg-[#101114]"] [class~="text-white"],
+  html:not(.dark) [class~="bg-[#15161a]"] [class~="text-white"],
+  html:not(.dark) [class~="bg-[#1b1c21]"] [class~="text-white"],
+  html:not(.dark) [class~="bg-[#0b0c0f]"].text-white,
+  html:not(.dark) [class~="bg-[#101114]"].text-white,
+  html:not(.dark) [class~="bg-[#15161a]"].text-white { color: hsl(var(--heroui-foreground)) !important; }
+  html:not(.dark) [class~="text-[#62656e]"],
+  html:not(.dark) [class~="text-[#676a73]"],
+  html:not(.dark) [class~="text-[#70737c]"],
+  html:not(.dark) [class~="text-[#777a84]"],
+  html:not(.dark) [class~="text-[#858891]"],
+  html:not(.dark) [class~="text-[#94979f]"],
+  html:not(.dark) [class~="text-[#a8abb2]"],
+  html:not(.dark) [class~="text-[#c5c7cc]"],
+  html:not(.dark) [class~="text-[#d8d9dd]"],
+  html:not(.dark) [class~="text-[#e1e2e5]"] { color: hsl(var(--heroui-default-600)) !important; }
 }
