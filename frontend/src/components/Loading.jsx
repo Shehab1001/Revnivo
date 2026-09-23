@@ -1,3 +1,5 @@
+import { Spinner } from '@heroui/react'
+
 export default function Loading({ label = 'Loading...' }) {
-  return <div className="flex min-h-40 items-center justify-center text-sm text-slate-500 dark:text-slate-400">{label}</div>
+  return <div className="flex min-h-40 flex-col items-center justify-center gap-3 text-sm text-default-500"><Spinner color="primary" size="sm"/><span>{label}</span></div>
 }

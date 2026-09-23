@@ -32,42 +32,46 @@ export default function AppShell() {
   }, [])
 
   useEffect(() => {
+    const heartbeat = () => api.get('/chat-presence/').catch(() => {})
+    heartbeat()
+    const timer = window.setInterval(heartbeat, 30000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
     const closeNotifications = (event) => {
       if (noticeRef.current && !noticeRef.current.contains(event.target)) {
         setNoticeOpen(false)
-        if (notifications.some((notification) => !notification.read)) {
-          api.patch('/notifications/', { all: true }).catch(() => {})
-          setNotifications((items) => items.map((item) => ({ ...item, read: true })))
-        }
       }
     }
     document.addEventListener('mousedown', closeNotifications)
     return () => document.removeEventListener('mousedown', closeNotifications)
   }, [notifications])
 
-  const linkClass = ({ isActive }) => `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${isActive ? 'bg-[#e8f8ed] text-[#16843d] dark:bg-[#23462e] dark:text-[#7bea9d]' : 'text-slate-600 hover:bg-[#fffbea] dark:text-slate-300 dark:hover:bg-[#3b3e42]'}`
+  const linkClass = ({ isActive }) => `group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${isActive ? 'bg-[#1688ff]/12 text-[#1688ff] shadow-[inset_3px_0_0_#1688ff] dark:bg-[#1688ff]/15 dark:text-[#65b5ff]' : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-950 dark:text-[#9da0a8] dark:hover:bg-white/6 dark:hover:text-white'}`
   const unread = notifications.filter((notification) => !notification.read).length
   const unreadChat = notifications.filter((notification) => notification.kind === 'chat' && !notification.read).length
   const markRead = async (notification) => { await api.patch('/notifications/', { id: notification.id }).catch(() => {}); setNotifications(notifications.map((item) => item.id === notification.id ? { ...item, read: true } : item)) }
   const openNotifications = async () => { const nextOpen = !noticeOpen; setNoticeOpen(nextOpen); if (nextOpen && unread) { await api.patch('/notifications/', { all: true }).catch(() => {}); setNotifications(notifications.map((item) => ({ ...item, read: true }))) } }
 
   const Sidebar = () => (
-    <aside className={`${collapsed ? 'w-19' : 'w-64'} flex h-full flex-col border-r border-slate-200 bg-[#fffdf5] p-4 transition-all dark:border-[#45484d] dark:bg-[#333538]`}>
-      <div className={`mb-8 flex items-center ${collapsed ? 'justify-center' : 'gap-3 px-2'} py-2`}>
-        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#23C55E] text-white"><CircleDollarSign size={22}/></div>
-        {!collapsed && <div><div className="font-extrabold tracking-tight text-slate-900 dark:text-white">Revnivo</div><div className="text-xs text-slate-500">Income workspace</div></div>}
+    <aside className={`${collapsed ? 'w-19' : 'w-64'} flex h-full flex-col border-r border-slate-200/80 bg-white/90 p-3 shadow-[8px_0_30px_rgb(15_23_42_/_.03)] backdrop-blur-xl transition-all dark:border-white/8 dark:bg-[#101114]/95 dark:shadow-none`}>
+      <div className={`mb-8 flex items-center rounded-2xl border border-slate-200/80 bg-slate-50/80 ${collapsed ? 'justify-center p-2' : 'gap-3 p-3'} dark:border-white/8 dark:bg-white/4`}>
+        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#1688ff] text-white shadow-[0_8px_20px_rgb(22_136_255_/_25%)]"><CircleDollarSign size={21}/></div>
+        {!collapsed && <div className="min-w-0"><div className="truncate font-bold tracking-tight text-slate-900 dark:text-white">Revnivo</div><div className="truncate text-[11px] text-slate-500 dark:text-[#777a84]">Income workspace</div></div>}
       </div>
       <nav className="space-y-1">
+        {!collapsed && <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-[#62656e]">Workspace</p>}
         {isAdmin ? <div>
           <button onClick={() => { setDashboardOpen(!dashboardOpen); if (collapsed) setCollapsed(false) }} className={`${linkClass({ isActive: false })} w-full ${collapsed ? 'justify-center' : ''}`} title="Dashboard"><BarChart3 size={18}/>{!collapsed && <><span className="flex-1 text-left">Dashboard</span><ChevronDown size={16} className={dashboardOpen ? '' : '-rotate-90'}/></>}</button>
-          {dashboardOpen && <div className={collapsed ? 'mt-1 flex flex-col items-center gap-1' : 'ml-5 border-l border-slate-200 pl-3 dark:border-[#555960]'}><NavLink to="/" end className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`} title="Income"><DollarSign size={18}/>{!collapsed && 'Income'}</NavLink><NavLink to="/admin/users" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`} title="Users"><Users size={18}/>{!collapsed && 'Users'}</NavLink></div>}
+          {dashboardOpen && <div className={collapsed ? 'mt-1 flex flex-col items-center gap-1' : 'ml-3 border-l border-slate-200 pl-3 dark:border-white/8'}><NavLink to="/" end className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`} title="Income"><DollarSign size={18}/>{!collapsed && 'Income'}</NavLink><NavLink to="/admin/users" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`} title="Users"><Users size={18}/>{!collapsed && 'Users'}</NavLink></div>}
         </div> : <NavLink to="/" end className={linkClass}><BarChart3 size={18}/>{!collapsed && 'Dashboard'}</NavLink>}
         {baseNav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} onClick={() => setMobileOpen(false)} className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title={label}><span className="relative"><Icon size={18}/>{label === 'Chat' && unreadChat > 0 && <span className="absolute -right-2 -top-2 grid h-4 min-w-4 place-items-center rounded-full bg-[#23C55E] px-0.5 text-[9px] font-bold text-white">{unreadChat}</span>}</span>{!collapsed && label}</NavLink>)}
-        {isAdmin && <NavLink to="/admin/subscriptions" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title="Subscriptions"><WalletCards size={18}/>{!collapsed && 'Subscriptions'}</NavLink>}
+        {isAdmin && <>{!collapsed && <p className="mb-2 mt-7 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-[#62656e]">Administration</p>}<NavLink to="/admin/subscriptions" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title="Subscriptions"><WalletCards size={18}/>{!collapsed && 'Subscriptions'}</NavLink></>}
       </nav>
-      <div className="mt-auto border-t border-slate-200 pt-4 dark:border-[#45484d]">
-        {!collapsed && <div className="mb-3 flex items-center gap-2 px-2"><div className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full bg-[#e8f8ed] font-bold text-[#16843d]">{user?.profile_image_url ? <img src={user.profile_image_url} alt="Profile" className="h-full w-full object-cover"/> : user?.name?.slice(0, 2).toUpperCase()}</div><div className="min-w-0"><div className="truncate text-sm font-semibold">{user?.name}</div><div className="truncate text-xs text-slate-500">{user?.email}</div></div></div>}
-        <button onClick={logout} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-[#3b3e42] ${collapsed ? 'justify-center' : ''}`} title="Logout"><LogOut size={18}/>{!collapsed && 'Logout'}</button>
+      <div className="mt-auto border-t border-slate-200/80 pt-3 dark:border-white/8">
+        {!collapsed && <div className="mb-3 flex items-center gap-2 rounded-xl p-2"><div className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full bg-[#1688ff]/12 font-bold text-[#1688ff] dark:text-[#65b5ff]">{user?.profile_image_url ? <img src={user.profile_image_url} alt="Profile" className="h-full w-full object-cover"/> : user?.name?.slice(0, 2).toUpperCase()}</div><div className="min-w-0"><div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{user?.name}</div><div className="truncate text-[11px] text-slate-500 dark:text-[#777a84]">{user?.email}</div></div></div>}
+        <button onClick={logout} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-rose-50 hover:text-rose-600 dark:text-[#9da0a8] dark:hover:bg-rose-500/10 dark:hover:text-rose-300 ${collapsed ? 'justify-center' : ''}`} title="Logout"><LogOut size={18}/>{!collapsed && 'Log out'}</button>
       </div>
     </aside>
   )

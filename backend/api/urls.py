@@ -14,6 +14,7 @@ urlpatterns = [
     path("admin/coupons/", views.admin_coupons),
     path("notifications/", views.notifications),
     path("support-chat/", views.support_chat),
+    path("chat-presence/", views.chat_presence),
     path("notes/", views.notes),
     path("notes/<str:note_id>/", views.note_detail),
     path("platforms/", views.platforms),
