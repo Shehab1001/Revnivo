@@ -116,6 +116,21 @@ GOOGLE_CLIENT_ID=your-google-web-client-id.apps.googleusercontent.com
 
 For Google sign-in, create a Web application OAuth client in Google Cloud Console. Add these exact Authorized JavaScript origins (without a path or trailing slash): `http://localhost:5173` and `http://127.0.0.1:5173`. Then set the same client ID as `GOOGLE_CLIENT_ID` in `backend/.env` and `VITE_GOOGLE_CLIENT_ID` in `frontend/.env`.
 
+### Password-reset email
+
+Password reset codes are sent through SMTP. Copy `backend/.env.example` to `backend/.env`, then configure these values. For Gmail, enable two-step verification, generate a Google App Password, and use that 16-character password for `EMAIL_HOST_PASSWORD`; do not use the Google account password.
+
+```env
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=your-email@gmail.com
+EMAIL_HOST_PASSWORD=your-16-character-google-app-password
+EMAIL_USE_TLS=true
+DEFAULT_FROM_EMAIL=your-email@gmail.com
+```
+
+Restart the backend after changing `.env`.
+
 ## Run manually
 
 ### Backend

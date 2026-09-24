@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 
 import Loading from '../components/Loading'
 import api from '../services/api'
+import { formatDate } from '../utils/format'
 import { useSortableData } from '../utils/useSortableData.js'
 
 export default function Subscriptions() {
@@ -142,16 +143,7 @@ export default function Subscriptions() {
         <CardBody className="p-0">
           {/* Card heading + search */}
           <div className="border-b border-divider p-5">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h2 className="font-semibold text-foreground">
-                  Users
-                </h2>
-
-                <p className="mt-1 text-xs text-default-500">
-                  Activate trials and manage subscription status.
-                </p>
-              </div>
+            <div className=" ">
 
               <span className="text-xs text-default-400">
                 {filteredUsers.length}{' '}
@@ -297,9 +289,7 @@ export default function Subscriptions() {
                     {/* Trial */}
                     <td className="px-5 py-4 text-xs text-default-500">
                       {user.trial_ends_at
-                        ? new Date(
-                            user.trial_ends_at
-                          ).toLocaleDateString()
+                        ? formatDate(user.trial_ends_at)
                         : '—'}
                     </td>
 
@@ -350,12 +340,8 @@ export default function Subscriptions() {
         </CardBody>
       </Card>
 
-      {/* Pagination OUTSIDE the table/card */}
-      <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
-        <span className="text-xs text-default-400">
-          Page {page} of {pageCount}
-        </span>
-
+      {/* Pagination */}
+      <div className="flex justify-center border-t border-divider pt-4">
         <Pagination
           showControls
           color="primary"

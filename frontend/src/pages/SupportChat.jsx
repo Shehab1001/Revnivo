@@ -1,48 +1,32 @@
 import { Button, Card, CardBody, Chip, Input, Textarea } from '@heroui/react'
 import { Mic, MessageCircle, Paperclip, Search, Smile } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import Loading from '../components/Loading'
+import ConfirmDeleteModal from '../components/ConfirmDeleteModal'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
+import { formatDate, formatTime } from '../utils/format'
 
 function isSameCalendarDay(first, second) {
   if (!first || !second) return false
 
-  const a = new Date(first)
-  const b = new Date(second)
+  return localDateKey(first) === localDateKey(second)
+}
 
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  )
+function localDateKey(value) {
+  return formatDate(value, 'en-CA')
 }
 
 function getMessageDateLabel(value) {
-  const date = new Date(value)
   const now = new Date()
+  const messageDay = localDateKey(value)
 
-  const messageDay = new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate()
-  )
+  if (messageDay === localDateKey(now)) return 'Today'
+  if (messageDay === localDateKey(now.getTime() - 86400000)) return 'Yesterday'
 
-  const today = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate()
-  )
-
-  const differenceInDays = Math.round(
-    (today - messageDay) / 86400000
-  )
-
-  if (differenceInDays === 0) return 'Today'
-  if (differenceInDays === 1) return 'Yesterday'
-
-  return date.toLocaleDateString('en-GB', {
+  return formatDate(value, 'en-GB', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -50,19 +34,23 @@ function getMessageDateLabel(value) {
 }
 
 function formatMessageTime(value) {
-  return new Date(value)
-    .toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    })
-    .toLowerCase()
+  return formatTime(value, 'en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).toLowerCase()
 }
 
-function Avatar({ user }) {
+function Avatar({ user, isAdmin = false }) {
   return (
     <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full bg-primary/10 font-bold text-primary">
-      {user?.profile_image_url ? (
+      {isAdmin ? (
+        <img
+          src="/profile.png"
+          alt="Revnivo Support"
+          className="h-full w-full bg-white object-cover p-1.5"
+        />
+      ) : user?.profile_image_url ? (
         <img
           src={user.profile_image_url}
           alt=""
@@ -135,6 +123,8 @@ function AttachmentPreview({ url, file, own }) {
 
 export default function SupportChat() {
   const { user } = useAuth()
+  const [searchParams] = useSearchParams()
+  const notifiedUserId = searchParams.get('user') || ''
 
   const [contacts, setContacts] = useState([])
   const [selectedUser, setSelectedUser] = useState('')
@@ -146,6 +136,8 @@ export default function SupportChat() {
   const [recording, setRecording] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [contextMenu, setContextMenu] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
 
   const typingTimer = useRef(null)
   const recorderRef = useRef(null)
@@ -319,14 +311,25 @@ export default function SupportChat() {
     const currentLastMessageId =
       messages.at(-1)?.id ?? null
 
-    if (scrollToLatestRef.current) {
+    if (
+      scrollToLatestRef.current &&
+      messagesEndRef.current
+    ) {
       scrollToBottom('auto')
       scrollToLatestRef.current = false
     }
 
     lastMessageIdRef.current =
       currentLastMessageId
-  }, [messages])
+  }, [messages, contacts, selectedUser])
+
+  useEffect(() => {
+    if (user?.role === 'admin' && notifiedUserId) {
+      scrollToLatestRef.current = true
+      lastMessageIdRef.current = null
+      setSelectedUser(notifiedUserId)
+    }
+  }, [notifiedUserId, user?.role])
 
   useEffect(() => {
     if (user?.role === 'admin') {
@@ -614,19 +617,22 @@ export default function SupportChat() {
     messageId,
     mode
   ) => {
-    await api.delete(
-      '/support-chat/',
-      {
-        data: {
-          id: messageId,
-          mode,
-        },
-      }
-    )
-
-    setContextMenu(null)
-
-    await loadMessages()
+    setDeleting(true)
+    try {
+      await api.delete(
+        '/support-chat/',
+        {
+          data: {
+            id: messageId,
+            mode,
+          },
+        }
+      )
+      setDeleteTarget(null)
+      await loadMessages()
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const active = selectedUser
@@ -681,24 +687,20 @@ export default function SupportChat() {
         >
           <button
             className="block w-full rounded-lg px-3 py-2 text-left text-xs text-foreground transition-colors hover:bg-default-100"
-            onClick={() =>
-              deleteMessage(
-                contextMenu.id,
-                'me'
-              )
-            }
+            onClick={() => {
+              setDeleteTarget({ id: contextMenu.id, mode: 'me' })
+              setContextMenu(null)
+            }}
           >
             Delete for me
           </button>
 
           <button
             className="block w-full rounded-lg px-3 py-2 text-left text-xs text-danger transition-colors hover:bg-danger/10"
-            onClick={() =>
-              deleteMessage(
-                contextMenu.id,
-                'everyone'
-              )
-            }
+            onClick={() => {
+              setDeleteTarget({ id: contextMenu.id, mode: 'everyone' })
+              setContextMenu(null)
+            }}
           >
             Delete for everyone
           </button>
@@ -767,6 +769,9 @@ export default function SupportChat() {
                   <div className="relative">
                     <Avatar
                       user={contact}
+                      isAdmin={
+                        contact.id === 'support'
+                      }
                     />
 
                     <span
@@ -796,15 +801,10 @@ export default function SupportChat() {
 
                       {contact.last_message_at && (
                         <time className="shrink-0 text-[10px] text-default-400">
-                          {new Date(
-                            contact.last_message_at
-                          ).toLocaleTimeString(
-                            'en-EG',
-                            {
-                              hour: 'numeric',
-                              minute: '2-digit',
-                            }
-                          )}
+                          {formatTime(contact.last_message_at, 'en-EG', {
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })}
                         </time>
                       )}
                     </div>
@@ -872,6 +872,9 @@ export default function SupportChat() {
                 <div className="relative">
                   <Avatar
                     user={active}
+                    isAdmin={
+                      active.id === 'support'
+                    }
                   />
 
                   <span
@@ -1016,6 +1019,10 @@ export default function SupportChat() {
                                   own
                                     ? user
                                     : active
+                                }
+                                isAdmin={
+                                  message.sender ===
+                                  'admin'
                                 }
                               />
                             ) : (
@@ -1331,6 +1338,14 @@ export default function SupportChat() {
           )}
         </section>
       </Card>
+      <ConfirmDeleteModal
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteMessage(deleteTarget.id, deleteTarget.mode)}
+        loading={deleting}
+        title={deleteTarget?.mode === 'everyone' ? 'Delete for everyone?' : 'Delete message?'}
+        message={deleteTarget?.mode === 'everyone' ? 'This message will be removed for everyone in the conversation.' : 'This message will be hidden from your view.'}
+      />
     </div>
   )
 }
