@@ -1,31 +1,66 @@
-# Revnivo — React + Tailwind + Flowbite + Django REST + MongoDB
+# Revnivo
 
-A full-stack income dashboard for tracking earnings from multiple platforms over months and years.
+Revnivo is a full-stack personal income management platform for freelancers, creators, consultants, and other professionals who earn through multiple platforms or clients. It provides a centralized workspace for recording earnings, organizing income sources, monitoring performance, and maintaining a clear history of financial activity.
 
-## Stack
+The application combines a responsive React dashboard with a Django REST API and MongoDB persistence. Users can manage platforms such as freelance marketplaces, content platforms, client portals, and direct income sources; record earnings in different currencies; review aggregated metrics and charts; and use supporting tools such as notes and support chat. Administrative users have dedicated views for managing users and subscriptions.
 
-- Frontend: React 18, Vite, Tailwind CSS 4, React Router, Recharts, Axios
-- Backend: Python, Django 5.2, Django REST Framework
-- Database: MongoDB through the official PyMongo driver
-- Authentication: JWT Bearer tokens + Django password hashing
-- Money storage: MongoDB Decimal128
-- Platform images: Django media storage in development
+## Product capabilities
 
-## Features
+- User registration, login, Google sign-in, and JWT-protected sessions
+- Private, user-scoped platforms, earnings, notes, notifications, and chat data
+- Dashboard summaries with monthly, yearly, and platform-level income analysis
+- Filtering by currency, date period, and platform
+- Multi-currency earnings with USD conversion support and cached exchange rates
+- Platform management with logos, websites, statuses, search, sorting, table pagination, and drag-and-drop ordering
+- Earnings management with create, edit, delete, search, sorting, pagination, categories, notes, and dates
+- Notes workspace with search and pagination
+- In-app notifications and user-to-user/support chat with media attachments
+- Administrator views for user management and subscription activation
+- Responsive layouts with light and dark themes for desktop and mobile screens
 
-- Register / login
-- Private user-scoped data
-- Light / dark mode
-- Add, edit, and archive income platforms without erasing historical earnings
-- Upload a platform logo/image
-- Add, edit, delete, and search earnings
-- Store date, amount, currency, category, and notes
-- Monthly income chart
-- Lifetime yearly income chart
-- Income-by-platform chart
-- Dashboard filters for year and currency
-- Recent earnings and summary cards
-- Responsive desktop/mobile UI
+## Technology stack
+
+### Frontend
+
+- React 18.3 for the component-based user interface
+- Vite 7 for development, bundling, and production builds
+- React Router 6 for client-side navigation and protected application routes
+- HeroUI for accessible interface primitives such as cards, inputs, selects, chips, buttons, and pagination
+- Tailwind CSS 4 for utility-first styling and responsive layouts
+- Lucide React for interface icons
+- Recharts for dashboard charts and data visualization
+- Axios for API communication through the Vite development proxy
+- Framer Motion for selected interface transitions
+- Flag Icons for currency and country indicators
+
+### Backend
+
+- Python with Django 5.2 as the web framework
+- Django REST Framework for HTTP APIs and serialization
+- PyMongo for direct MongoDB access and document persistence
+- PyJWT for stateless JWT authentication
+- Django CORS Headers for controlled frontend/API communication
+- Pillow for uploaded platform and profile images
+- Google Auth for Google identity-token verification
+- Requests and python-dotenv for external rate services and environment configuration
+
+### Data and infrastructure
+
+- MongoDB 8, accessed through PyMongo
+- MongoDB Decimal128 for precise monetary storage
+- Local Django media storage for uploaded images and chat media during development
+- Docker Compose for an optional local MongoDB service
+- Windows batch launchers for starting the backend, frontend, and Docker-backed development environment
+
+## Architecture
+
+The project is organized as two independently runnable applications:
+
+- `frontend/`: React single-page application responsible for navigation, authentication state, themes, dashboard views, forms, tables, charts, and API calls.
+- `backend/`: Django REST service responsible for authentication, authorization, business logic, MongoDB access, serialization, media handling, exchange-rate conversion, and administrative endpoints.
+- `docker-compose.yml`: Optional MongoDB 8 service with a persistent Docker volume.
+
+The frontend communicates with the backend through `/api` endpoints. In local development, Vite proxies API and media requests to Django on `127.0.0.1:8000`, while the frontend runs on `http://localhost:5173`.
 
 ## Project structure
 
@@ -80,6 +115,21 @@ GOOGLE_CLIENT_ID=your-google-web-client-id.apps.googleusercontent.com
 ```
 
 For Google sign-in, create a Web application OAuth client in Google Cloud Console. Add these exact Authorized JavaScript origins (without a path or trailing slash): `http://localhost:5173` and `http://127.0.0.1:5173`. Then set the same client ID as `GOOGLE_CLIENT_ID` in `backend/.env` and `VITE_GOOGLE_CLIENT_ID` in `frontend/.env`.
+
+### Password-reset email
+
+Password reset codes are sent through SMTP. Copy `backend/.env.example` to `backend/.env`, then configure these values. For Gmail, enable two-step verification, generate a Google App Password, and use that 16-character password for `EMAIL_HOST_PASSWORD`; do not use the Google account password.
+
+```env
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=your-email@gmail.com
+EMAIL_HOST_PASSWORD=your-16-character-google-app-password
+EMAIL_USE_TLS=true
+DEFAULT_FROM_EMAIL=your-email@gmail.com
+```
+
+Restart the backend after changing `.env`.
 
 ## Run manually
 

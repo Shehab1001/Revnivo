@@ -1,7 +1,17 @@
 import { Button, Card, CardBody, Input } from '@heroui/react'
-import { Eye, EyeOff, Moon, Sun } from 'lucide-react'
+import {
+  ArrowRight,
+  Eye,
+  EyeOff,
+  Moon,
+  ShieldCheck,
+  Sparkles,
+  Sun,
+  WalletCards,
+} from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+
 import GoogleAuthButton from '../components/GoogleAuthButton'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
@@ -10,49 +20,431 @@ export default function Register() {
   const { register } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
-  const [form, setForm] = useState({ name: '', email: '', password: '' })
+
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+  })
+
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
 
   const submit = async (e) => {
-    e.preventDefault(); setError(''); setLoading(true)
-    try { await register(form.name, form.email, form.password); navigate('/') }
-    catch (err) {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+
+    try {
+      await register(
+        form.name,
+        form.email,
+        form.password
+      )
+      navigate('/')
+    } catch (err) {
       const data = err.response?.data
-      setError(data?.detail || Object.values(data || {}).flat().join(' ') || 'Registration failed.')
-    } finally { setLoading(false) }
+
+      setError(
+        data?.detail ||
+          Object.values(data || {})
+            .flat()
+            .join(' ') ||
+          'Registration failed.'
+      )
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
-    <div className="min-h-screen overflow-hidden bg-background p-4 text-foreground sm:p-6">
-      <div className="mx-auto flex max-w-7xl justify-end"><Button isIconOnly variant="flat" radius="lg" onPress={toggleTheme} aria-label="Toggle theme">{theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>}</Button></div>
-      <div className="mx-auto grid min-h-[calc(100vh-5rem)] max-w-7xl place-items-center gap-10 py-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-20">
-        <div className="hidden max-w-xl lg:block">
-          <img src="/logo.svg" alt="Revnivo" className="brand-logo mb-10 h-12 w-auto max-w-56 object-contain" />
-          <p className="mb-4 text-sm font-semibold uppercase tracking-[0.22em] text-primary">A better starting point</p>
-          <h1 className="text-5xl font-black leading-[1.05] tracking-tight text-slate-950 dark:text-white xl:text-6xl">Turn scattered payments into a clear income history.</h1>
-          <p className="mt-6 max-w-lg text-lg leading-8 text-slate-500 dark:text-slate-400">Bring your platforms together, understand your currencies, and make every month easier to read.</p>
-          <div className="mt-10 flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400"><span className="h-2 w-2 rounded-full bg-[#23C55E]"/> One workspace for every stream</div>
+    <div className="relative min-h-screen overflow-x-hidden bg-background text-foreground transition-colors duration-300 lg:h-screen lg:min-h-0 lg:overflow-hidden">
+      {/* Soft background glow */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0"
+      >
+        <div className="absolute -left-32 -top-32 h-80 w-80 rounded-full bg-primary/10 blur-3xl sm:h-96 sm:w-96" />
+        <div className="absolute -bottom-40 -right-28 h-[26rem] w-[26rem] rounded-full bg-secondary/10 blur-3xl sm:h-[30rem] sm:w-[30rem]" />
+      </div>
+
+      {/* Full-page engineering grid */}
+      <div
+        aria-hidden="true"
+        className="
+          pointer-events-none
+          absolute
+          inset-0
+          [background-image:linear-gradient(to_right,rgba(15,23,42,0.070)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.070)_1px,transparent_1px)]
+          [background-size:24px_24px]
+          dark:[background-image:linear-gradient(to_right,rgba(255,255,255,0.055)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.055)_1px,transparent_1px)]
+        "
+      />
+
+      {/* Major guide lines */}
+      <div
+        aria-hidden="true"
+        className="
+          pointer-events-none
+          absolute
+          inset-0
+          opacity-70
+          [background-image:linear-gradient(to_right,rgba(15,23,42,0.065)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.065)_1px,transparent_1px)]
+          [background-size:120px_120px]
+          dark:opacity-60
+          dark:[background-image:linear-gradient(to_right,rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.045)_1px,transparent_1px)]
+        "
+      />
+
+      {/* Readability fade */}
+      <div
+        aria-hidden="true"
+        className="
+          pointer-events-none
+          absolute
+          inset-0
+          bg-[radial-gradient(circle_at_55%_48%,transparent_0%,transparent_38%,hsl(var(--heroui-background)/0.24)_78%,hsl(var(--heroui-background)/0.52)_100%)]
+        "
+      />
+
+      <div className="relative z-10 flex min-h-screen flex-col p-4 sm:p-5 lg:h-screen lg:min-h-0 lg:p-5">
+        {/* Top bar */}
+        <div className="mx-auto flex w-full max-w-7xl shrink-0 items-center justify-between">
+          <div className="lg:hidden">
+            <img
+              src="/logo.svg"
+              alt="Revnivo"
+              className="brand-logo h-9 w-auto max-w-44 object-contain"
+            />
+          </div>
+
+          <div className="ml-auto">
+            <Button
+              isIconOnly
+              size="sm"
+              variant="flat"
+              radius="lg"
+              onPress={toggleTheme}
+              aria-label="Toggle theme"
+              className="h-9 w-9 min-w-9 border border-default-200/70 bg-content1/70 text-foreground shadow-sm backdrop-blur-md"
+            >
+              {theme === 'dark' ? (
+                <Sun size={16} />
+              ) : (
+                <Moon size={16} />
+              )}
+            </Button>
+          </div>
         </div>
-        <Card className="w-full max-w-md border-default-200 bg-content1/90 shadow-[0_24px_80px_rgb(15_23_42/0.10)] backdrop-blur-xl dark:border-white/10 dark:bg-[#15161a]/95 dark:shadow-black/30" radius="lg">
-          <CardBody className="p-6 sm:p-8">
-            <div className="mb-8 lg:hidden"><img src="/logo.svg" alt="Revnivo" className="brand-logo h-9 w-auto max-w-44 object-contain" /></div>
-            <h2 className="text-3xl font-bold tracking-tight">Create your account</h2>
-            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Start building a clearer picture of your income.</p>
-            {error && <div className="mt-5 rounded-xl border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700 dark:border-danger-500/30 dark:bg-danger-500/10 dark:text-danger-200">{error}</div>}
-            <form onSubmit={submit} className="mt-7 space-y-4">
-              <Input label="Name" isRequired variant="bordered" radius="lg" value={form.name} onValueChange={(name) => setForm({ ...form, name })} />
-              <Input label="Email" type="email" isRequired variant="bordered" radius="lg" autoComplete="email" value={form.email} onValueChange={(email) => setForm({ ...form, email })} />
-              <Input label="Password" type={showPassword ? 'text' : 'password'} isRequired minLength={8} variant="bordered" radius="lg" autoComplete="new-password" value={form.password} onValueChange={(password) => setForm({ ...form, password })} endContent={<button type="button" className="text-slate-400 hover:text-slate-700 dark:hover:text-white" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}</button>} />
-              <p className="-mt-2 text-xs text-slate-400">Use at least 8 characters.</p>
-              <Button color="primary" type="submit" radius="lg" size="lg" fullWidth isLoading={loading}>{loading ? 'Creating account...' : 'Create account'}</Button>
-            </form>
-            <div className="my-6 flex items-center gap-3 text-xs text-slate-400"><span className="h-px flex-1 bg-slate-200 dark:bg-slate-700"/><span>OR</span><span className="h-px flex-1 bg-slate-200 dark:bg-slate-700"/></div>
-            <GoogleAuthButton />
-            <p className="mt-7 text-center text-sm text-slate-500 dark:text-slate-400">Already have an account? <Link to="/login" className="font-semibold text-primary hover:underline">Sign in</Link></p>
-          </CardBody>
-        </Card>
+
+        {/* Main content fills only the available viewport height */}
+        <div
+          className="
+            mx-auto
+            grid
+            w-full
+            max-w-7xl
+            flex-1
+            min-h-0
+            place-items-center
+            gap-8
+            py-4
+            lg:grid-cols-[1.08fr_0.92fr]
+            lg:gap-14
+            lg:py-2
+            xl:gap-20
+          "
+        >
+          {/* Left marketing side */}
+          <div className="hidden max-w-xl self-center lg:block">
+            <img
+              src="/logo.svg"
+              alt="Revnivo"
+              className="brand-logo mb-4 h-16 w-auto max-w-64 object-contain xl:h-20"
+            />
+
+            <h1 className="mt-4 max-w-xl text-4xl font-extralight leading-[1.04] tracking-tight text-foreground xl:text-[44px]">
+              Build a clearer picture of every income stream.
+            </h1>
+
+            <p className="mt-4 max-w-md text-[13px] leading-5 text-default-500 xl:text-sm xl:leading-6">
+              Bring your platforms, payments, and currencies together in one calm workspace from day one.
+            </p>
+
+            <div className="mt-6 grid max-w-lg gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-default-200/70 bg-content1/60 p-3.5 backdrop-blur-md">
+                <div className="mb-2.5 grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary">
+                  <WalletCards size={16} />
+                </div>
+
+                <div className="text-[13px] font-semibold text-foreground">
+                  Every income stream
+                </div>
+
+                <p className="mt-1 text-[10px] leading-4 text-default-500">
+                  Keep platforms, payments, and currencies together in one organized workspace.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-default-200/70 bg-content1/60 p-3.5 backdrop-blur-md">
+                <div className="mb-2.5 grid h-8 w-8 place-items-center rounded-xl bg-success/10 text-success">
+                  <ShieldCheck size={16} />
+                </div>
+
+                <div className="text-[13px] font-semibold text-foreground">
+                  Private by account
+                </div>
+
+                <p className="mt-1 text-[10px] leading-4 text-default-500">
+                  Your workspace and income records stay tied to your account.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Register card */}
+          <div className="w-full max-w-[400px] self-center">
+            <Card
+              radius="lg"
+              className="
+                w-full
+                overflow-hidden
+                border
+                border-black/16
+                bg-content1/80
+                text-foreground
+                shadow-[0_20px_60px_rgba(15,23,42,0.09)]
+                backdrop-blur-xl
+                dark:border-white/8
+                dark:bg-content1/85
+                dark:shadow-[0_20px_60px_rgba(0,0,0,0.28)]
+              "
+            >
+              <CardBody className="p-6 sm:p-6">
+                <div className="mb-4 lg:hidden">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/10 px-3 py-1.5 text-[11px] font-semibold text-primary">
+                    <Sparkles size={13} />
+                    Create your workspace
+                  </div>
+                </div>
+
+                <div className="mb-4">
+                  <h2 className="text-[26px] font-bold tracking-tight text-foreground">
+                    Create your account
+                  </h2>
+
+                  <p className="mt-1.5 text-xs leading-5 text-default-500">
+                    Start building a clearer picture of your income.
+                  </p>
+                </div>
+
+                {error && (
+                  <div className="mb-3 rounded-xl border border-danger/25 bg-danger/10 p-2.5 text-xs text-danger">
+                    {error}
+                  </div>
+                )}
+
+                <form
+                  onSubmit={submit}
+                  className="space-y-2.5"
+                >
+                  <Input
+                    label="Name"
+                    placeholder="John Doe"
+                    isRequired
+                    labelPlacement="outside"
+                    variant="flat"
+                    radius="lg"
+                    size="md"
+                    autoComplete="name"
+                    value={form.name}
+                    onValueChange={(name) =>
+                      setForm({
+                        ...form,
+                        name,
+                      })
+                    }
+                    classNames={{
+                      base: 'gap-1.5',
+                      label:
+                        'text-[13px] font-semibold text-foreground',
+                      inputWrapper:
+                        'h-10 min-h-10 border border-transparent bg-default-100 px-3.5 shadow-none transition-all duration-200 data-[hover=true]:bg-default-200 group-data-[focus=true]:border-primary/50 group-data-[focus=true]:bg-default-100 group-data-[focus=true]:ring-2 group-data-[focus=true]:ring-primary/10 dark:bg-[#1b1b1f] dark:data-[hover=true]:bg-[#222226] dark:group-data-[focus=true]:bg-[#1b1b1f]',
+                      input:
+                        'text-sm text-foreground placeholder:text-default-400',
+                    }}
+                  />
+
+                  <Input
+                    label="Email"
+                    placeholder="john@example.com"
+                    type="email"
+                    isRequired
+                    labelPlacement="outside"
+                    variant="flat"
+                    radius="lg"
+                    size="md"
+                    autoComplete="email"
+                    value={form.email}
+                    onValueChange={(email) =>
+                      setForm({
+                        ...form,
+                        email,
+                      })
+                    }
+                    classNames={{
+                      base: 'gap-1.5',
+                      label:
+                        'text-[13px] font-semibold text-foreground',
+                      inputWrapper:
+                        'h-10 min-h-10 my-4 border border-transparent bg-default-100 px-3.5 shadow-none transition-all duration-200 data-[hover=true]:bg-default-200 group-data-[focus=true]:border-primary/50 group-data-[focus=true]:bg-default-100 group-data-[focus=true]:ring-2 group-data-[focus=true]:ring-primary/10 dark:bg-[#1b1b1f] dark:data-[hover=true]:bg-[#222226] dark:group-data-[focus=true]:bg-[#1b1b1f]',
+                      input:
+                        'text-sm text-foreground placeholder:text-default-400',
+                    }}
+                  />
+
+                  <Input
+                    label="Password"
+                    placeholder="Create your password"
+                    type={
+                      showPassword
+                        ? 'text'
+                        : 'password'
+                    }
+                    isRequired
+                    minLength={8}
+                    labelPlacement="outside"
+                    variant="flat"
+                    radius="lg"
+                    size="md"
+                    autoComplete="new-password"
+                    value={form.password}
+                    onValueChange={(password) =>
+                      setForm({
+                        ...form,
+                        password,
+                      })
+                    }
+                    description="Must be at least 8 characters."
+                    classNames={{
+                      base: 'gap-1.5',
+                      label:
+                        'text-[13px] font-semibold text-foreground',
+                      inputWrapper:
+                        'h-10 min-h-10 border border-transparent bg-default-100 px-3.5 shadow-none transition-all duration-200 data-[hover=true]:bg-default-200 group-data-[focus=true]:border-primary/50 group-data-[focus=true]:bg-default-100 group-data-[focus=true]:ring-2 group-data-[focus=true]:ring-primary/10 dark:bg-[#1b1b1f] dark:data-[hover=true]:bg-[#222226] dark:group-data-[focus=true]:bg-[#1b1b1f]',
+                      input:
+                        'text-sm text-foreground placeholder:text-default-400',
+                      description:
+                        'mt-0.5 text-[10px] leading-4 text-default-400',
+                    }}
+                    endContent={
+                      <button
+                        type="button"
+                        className="text-default-400 transition-colors hover:text-foreground"
+                        onClick={() =>
+                          setShowPassword(
+                            !showPassword
+                          )
+                        }
+                        aria-label={
+                          showPassword
+                            ? 'Hide password'
+                            : 'Show password'
+                        }
+                      >
+                        {showPassword ? (
+                          <EyeOff size={16} />
+                        ) : (
+                          <Eye size={16} />
+                        )}
+                      </button>
+                    }
+                  />
+
+                  <Button
+                    color="primary"
+                    type="submit"
+                    radius="lg"
+                    size="md"
+                    fullWidth
+                    isLoading={loading}
+                    endContent={
+                      !loading ? (
+                        <ArrowRight size={15} />
+                      ) : null
+                    }
+                    className="h-10 min-h-10 text-sm font-semibold shadow-[0_8px_24px_rgba(0,111,238,0.20)]"
+                  >
+                    {loading
+                      ? 'Creating account...'
+                      : 'Create account'}
+                  </Button>
+                </form>
+
+                <div className="my-3.5 flex items-center gap-3 text-[10px] text-default-400">
+                  <span className="h-px flex-1 bg-divider" />
+                  <span>OR</span>
+                  <span className="h-px flex-1 bg-divider" />
+                </div>
+
+                <div
+                  className="
+                    w-full
+                    [&_button]:h-10
+                    [&_button]:min-h-10
+                    [&_button]:w-full
+                    [&_button]:justify-center
+                    [&_button]:rounded-xl
+                    [&_button]:border
+                    [&_button]:border-default-200
+                    [&_button]:bg-background/60
+                    [&_button]:px-3
+                    [&_button]:text-xs
+                    [&_button]:font-semibold
+                    [&_button]:text-foreground
+                    [&_button]:shadow-none
+                    [&_button]:transition-all
+                    [&_button]:duration-200
+                    hover:[&_button]:border-default-300
+                    hover:[&_button]:bg-default-100
+                    active:[&_button]:scale-[0.995]
+                    dark:[&_button]:border-white/10
+                    dark:[&_button]:bg-background/30
+                    dark:hover:[&_button]:bg-default-100
+                    [&_[role=button]]:h-10
+                    [&_[role=button]]:min-h-10
+                    [&_[role=button]]:w-full
+                    [&_[role=button]]:rounded-xl
+                    [&_[role=button]]:border
+                    [&_[role=button]]:border-default-200
+                    [&_[role=button]]:bg-background/60
+                    [&_[role=button]]:text-foreground
+                    dark:[&_[role=button]]:border-white/10
+                    dark:[&_[role=button]]:bg-background/30
+                    [&_iframe]:w-full
+                  "
+                >
+                  <GoogleAuthButton />
+                </div>
+
+                <p className="mt-4 text-center text-xs text-default-500">
+                  Already have an account?{' '}
+                  <Link
+                    to="/login"
+                    className="font-semibold text-primary hover:underline"
+                  >
+                    Sign in
+                  </Link>
+                </p>
+              </CardBody>
+            </Card>
+
+            <p className="mt-3 text-center text-[10px] text-default-400">
+              Secure access to your Revnivo workspace
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   )
