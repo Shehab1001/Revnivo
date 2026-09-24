@@ -90,7 +90,7 @@ def serialize_earning(doc, platform=None, usd_rate=None):
         "note": doc.get("note", ""),
         "description": doc.get("note", ""),
         "category": doc.get("category", ""),
-        "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None,
+        "created_at": serialize_datetime(doc.get("created_at")),
     }
 
 
@@ -99,7 +99,7 @@ def serialize_note(doc):
         "id": str(doc["_id"]),
         "title": doc.get("title", ""),
         "content": doc.get("content", ""),
-        "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None,
+        "created_at": serialize_datetime(doc.get("created_at")),
         "updated_at": serialize_datetime(doc.get("updated_at")),
     }
 

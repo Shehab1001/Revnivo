@@ -18,6 +18,7 @@ class PlatformSerializer(serializers.Serializer):
     default_currency = serializers.CharField(max_length=8, default="USD")
     logo = serializers.ImageField(required=False, allow_null=True)
     status = serializers.ChoiceField(choices=["working", "applied", "not active", "under review"], default="not active")
+    display_order = serializers.IntegerField(required=False, min_value=0)
 
     def validate_default_currency(self, value):
         return value.strip().upper()

@@ -1,11 +1,11 @@
-@import url('https://fonts.googleapis.com/css2?family=Josefin+Sans:ital,wght@0,100..700;1,100..700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@200..1000&display=swap');
 @import "tailwindcss";
 @plugin "../hero-ui.ts";
 @source "../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}";
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  font-family: "Josefin Sans", sans-serif;
+  font-family: "Cairo", sans-serif;
   color-scheme: light;
   background: hsl(var(--heroui-background));
   color: hsl(var(--heroui-foreground));
@@ -16,6 +16,8 @@ body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input, select, textarea { font: inherit; }
 
 body { background: hsl(var(--heroui-background)); color: hsl(var(--heroui-foreground)); }
+table thead th { cursor: pointer; user-select: none; }
+table thead th:not(:last-child):not(.sortable-header)::after { content: ''; display: inline-block; width: 13px; height: 13px; margin-left: 0.4rem; vertical-align: -2px; background: currentColor; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m21 16-4 4-4-4'/%3E%3Cpath d='M17 20V4'/%3E%3Cpath d='m3 8 4-4 4 4'/%3E%3Cpath d='M7 4v16'/%3E%3C/svg%3E") center / contain no-repeat; opacity: 0.7; }
 html.dark body { background: hsl(var(--heroui-background)); }
 
 .brand-logo { filter: brightness(0); }
@@ -65,6 +67,8 @@ html:not(.dark) .recharts-cartesian-grid-horizontal line { stroke: #e4e7eb !impo
 .dashboard-page [data-slot="trigger"] { border-radius: 0.75rem; }
 .recharts-cartesian-grid-horizontal line { stroke-width: 0.5; }
 .dashboard-panel:hover { border-color: rgb(255 255 255 / 0.14); transform: translateY(-2px); }
+.platform-drag-card { transition: transform 180ms ease, box-shadow 180ms ease, opacity 180ms ease; }
+.platform-drag-card.is-dragging { opacity: 1; transform: scale(1.04) rotate(1deg); box-shadow: 0 18px 34px rgb(15 23 42 / 0.24); z-index: 10; }
 
 @media (prefers-reduced-motion: reduce) {
   .dashboard-reveal { animation: none; }
