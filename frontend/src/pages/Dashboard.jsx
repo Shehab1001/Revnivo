@@ -9,29 +9,112 @@ import Loading from '../components/Loading'
 import api from '../services/api'
 import { useTheme } from '../contexts/ThemeContext'
 import { formatMoney, monthLabel } from '../utils/format'
-import { currencyCountry, currencyOption, detectLocalCurrency, getCurrencyOptions } from '../utils/currencies'
+import { currencyCountry, detectLocalCurrency, getCurrencyOptions } from '../utils/currencies'
 import 'flag-icons/css/flag-icons.min.css'
 
 const platformLineColors = ['#48a4ff', '#b993ff', '#28d8e9', '#37dc8d', '#ffb020', '#ff7096']
 
 
-function Metric({ label, value, note, icon: Icon, accent, trend }) {
-  const [visible, setVisible] = useState(true)
+function splitMetricValue(value) {
+  const text = String(value ?? '')
+  const firstDigit = text.search(/\d/)
+
+  if (firstDigit === -1) {
+    return { prefix: '', amount: text, suffix: '' }
+  }
+
+  let lastDigit = -1
+  for (let index = text.length - 1; index >= 0; index -= 1) {
+    if (/\d/.test(text[index])) {
+      lastDigit = index
+      break
+    }
+  }
+
+  return {
+    prefix: text.slice(0, firstDigit),
+    amount: text.slice(firstDigit, lastDigit + 1),
+    suffix: text.slice(lastDigit + 1),
+  }
+}
+
+
+function Metric({ label, value, note, icon: Icon, accent, trend, visible }) {
   const accents = {
     blue: 'bg-primary/10 text-primary',
     violet: 'bg-secondary/10 text-secondary',
     cyan: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400',
     green: 'bg-success/10 text-success',
   }
+
+  const valueLength = String(value ?? '').length
+  const { prefix, amount, suffix } = splitMetricValue(value)
+
+  const valueSize =
+    valueLength > 28
+      ? 'text-base sm:text-lg'
+      : valueLength > 20
+        ? 'text-lg sm:text-xl'
+        : valueLength > 14
+          ? 'text-xl sm:text-2xl'
+          : 'text-2xl sm:text-[28px]'
+
   return <Card className="dashboard-reveal dashboard-panel border border-default-200/60 bg-content1 text-foreground shadow-sm dark:border-white/5 dark:shadow-none" radius="lg">
     <CardBody className="p-4 sm:p-5">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-default-500">{label}</p>
-          <p className="mt-2 truncate text-2xl font-semibold tracking-tight sm:text-[28px]">{visible ? value : '* * * * *'}</p>
-          <div className="mt-2 flex items-center gap-2"><p className="truncate text-[11px] text-default-400">{visible ? note : '*****'}</p>{visible && trend && <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${trend.direction === 'up' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'}`}>{trend.direction === 'up' ? <TrendingUp size={11}/> : <TrendingDown size={11}/>} {trend.label}</span>}</div>
+
+          <p
+            className={`mt-2 max-w-full whitespace-normal break-words [overflow-wrap:anywhere] font-semibold leading-tight tracking-tight tabular-nums ${valueSize}`}
+            title={visible ? String(value) : undefined}
+          >
+            {visible ? (
+              <>
+                {prefix && (
+                  <span className="mr-1 align-middle text-[0.58em] font-semibold tracking-normal text-default-500">
+                    {prefix.trim()}
+                  </span>
+                )}
+                <span>{amount}</span>
+                {suffix && (
+                  <span className="ml-1 align-middle text-[0.58em] font-semibold tracking-normal text-default-500">
+                    {suffix.trim()}
+                  </span>
+                )}
+              </>
+            ) : (
+              '* * * * *'
+            )}
+          </p>
+
+          <div className="mt-2 flex min-w-0 items-center gap-2">
+            <p className="min-w-0 truncate text-[11px] text-default-400">
+              {visible ? note : '*****'}
+            </p>
+
+            {visible && trend && (
+              <span
+                className={`inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                  trend.direction === 'up'
+                    ? 'bg-success/10 text-success'
+                    : 'bg-danger/10 text-danger'
+                }`}
+              >
+                {trend.direction === 'up' ? (
+                  <TrendingUp size={11} />
+                ) : (
+                  <TrendingDown size={11} />
+                )}
+                {trend.label}
+              </span>
+            )}
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2"><Button isIconOnly size="sm" variant="light" className="h-8 w-8 min-w-8 text-default-500 hover:text-foreground" onPress={() => setVisible((current) => !current)} aria-label={visible ? `Hide ${label}` : `Show ${label}`} title={visible ? 'Hide data' : 'Show data'}>{visible ? <Eye size={16}/> : <EyeOff size={16}/>}</Button><span className={`grid h-9 w-9 place-items-center rounded-xl ${accents[accent]}`}><Icon size={17}/></span></div>
+
+        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${accents[accent]}`}>
+          <Icon size={17} />
+        </span>
       </div>
     </CardBody>
   </Card>
@@ -61,16 +144,19 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [currency, setCurrency] = useState(detectLocalCurrency)
+  const localCurrency = useMemo(() => detectLocalCurrency(), [])
+  const [currency, setCurrency] = useState('')
+  const [currencySearch, setCurrencySearch] = useState('')
   const [period, setPeriod] = useState('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [platformId, setPlatformId] = useState('all')
   const [activeTab, setActiveTab] = useState('Overview')
   const [error, setError] = useState('')
-  const localCurrency = useMemo(() => detectLocalCurrency(), [])
+  const [dataVisible, setDataVisible] = useState(true)
+  const effectiveCurrency = currency || localCurrency
 
-  const load = async (selectedCurrency = currency, selectedPeriod = period, selectedPlatform = platformId, selectedFrom = dateFrom, selectedTo = dateTo) => {
+  const load = async (selectedCurrency = effectiveCurrency, selectedPeriod = period, selectedPlatform = platformId, selectedFrom = dateFrom, selectedTo = dateTo) => {
     setLoading(true)
     setError('')
     try {
@@ -90,7 +176,7 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    if (period !== 'custom' || (dateFrom && dateTo)) load(currency, period, platformId, dateFrom, dateTo)
+    if (period !== 'custom' || (dateFrom && dateTo)) load(effectiveCurrency, period, platformId, dateFrom, dateTo)
   }, [currency, period, platformId, dateFrom, dateTo])
 
   const monthly = useMemo(() => (data?.monthly || []).map((item) => ({ ...item, label: monthLabel(item.month, item.year) })), [data])
@@ -99,7 +185,29 @@ export default function Dashboard() {
   const monthlyByPlatform = useMemo(() => (data?.monthly_by_platform || []).map((item) => ({ ...item, label: `${monthLabel(item.month, item.year)} ${String(item.year).slice(-2)}` })), [data])
   const platformLines = useMemo(() => platformBreakdown.map((platform, index) => ({ ...platform, dataKey: platform.platform_id, color: platformLineColors[index % platformLineColors.length] })), [platformBreakdown])
   const summary = data?.summary || {}
-  const currencyOptions = useMemo(() => getCurrencyOptions(data?.filters?.currencies || []), [data])
+  const currencyOptions = useMemo(() => getCurrencyOptions(), [])
+  const currencySearchOptions = useMemo(() => {
+    let regionNames = null
+
+    try {
+      regionNames = new Intl.DisplayNames(['en'], { type: 'region' })
+    } catch {
+      regionNames = null
+    }
+
+    return currencyOptions.map((item) => {
+      const countryCode = currencyCountry(item.code)
+      const countryName =
+        regionNames && countryCode
+          ? regionNames.of(String(countryCode).toUpperCase()) || ''
+          : ''
+
+      return {
+        ...item,
+        searchText: `${item.code} ${item.name || ''} ${countryName}`.trim(),
+      }
+    })
+  }, [currencyOptions])
   const currentMonthIncome = Number(summary.current_month_income || 0)
   const previousMonthIncome = Number(summary.previous_month_income || 0)
   const monthTrend = previousMonthIncome > 0
@@ -118,40 +226,212 @@ export default function Dashboard() {
       <div className="dashboard-reveal flex flex-col gap-4 border-b border-divider pb-5 md:flex-row md:items-end md:justify-between">
         <div><p className="text-xs font-medium uppercase tracking-[0.22em] text-primary">{activeTab}</p><h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Welcome back, {user?.name || 'there'}</h1><p className="mt-1 text-sm text-default-500">Here is what is happening with your income today.</p></div>
         
-        <div className="flex flex-wrap justify-end gap-2">
-          <Select aria-label="Platform" className="w-full sm:w-40" size="md" variant="bordered" selectedKeys={new Set([String(platformId)])} onSelectionChange={(keys) => setPlatformId(Array.from(keys)[0] || 'all')}><SelectItem key="all">All platforms</SelectItem>{(data?.filters?.platforms || []).map((platform) => <SelectItem key={String(platform.id)}>{platform.name}</SelectItem>)}</Select>
-          <Autocomplete aria-label="Currency" className="w-full sm:w-52" size="md" variant="bordered" selectedKey={currency} onSelectionChange={(key) => key && setCurrency(String(key))} onFocus={(event) => event.target.select()} onClick={(event) => event.target.select()} allowsCustomValue={false} placeholder="Currency"><AutocompleteItem key={localCurrency} textValue={`${localCurrency} ${currencyOption(localCurrency).name}`}><span className="inline-flex items-center gap-2"><span aria-hidden="true" className={`fi fi-${currencyCountry(localCurrency)} dashboard-currency-flag`}/><span>{localCurrency}</span></span></AutocompleteItem>{currencyOptions.filter((item) => item.code !== localCurrency).map((item) => <AutocompleteItem key={item.code} textValue={`${item.code} ${item.name}`}><span className="inline-flex items-center gap-2"><span aria-hidden="true" className={`fi fi-${currencyCountry(item.code)} dashboard-currency-flag`}/><span>{item.code}</span></span></AutocompleteItem>)}</Autocomplete>
-          <Select aria-label="Date range" className={period === 'custom' ? 'basis-full' : 'w-full sm:w-40'} size="md" variant="bordered" selectedKeys={new Set([period])} onSelectionChange={(keys) => setPeriod(Array.from(keys)[0] || 'all')}>
-            <SelectItem key="all">All time</SelectItem>
-            <SelectItem key="last_week">Last week</SelectItem>
-            <SelectItem key="last_month">Last month</SelectItem>
-            <SelectItem key="last_3_months">Last 3 months</SelectItem>
-            <SelectItem key="last_year">Last year</SelectItem>
-            <SelectItem key="custom">Custom</SelectItem>
-          </Select>
-          {period === 'custom' && <div className="grid basis-full grid-cols-2 gap-2"><Input aria-label="From date" type="date" size="sm" variant="bordered" label="From" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)}/><Input aria-label="To date" type="date" size="sm" variant="bordered" label="To" value={dateTo} min={dateFrom} onChange={(event) => setDateTo(event.target.value)}/></div>}
+        <div className="flex w-full flex-col items-stretch gap-3 md:w-auto md:items-end">
+          <Button
+            isIconOnly
+            radius="full"
+            variant="flat"
+            size="lg"
+            onPress={() => setDataVisible((current) => !current)}
+            aria-label={dataVisible ? 'Hide dashboard data' : 'Show dashboard data'}
+            title={dataVisible ? 'Hide dashboard data' : 'Show dashboard data'}
+            className="
+              h-12
+              w-12
+              min-w-12
+              border
+              border-default-200/70
+              bg-content1
+              text-foreground
+              shadow-sm
+              transition-all
+              duration-200
+              hover:scale-105
+              hover:bg-default-100
+              dark:border-white/8
+            "
+          >
+            {dataVisible ? <Eye size={23} /> : <EyeOff size={23} />}
+          </Button>
+
+          <div className="flex w-full flex-wrap justify-end gap-2">
+            <Select
+              aria-label="Platform"
+              className="w-full sm:w-44"
+              size="md"
+              variant="flat"
+              radius="full"
+              startContent={<Layers3 size={16} className="shrink-0 text-default-600 dark:text-zinc-100" />}
+              selectedKeys={new Set([String(platformId)])}
+              onSelectionChange={(keys) => setPlatformId(Array.from(keys)[0] || 'all')}
+              classNames={{
+                trigger:
+                  'h-11 min-h-11 border-0 bg-default-100 px-3.5 shadow-none transition-colors data-[hover=true]:bg-default-200 dark:bg-[#242426] dark:data-[hover=true]:bg-[#303033]',
+                value:
+                  'text-sm font-semibold text-foreground dark:text-white',
+                selectorIcon:
+                  'right-3 text-default-500 dark:text-zinc-200',
+                popoverContent:
+                  'rounded-2xl border border-default-200 bg-content1 p-1 shadow-xl dark:border-white/10 dark:bg-[#202023]',
+              }}
+            >
+              <SelectItem key="all">All platforms</SelectItem>
+              {(data?.filters?.platforms || []).map((platform) => (
+                <SelectItem key={String(platform.id)}>{platform.name}</SelectItem>
+              ))}
+            </Select>
+
+            <Autocomplete
+              aria-label="Currency"
+              placeholder="Currency"
+              className="w-full sm:w-44"
+              size="md"
+              variant="flat"
+              radius="full"
+              isClearable={false}
+              allowsCustomValue={false}
+              selectedKey={currency || null}
+              inputValue={currencySearch}
+              onInputChange={setCurrencySearch}
+              onSelectionChange={(key) => {
+                if (!key) return
+                const selected = String(key)
+                setCurrency(selected)
+                setCurrencySearch(selected)
+              }}
+              onOpenChange={(isOpen) => {
+                if (isOpen) {
+                  // Open with an empty query so every currency is visible.
+                  setCurrencySearch('')
+                } else if (currency) {
+                  // The closed pill shows only the selected currency code.
+                  setCurrencySearch(currency)
+                }
+              }}
+              defaultFilter={(textValue, inputValue) =>
+                textValue.toLowerCase().includes(inputValue.trim().toLowerCase())
+              }
+              inputProps={{
+                startContent: (
+                  <CircleDollarSign
+                    size={16}
+                    className="shrink-0 text-default-600 dark:text-zinc-100"
+                  />
+                ),
+                classNames: {
+                  inputWrapper:
+                    'h-11 min-h-11 border-0 bg-default-100 px-3.5 shadow-none transition-colors data-[hover=true]:bg-default-200 group-data-[focus=true]:bg-default-100 dark:bg-[#242426] dark:data-[hover=true]:bg-[#303033] dark:group-data-[focus=true]:bg-[#242426]',
+                  input:
+                    'text-sm font-semibold text-foreground placeholder:text-default-500 dark:text-white',
+                  innerWrapper: 'gap-2',
+                },
+              }}
+              classNames={{
+                selectorButton:
+                  'text-default-500 dark:text-zinc-200',
+                popoverContent:
+                  'rounded-2xl border border-default-200 bg-content1 p-1 shadow-xl dark:border-white/10 dark:bg-[#202023]',
+              }}
+            >
+              {currencySearchOptions.map((item) => (
+                <AutocompleteItem
+                  key={item.code}
+                  textValue={item.searchText}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <span
+                      aria-hidden="true"
+                      className={`fi fi-${currencyCountry(item.code)} dashboard-currency-flag`}
+                    />
+                    <span className="font-semibold">{item.code}</span>
+                  </span>
+                </AutocompleteItem>
+              ))}
+            </Autocomplete>
+
+            <Select
+              aria-label="Date range"
+              className="w-full sm:w-44" 
+              size="md"
+              variant="flat"
+              radius="full"
+              startContent={<CalendarDays size={16} className="shrink-0 text-default-600 dark:text-zinc-100" />}
+              selectedKeys={new Set([period])}
+              onSelectionChange={(keys) => setPeriod(Array.from(keys)[0] || 'all')}
+              classNames={{
+                trigger:
+                  'h-11 min-h-11 border-0 bg-default-100 px-3.5 shadow-none transition-colors data-[hover=true]:bg-default-200 dark:bg-[#242426] dark:data-[hover=true]:bg-[#303033]',
+                value:
+                  'text-sm font-semibold text-foreground dark:text-white',
+                selectorIcon:
+                  'right-3 text-default-500 dark:text-zinc-200',
+                popoverContent:
+                  'rounded-2xl border border-default-200 bg-content1 p-1 shadow-xl dark:border-white/10 dark:bg-[#202023]',
+              }}
+            >
+              <SelectItem key="all">All time</SelectItem>
+              <SelectItem key="last_week">Last week</SelectItem>
+              <SelectItem key="last_month">Last month</SelectItem>
+              <SelectItem key="last_3_months">Last 3 months</SelectItem>
+              <SelectItem key="last_year">Last year</SelectItem>
+              <SelectItem key="custom">Custom</SelectItem>
+            </Select>
+            {period === 'custom' && (
+              <div className="ml-auto grid w-full grid-cols-2 gap-2 sm:w-[320px]">
+                <Input
+                  aria-label="From date"
+                  type="date"
+                  size="sm"
+                  variant="bordered"
+                  radius="lg"
+                  label="From"
+                  value={dateFrom}
+                  onChange={(event) => setDateFrom(event.target.value)}
+                  classNames={{
+                    inputWrapper:
+                      'h-11 min-h-11 border-default-300 bg-background/50 dark:border-white/15 dark:bg-[#151517]',
+                  }}
+                />
+                <Input
+                  aria-label="To date"
+                  type="date"
+                  size="sm"
+                  variant="bordered"
+                  radius="lg"
+                  label="To"
+                  value={dateTo}
+                  min={dateFrom}
+                  onChange={(event) => setDateTo(event.target.value)}
+                  classNames={{
+                    inputWrapper:
+                      'h-11 min-h-11 border-default-300 bg-background/50 dark:border-white/15 dark:bg-[#151517]',
+                  }}
+                />
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {error && <div className="rounded-xl border border-danger/25 bg-danger/10 p-3 text-sm text-danger">{error}</div>}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Revenue" value={formatMoney(summary.total_income, currency)} note={period === 'all' ? 'Across all time' : period === 'custom' ? `${dateFrom || 'Start'} to ${dateTo || 'End'}` : period.replaceAll('_', ' ')} icon={CircleDollarSign} accent="blue"/>
-        <Metric label="This month income" value={formatMoney(currentMonthIncome, currency)} note="vs last month" trend={monthTrend} icon={CircleDollarSign} accent="green"/>
-        <Metric label="Transactions" value={summary.transactions || 0} note="Recorded payments" icon={ReceiptText} accent="violet"/>
-        <Metric label="Platforms" value={summary.platforms || 0} note="Active platform records" icon={Layers3} accent="cyan"/>
+        <Metric label="Revenue" value={formatMoney(summary.total_income, effectiveCurrency)} note={period === 'all' ? 'Across all time' : period === 'custom' ? `${dateFrom || 'Start'} to ${dateTo || 'End'}` : period.replaceAll('_', ' ')} icon={CircleDollarSign} accent="blue" visible={dataVisible}/>
+        <Metric label="This month income" value={formatMoney(currentMonthIncome, effectiveCurrency)} note="vs last month" trend={monthTrend} icon={CircleDollarSign} accent="green" visible={dataVisible}/>
+        <Metric label="Transactions" value={summary.transactions || 0} note="Recorded payments" icon={ReceiptText} accent="violet" visible={dataVisible}/>
+        <Metric label="Platforms" value={summary.platforms || 0} note="Active platform records" icon={Layers3} accent="cyan" visible={dataVisible}/>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.18fr_.82fr]">
-        <Panel><PanelHeading title="Sales performance" subtitle={`Monthly income in ${currency}`} action={<Select aria-label="Chart period" size="sm" className="w-32" variant="flat" defaultSelectedKeys={['all']}><SelectItem key="all">All time</SelectItem></Select>}/>{yearly.length ? <div className="h-72"><ResponsiveContainer width="100%" height="100%"><BarChart data={yearly} barCategoryGap="22%"><CartesianGrid stroke={chartTheme.grid} vertical={false}/><XAxis dataKey="label" axisLine={false} tickLine={false} tick={axisStyle}/><YAxis axisLine={false} tickLine={false} tick={axisStyle}/><Tooltip contentStyle={tooltipStyle} labelStyle={{ color: chartTheme.tooltip.color }} itemStyle={{ color: chartTheme.tooltip.color }} formatter={(value) => formatMoney(value, currency)}/><Bar dataKey="total" fill={chartTheme.primary} radius={[7, 7, 2, 2]} /></BarChart></ResponsiveContainer></div> : <EmptyState title="No earnings history" text="Add dated earnings to build this chart."/>}</Panel>
-        <Panel><PanelHeading title="Income by platform" subtitle="Each line represents a platform" action={<Button isIconOnly size="sm" variant="light" className="text-default-500 hover:text-foreground" onPress={() => load()} aria-label="Refresh chart"><RefreshCw size={15}/></Button>}/>{monthlyByPlatform.length && platformLines.length ? <div className="h-72"><ResponsiveContainer width="100%" height="100%"><LineChart data={monthlyByPlatform}><CartesianGrid stroke={chartTheme.grid} vertical={false}/><XAxis dataKey="label" axisLine={false} tickLine={false} tick={axisStyle}/><YAxis axisLine={false} tickLine={false} tick={axisStyle}/><Tooltip contentStyle={tooltipStyle} labelStyle={{ color: chartTheme.tooltip.color }} itemStyle={{ color: chartTheme.tooltip.color }} formatter={(value, name) => [formatMoney(value, currency), platformLines.find((platform) => platform.dataKey === name)?.name || name]}/><Legend wrapperStyle={{ color: chartTheme.legend, fontSize: 11 }} formatter={(value) => platformLines.find((platform) => platform.dataKey === value)?.name || value}/>{platformLines.map((platform) => <Line key={platform.dataKey} type="monotone" dataKey={platform.dataKey} name={platform.dataKey} stroke={platform.color} strokeWidth={2.5} dot={false} connectNulls activeDot={{ r: 4 }}/>)}</LineChart></ResponsiveContainer></div> : <EmptyState title="No platform trend" text="Add earnings to see a line for each platform."/>}</Panel>
+        <Panel><PanelHeading title="Sales performance" subtitle={`Monthly income in ${effectiveCurrency}`} action={<Select aria-label="Chart period" size="sm" className="w-32" variant="flat" defaultSelectedKeys={['all']}><SelectItem key="all">All time</SelectItem></Select>}/>{yearly.length ? <div className={`h-72 transition-all duration-300 ${dataVisible ? '' : 'pointer-events-none select-none blur-md'} `}><ResponsiveContainer width="100%" height="100%"><BarChart data={yearly} barCategoryGap="22%"><CartesianGrid stroke={chartTheme.grid} vertical={false}/><XAxis dataKey="label" axisLine={false} tickLine={false} tick={axisStyle}/><YAxis axisLine={false} tickLine={false} tick={axisStyle}/><Tooltip contentStyle={tooltipStyle} labelStyle={{ color: chartTheme.tooltip.color }} itemStyle={{ color: chartTheme.tooltip.color }} formatter={(value) => formatMoney(value, effectiveCurrency)}/><Bar dataKey="total" fill={chartTheme.primary} radius={[7, 7, 2, 2]} /></BarChart></ResponsiveContainer></div> : <EmptyState title="No earnings history" text="Add dated earnings to build this chart."/>}</Panel>
+        <Panel><PanelHeading title="Income by platform" subtitle="Each line represents a platform" action={<Button isIconOnly size="sm" variant="light" className="text-default-500 hover:text-foreground" onPress={() => load()} aria-label="Refresh chart"><RefreshCw size={15}/></Button>}/>{monthlyByPlatform.length && platformLines.length ? <div className={`h-72 transition-all duration-300 ${dataVisible ? '' : 'pointer-events-none select-none blur-md'} `}><ResponsiveContainer width="100%" height="100%"><LineChart data={monthlyByPlatform}><CartesianGrid stroke={chartTheme.grid} vertical={false}/><XAxis dataKey="label" axisLine={false} tickLine={false} tick={axisStyle}/><YAxis axisLine={false} tickLine={false} tick={axisStyle}/><Tooltip contentStyle={tooltipStyle} labelStyle={{ color: chartTheme.tooltip.color }} itemStyle={{ color: chartTheme.tooltip.color }} formatter={(value, name) => [formatMoney(value, effectiveCurrency), platformLines.find((platform) => platform.dataKey === name)?.name || name]}/><Legend wrapperStyle={{ color: chartTheme.legend, fontSize: 11 }} formatter={(value) => platformLines.find((platform) => platform.dataKey === value)?.name || value}/>{platformLines.map((platform) => <Line key={platform.dataKey} type="monotone" dataKey={platform.dataKey} name={platform.dataKey} stroke={platform.color} strokeWidth={2.5} dot={false} connectNulls activeDot={{ r: 4 }}/>)}</LineChart></ResponsiveContainer></div> : <EmptyState title="No platform trend" text="Add earnings to see a line for each platform."/>}</Panel>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[.8fr_1.2fr]">
-        <Panel><PanelHeading title="Platform mix" subtitle="Where your selected income comes from"/>{platformBreakdown.length ? <div className="space-y-5">{platformBreakdown.slice(0, 5).map((platform, index) => { const total = platformBreakdown.reduce((sum, item) => sum + Number(item.total || 0), 0); const percent = total ? Math.round((Number(platform.total || 0) / total) * 100) : 0; const barColors = ['bg-primary', 'bg-secondary', 'bg-cyan-500', 'bg-success', 'bg-warning']; return <div key={platform.platform_id} className="group"><div className="mb-2.5 flex items-center justify-between gap-3 text-xs"><span className="truncate font-medium text-foreground/85">{platform.name}</span><span className="rounded-full bg-default-100 px-2 py-0.5 text-[10px] font-semibold text-default-500 ring-1 ring-inset ring-default-200/70">{percent}%</span></div><div className="relative h-2.5 overflow-hidden rounded-full bg-default-200/60"><div className={`relative h-full rounded-full ${barColors[index % barColors.length]} transition-all duration-700 ease-out group-hover:brightness-110`} style={{ width: `${percent}%` }}><div className="absolute inset-0 bg-gradient-to-b from-white/25 to-transparent"/></div></div></div>})}</div> : <EmptyState title="No platform totals" text="Your platform mix will appear here."/>}</Panel>
-        <Panel><PanelHeading title="Recent earnings" subtitle="Latest entries for the selected filters" action={<Button size="sm" variant="flat" color="primary" onPress={() => navigate('/earnings')} endContent={<ArrowUpRight size={14}/>}>View all</Button>}/>{data?.recent?.length ? <div className="overflow-x-auto"><table className="w-full min-w-130 text-left"><thead><tr className="border-b border-divider text-[10px] uppercase tracking-wider text-default-500"><th className="pb-3 font-medium">Description</th><th className="pb-3 font-medium">Platform</th><th className="pb-3 font-medium">Date</th><th className="pb-3 text-right font-medium">Amount</th></tr></thead><tbody className="divide-y divide-divider">{data.recent.map((item) => <tr key={item.id} className="text-xs transition-colors hover:bg-default-100/60"><td className="py-3 pr-3"><div className="flex items-center gap-2"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><ReceiptText size={13}/></span><span className="truncate text-foreground/90">{item.category || 'Uncategorized'}</span></div></td><td className="py-3 pr-3 text-default-500">{item.platform_name || '—'}</td><td className="py-3 pr-3 text-default-400">{item.earned_at}</td><td className="py-3 text-right font-semibold text-success">+{formatMoney(item.amount_usd, 'USD')}</td></tr>)}</tbody></table></div> : <EmptyState title="No earnings yet" text="Add your first payment to start the timeline."/>}</Panel>
+        <Panel><PanelHeading title="Platform mix" subtitle="Where your selected income comes from"/>{platformBreakdown.length ? <div className={`space-y-5 transition-all duration-300 ${dataVisible ? '' : 'pointer-events-none select-none blur-md'} `}>{platformBreakdown.slice(0, 5).map((platform, index) => { const total = platformBreakdown.reduce((sum, item) => sum + Number(item.total || 0), 0); const percent = total ? Math.round((Number(platform.total || 0) / total) * 100) : 0; const barColors = ['bg-primary', 'bg-secondary', 'bg-cyan-500', 'bg-success', 'bg-warning']; return <div key={platform.platform_id} className="group"><div className="mb-2.5 flex items-center justify-between gap-3 text-xs"><span className="truncate font-medium text-foreground/85">{platform.name}</span><span className="rounded-full bg-default-100 px-2 py-0.5 text-[10px] font-semibold text-default-500 ring-1 ring-inset ring-default-200/70">{percent}%</span></div><div className="relative h-2.5 overflow-hidden rounded-full bg-default-200/60"><div className={`relative h-full rounded-full ${barColors[index % barColors.length]} transition-all duration-700 ease-out group-hover:brightness-110`} style={{ width: `${percent}%` }}><div className="absolute inset-0 bg-gradient-to-b from-white/25 to-transparent"/></div></div></div>})}</div> : <EmptyState title="No platform totals" text="Your platform mix will appear here."/>}</Panel>
+        <Panel><PanelHeading title="Recent earnings" subtitle="Latest entries for the selected filters" action={<Button size="sm" variant="flat" color="primary" onPress={() => navigate('/earnings')} endContent={<ArrowUpRight size={14}/>}>View all</Button>}/>{data?.recent?.length ? <div className={`overflow-x-auto transition-all duration-300 ${dataVisible ? '' : 'pointer-events-none select-none blur-md'} `}><table className="w-full min-w-130 text-left"><thead><tr className="border-b border-divider text-[10px] uppercase tracking-wider text-default-500"><th className="pb-3 font-medium">Description</th><th className="pb-3 font-medium">Platform</th><th className="pb-3 font-medium">Date</th><th className="pb-3 text-right font-medium">Amount</th></tr></thead><tbody className="divide-y divide-divider">{data.recent.map((item) => <tr key={item.id} className="text-xs transition-colors hover:bg-default-100/60"><td className="py-3 pr-3"><div className="flex items-center gap-2"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><ReceiptText size={13}/></span><span className="truncate text-foreground/90">{item.category || 'Uncategorized'}</span></div></td><td className="py-3 pr-3 text-default-500">{item.platform_name || '—'}</td><td className="py-3 pr-3 text-default-400">{item.earned_at}</td><td className="py-3 text-right font-semibold text-success">+{formatMoney(item.amount_usd, 'USD')}</td></tr>)}</tbody></table></div> : <EmptyState title="No earnings yet" text="Add your first payment to start the timeline."/>}</Panel>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-divider pt-4 text-xs text-default-400"><span>Updated just now from your income records</span><div className="flex items-center gap-2"><Button size="sm" variant="light" className="text-default-500 hover:text-foreground" startContent={<CalendarDays size={14}/>}>{period === 'all' ? 'All time' : period.replaceAll('_', ' ')}</Button><Button size="sm" variant="light" className="text-default-500 hover:text-foreground" startContent={<Download size={14}/>} onPress={() => navigate('/earnings')}>Export view</Button></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-divider pt-4 text-xs text-default-400"><span>Updated just now from your income records</span><div className="flex items-center gap-2"><Button size="sm" variant="light" className="text-default-500 hover:text-foreground" startContent={<CalendarDays size={14}/>}>{dataVisible ? (period === 'all' ? 'All time' : period.replaceAll('_', ' ')) : '*****'}</Button><Button size="sm" variant="light" className="text-default-500 hover:text-foreground" startContent={<Download size={14}/>} onPress={() => navigate('/earnings')}>Export view</Button></div></div>
     </div>
   </div>
 }

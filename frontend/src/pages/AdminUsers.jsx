@@ -18,7 +18,9 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 
 import Loading from '../components/Loading'
+import ConfirmDeleteModal from '../components/ConfirmDeleteModal'
 import api from '../services/api'
+import { formatDate } from '../utils/format'
 
 const SUPERADMIN_EMAIL = 'dev.shehabsaid@gmail.com'
 
@@ -86,6 +88,8 @@ export default function AdminUsers() {
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
 
   const pageSize = 8
 
@@ -171,29 +175,24 @@ export default function AdminUsers() {
     }
   }
 
-  const remove = async (user) => {
-    if (
-      protectedUser(user) ||
-      !window.confirm(
-        `Delete ${user.email}? This cannot be undone.`
-      )
-    ) {
-      return
-    }
-
+  const remove = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
     try {
       await api.delete('/admin/users/', {
         data: {
-          id: user.id,
+          id: deleteTarget.id,
         },
       })
-
-      load()
+      setDeleteTarget(null)
+      await load()
     } catch (err) {
       setError(
         err.response?.data?.detail ||
           'Could not delete this user.'
       )
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -421,9 +420,7 @@ export default function AdminUsers() {
                     {/* Trial */}
                     <td className="px-5 py-4 text-default-500">
                       {user.trial_ends_at
-                        ? new Date(
-                            user.trial_ends_at
-                          ).toLocaleDateString()
+                        ? formatDate(user.trial_ends_at)
                         : '—'}
                     </td>
 
@@ -459,7 +456,7 @@ export default function AdminUsers() {
                               variant="light"
                               color="danger"
                               radius="lg"
-                              onPress={() => remove(user)}
+                              onPress={() => setDeleteTarget(user)}
                               aria-label="Delete user"
                             >
                               <Trash2 size={15} />
@@ -496,29 +493,31 @@ export default function AdminUsers() {
             className="
               flex
               items-center
-              justify-between
+              justify-center
               border-t
               border-divider
               px-4
               py-4
             "
           >
-            <span className="hidden text-xs text-default-400 sm:block">
-              Page {page} of {pages}
-            </span>
-
-            <div className="mx-auto sm:mx-0">
-              <Pagination
-                showControls
-                color="primary"
-                page={page}
-                total={pages}
-                onChange={setPage}
-              />
-            </div>
+            <Pagination
+              showControls
+              color="primary"
+              page={page}
+              total={pages}
+              onChange={setPage}
+            />
           </div>
         </CardBody>
       </Card>
+      <ConfirmDeleteModal
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={remove}
+        loading={deleting}
+        title="Delete user?"
+        message={`Delete ${deleteTarget?.email || 'this user'}? This action cannot be undone.`}
+      />
     </div>
   )
 }

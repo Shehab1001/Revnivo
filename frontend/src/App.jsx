@@ -6,6 +6,7 @@ import Earnings from './pages/Earnings'
 import Login from './pages/Login'
 import Platforms from './pages/Platforms'
 import Register from './pages/Register'
+import ForgotPassword from './pages/ForgotPassword'
 import Notes from './pages/Notes'
 import Settings from './pages/Settings'
 import AdminUsers from './pages/AdminUsers'
@@ -27,6 +28,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<PublicOnly><Login/></PublicOnly>} />
       <Route path="/register" element={<PublicOnly><Register/></PublicOnly>} />
+      <Route path="/forgot-password" element={<PublicOnly><ForgotPassword/></PublicOnly>} />
       <Route element={<Protected><AppShell/></Protected>}>
         <Route path="/" element={<Dashboard/>}/>
         <Route path="/platforms" element={<Platforms/>}/>

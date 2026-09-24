@@ -25,6 +25,7 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 
 import EmptyState from '../components/EmptyState'
+import ConfirmDeleteModal from '../components/ConfirmDeleteModal'
 import Loading from '../components/Loading'
 import Modal from '../components/Modal'
 import PlatformAvatar from '../components/PlatformAvatar'
@@ -64,6 +65,8 @@ export default function Platforms() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [draggedId, setDraggedId] = useState(null)
   const [tablePage, setTablePage] = useState(1)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
 
   const tablePageSize = 8
 
@@ -102,17 +105,16 @@ export default function Platforms() {
     setModal(true)
   }
 
-  const remove = async (platform) => {
-    if (
-      !window.confirm(
-        `Remove ${platform.name} from your active platforms? Existing earnings will stay in your history.`
-      )
-    ) {
-      return
+  const remove = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      await api.delete(`/platforms/${deleteTarget.id}/`)
+      setDeleteTarget(null)
+      await load()
+    } finally {
+      setDeleting(false)
     }
-
-    await api.delete(`/platforms/${platform.id}/`)
-    await load()
   }
 
   const visibleItems = useMemo(
@@ -292,7 +294,7 @@ export default function Platforms() {
                   size="sm"
                   variant="light"
                   color="danger"
-                  onPress={() => remove(platform)}
+                  onPress={() => setDeleteTarget(platform)}
                   aria-label={`Delete ${platform.name}`}
                 >
                   <Trash2 size={15} />
@@ -476,7 +478,7 @@ export default function Platforms() {
                         size="sm"
                         variant="light"
                         color="danger"
-                        onPress={() => remove(platform)}
+                        onPress={() => setDeleteTarget(platform)}
                         aria-label={`Delete ${platform.name}`}
                       >
                         <Trash2 size={15} />
@@ -764,6 +766,14 @@ export default function Platforms() {
       )}
 
       {renderModal()}
+      <ConfirmDeleteModal
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={remove}
+        loading={deleting}
+        title="Delete platform?"
+        message={`Remove ${deleteTarget?.name || 'this platform'} from active platforms? Existing earnings will remain in your history.`}
+      />
     </div>
   )
 }

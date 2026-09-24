@@ -3,6 +3,7 @@ from decimal import Decimal
 import base64
 import binascii
 import json
+import secrets
 from time import monotonic
 from urllib.request import urlopen
 
@@ -10,6 +11,8 @@ from bson import ObjectId
 from bson.decimal128 import Decimal128
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
+from django.core.mail import EmailMultiAlternatives
+from html import escape
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from pymongo import ASCENDING, DESCENDING
@@ -30,6 +33,7 @@ from .utils import (
     oid,
     save_logo,
     save_upload,
+    serialize_datetime,
     serialize_note,
     serialize_earning,
     serialize_platform,
@@ -65,7 +69,7 @@ def serialize_user(doc, request):
         "email": doc.get("email", ""),
         "profile_image_url": avatar_url or doc.get("google_picture", ""),
         "role": "admin" if is_admin_doc(doc) else doc.get("role", "user"),
-        "trial_ends_at": doc.get("trial_ends_at").isoformat() if doc.get("trial_ends_at") else None,
+        "trial_ends_at": serialize_datetime(doc.get("trial_ends_at")),
         "subscription_status": doc.get("subscription_status", "trial"),
     }
 
@@ -194,6 +198,426 @@ def login(request):
         return Response({"detail": "Invalid email or password."}, status=status.HTTP_401_UNAUTHORIZED)
     token = create_access_token(str(doc["_id"]), email)
     return Response({"token": token, "user": serialize_user(doc, request)})
+
+
+def send_password_reset_email(email, code):
+    """
+    Send a branded Revnivo password-reset OTP email.
+
+    A plain-text fallback is included for email clients that do not render HTML.
+    """
+    minutes = settings.PASSWORD_RESET_OTP_MINUTES
+    safe_email = escape(email)
+
+    subject = "Your Revnivo password reset code"
+
+    text_content = (
+        "Revnivo password reset\n\n"
+        f"We received a request to reset the password for {email}.\n\n"
+        f"Your verification code is: {code}\n\n"
+        f"This code expires in {minutes} minutes.\n\n"
+        "If you did not request this password reset, you can safely ignore this email.\n\n"
+        "For your security, never share this code with anyone."
+    )
+
+    html_content = f"""
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="color-scheme" content="light">
+        <meta name="supported-color-schemes" content="light">
+        <title>Revnivo Password Reset</title>
+      </head>
+
+      <body style="margin:0;padding:0;background-color:#f4f7fb;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+        <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+          Your Revnivo verification code is {code}. It expires in {minutes} minutes.
+        </div>
+
+        <table
+          role="presentation"
+          width="100%"
+          cellpadding="0"
+          cellspacing="0"
+          border="0"
+          style="width:100%;margin:0;padding:0;background-color:#f4f7fb;"
+        >
+          <tr>
+            <td align="center" style="padding:36px 16px;">
+              <table
+                role="presentation"
+                width="100%"
+                cellpadding="0"
+                cellspacing="0"
+                border="0"
+                style="
+                  width:100%;
+                  max-width:600px;
+                  background-color:#ffffff;
+                  border:1px solid #e7edf5;
+                  border-radius:22px;
+                  overflow:hidden;
+                  box-shadow:0 18px 55px rgba(15,23,42,0.08);
+                "
+              >
+                <!-- Header -->
+                <tr>
+                  <td
+                    align="center"
+                    style="
+                      padding:34px 32px 30px;
+                      background-color:#006fee;
+                      background-image:linear-gradient(135deg,#006fee 0%,#1688ff 100%);
+                    "
+                  >
+                    <div
+                      style="
+                        display:inline-block;
+                        margin:0;
+                        font-size:30px;
+                        line-height:36px;
+                        font-weight:800;
+                        letter-spacing:-0.8px;
+                        color:#ffffff;
+                      "
+                    >
+                      Revnivo
+                    </div>
+
+                    <div
+                      style="
+                        margin-top:8px;
+                        font-size:13px;
+                        line-height:20px;
+                        font-weight:600;
+                        letter-spacing:0.3px;
+                        color:#dcecff;
+                      "
+                    >
+                      Secure password recovery
+                    </div>
+                  </td>
+                </tr>
+
+                <!-- Content -->
+                <tr>
+                  <td style="padding:36px 34px 32px;">
+                    <h1
+                      style="
+                        margin:0;
+                        font-size:28px;
+                        line-height:36px;
+                        font-weight:800;
+                        letter-spacing:-0.6px;
+                        color:#111827;
+                      "
+                    >
+                      Reset your password
+                    </h1>
+
+                    <p
+                      style="
+                        margin:12px 0 0;
+                        font-size:15px;
+                        line-height:24px;
+                        color:#667085;
+                      "
+                    >
+                      We received a request to reset the password for your Revnivo account.
+                    </p>
+
+                    <table
+                      role="presentation"
+                      width="100%"
+                      cellpadding="0"
+                      cellspacing="0"
+                      border="0"
+                      style="margin-top:20px;"
+                    >
+                      <tr>
+                        <td
+                          style="
+                            padding:13px 15px;
+                            background-color:#f8fafc;
+                            border:1px solid #e5eaf1;
+                            border-radius:12px;
+                            font-size:13px;
+                            line-height:20px;
+                            color:#667085;
+                          "
+                        >
+                          Account:
+                          <span style="font-weight:700;color:#1f2937;">
+                            {safe_email}
+                          </span>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <p
+                      style="
+                        margin:26px 0 10px;
+                        font-size:14px;
+                        line-height:22px;
+                        font-weight:600;
+                        color:#344054;
+                      "
+                    >
+                      Use this verification code to continue:
+                    </p>
+
+                    <!-- OTP -->
+                    <table
+                      role="presentation"
+                      width="100%"
+                      cellpadding="0"
+                      cellspacing="0"
+                      border="0"
+                    >
+                      <tr>
+                        <td
+                          align="center"
+                          style="
+                            padding:25px 18px;
+                            background-color:#f3f8ff;
+                            border:1px solid #cfe3ff;
+                            border-radius:16px;
+                          "
+                        >
+                          <div
+                            style="
+                              font-family:'Courier New',Courier,monospace;
+                              font-size:38px;
+                              line-height:44px;
+                              font-weight:800;
+                              letter-spacing:9px;
+                              color:#006fee;
+                              white-space:nowrap;
+                            "
+                          >
+                            {code}
+                          </div>
+
+                          <div
+                            style="
+                              margin-top:10px;
+                              font-size:12px;
+                              line-height:18px;
+                              color:#667085;
+                            "
+                          >
+                            Expires in
+                            <strong style="color:#344054;">
+                              {minutes} minutes
+                            </strong>
+                          </div>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <!-- Security notice -->
+                    <table
+                      role="presentation"
+                      width="100%"
+                      cellpadding="0"
+                      cellspacing="0"
+                      border="0"
+                      style="margin-top:24px;"
+                    >
+                      <tr>
+                        <td
+                          style="
+                            padding:16px 18px;
+                            background-color:#fffaf0;
+                            border:1px solid #f5dfb3;
+                            border-radius:14px;
+                          "
+                        >
+                          <div
+                            style="
+                              font-size:13px;
+                              line-height:20px;
+                              font-weight:700;
+                              color:#8a5a00;
+                            "
+                          >
+                            Security reminder
+                          </div>
+
+                          <div
+                            style="
+                              margin-top:5px;
+                              font-size:13px;
+                              line-height:21px;
+                              color:#7a6540;
+                            "
+                          >
+                            Never share this verification code with anyone.
+                            Revnivo will never ask you for this code by email,
+                            chat, or phone.
+                          </div>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <p
+                      style="
+                        margin:24px 0 0;
+                        font-size:13px;
+                        line-height:21px;
+                        color:#98a2b3;
+                      "
+                    >
+                      If you did not request a password reset, you can safely ignore
+                      this email. Your current password will remain unchanged.
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- Footer -->
+                <tr>
+                  <td
+                    align="center"
+                    style="
+                      padding:22px 28px;
+                      background-color:#f9fafb;
+                      border-top:1px solid #edf0f4;
+                    "
+                  >
+                    <div
+                      style="
+                        font-size:13px;
+                        line-height:20px;
+                        font-weight:700;
+                        color:#344054;
+                      "
+                    >
+                      Revnivo
+                    </div>
+
+                    <div
+                      style="
+                        margin-top:4px;
+                        font-size:11px;
+                        line-height:18px;
+                        color:#98a2b3;
+                      "
+                    >
+                      Secure access to your income workspace
+                    </div>
+
+                    <div
+                      style="
+                        margin-top:8px;
+                        font-size:10px;
+                        line-height:16px;
+                        color:#b0b8c4;
+                      "
+                    >
+                      This is an automated security email. Please do not reply.
+                    </div>
+                  </td>
+                </tr>
+              </table>
+
+              <div
+                style="
+                  max-width:600px;
+                  margin-top:16px;
+                  padding:0 12px;
+                  text-align:center;
+                  font-size:11px;
+                  line-height:17px;
+                  color:#98a2b3;
+                "
+              >
+                © Revnivo. All rights reserved.
+              </div>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+
+    message = EmailMultiAlternatives(
+        subject=subject,
+        body=text_content,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[email],
+    )
+    message.attach_alternative(html_content, "text/html")
+    message.send(fail_silently=False)
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def forgot_password(request):
+    email = str(request.data.get("email", "")).strip().lower()
+    if not email:
+        return Response({"detail": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+    if not settings.EMAIL_HOST:
+        return Response({"detail": "Email delivery is not configured. Set EMAIL_HOST and restart the backend."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    db = get_db()
+    ensure_indexes()
+    user = db.users.find_one({"email": email}, {"_id": 1})
+    if not user:
+        # Keep the response identical to avoid confirming registered email addresses.
+        return Response({"detail": "If this email has an account, a verification code has been sent."})
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    now = utcnow()
+    reset = {
+        "email": email,
+        "code_hash": make_password(code),
+        "attempts": 0,
+        "created_at": now,
+        "expires_at": now + timedelta(minutes=settings.PASSWORD_RESET_OTP_MINUTES),
+    }
+    db.password_reset_otps.replace_one({"email": email}, reset, upsert=True)
+
+    try:
+        send_password_reset_email(email, code)
+    except Exception:
+        db.password_reset_otps.delete_one({"email": email, "code_hash": reset["code_hash"]})
+        return Response({"detail": "Unable to send the verification code. Please try again later."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    return Response({"detail": "If this email has an account, a verification code has been sent."})
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def reset_password(request):
+    email = str(request.data.get("email", "")).strip().lower()
+    code = str(request.data.get("code", "")).strip()
+    password = str(request.data.get("password", ""))
+    if not email or not code or not password:
+        return Response({"detail": "Email, verification code, and new password are required."}, status=status.HTTP_400_BAD_REQUEST)
+    if len(code) != 6 or not code.isdigit():
+        return Response({"detail": "Enter the 6-digit verification code."}, status=status.HTTP_400_BAD_REQUEST)
+    if len(password) < 8:
+        return Response({"detail": "Password must contain at least 8 characters."}, status=status.HTTP_400_BAD_REQUEST)
+
+    db = get_db()
+    reset = db.password_reset_otps.find_one({"email": email})
+    if not reset or reset.get("expires_at", now := utcnow()) <= now:
+        db.password_reset_otps.delete_one({"email": email})
+        return Response({"detail": "This verification code has expired. Request a new one."}, status=status.HTTP_400_BAD_REQUEST)
+    if reset.get("attempts", 0) >= 5:
+        db.password_reset_otps.delete_one({"email": email})
+        return Response({"detail": "Too many incorrect attempts. Request a new code."}, status=status.HTTP_400_BAD_REQUEST)
+    if not check_password(code, reset["code_hash"]):
+        db.password_reset_otps.update_one({"_id": reset["_id"]}, {"$inc": {"attempts": 1}})
+        return Response({"detail": "Incorrect verification code."}, status=status.HTTP_400_BAD_REQUEST)
+
+    result = db.users.update_one({"email": email}, {"$set": {"password_hash": make_password(password), "auth_provider": "password", "updated_at": utcnow()}})
+    db.password_reset_otps.delete_one({"_id": reset["_id"]})
+    if not result.matched_count:
+        return Response({"detail": "Unable to reset this password."}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({"detail": "Password reset successfully."})
 
 
 @api_view(["POST"])
@@ -355,7 +779,7 @@ def subscriptions(request):
     result = []
     for doc in docs:
         trial_ends = doc.get("trial_ends_at")
-        result.append({**serialize_user(doc, request), "trial_active": is_active_trial(trial_ends), "payment_method": doc.get("payment_method"), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None})
+        result.append({**serialize_user(doc, request), "trial_active": is_active_trial(trial_ends), "payment_method": doc.get("payment_method"), "created_at": serialize_datetime(doc.get("created_at"))})
     plan = db.settings.find_one({"key": "subscription_plan"}) or {"price": 3.0}
     return Response({"plan": {"price": float(plan.get("price", 3.0)), "currency": "USD", "trial_days": 30}, "users": result})
 
@@ -427,12 +851,19 @@ def admin_coupons(request):
     return Response({"status": "updated"})
 
 
-@api_view(["GET", "PATCH"])
+@api_view(["GET", "PATCH", "DELETE"])
 def notifications(request):
     db = get_db()
     owner = owner_oid(request)
     viewer = db.users.find_one({"_id": owner})
     query = {"$or": [{"owner_id": None}, {"owner_id": owner}]}
+    if is_admin_doc(viewer):
+        query["kind"] = {"$in": ["user", "chat", "subscription"]}
+    else:
+        query["kind"] = "chat"
+    if request.method == "DELETE":
+        db.notifications.delete_many(query)
+        return Response(status=status.HTTP_204_NO_CONTENT)
     if request.method == "PATCH":
         if request.data.get("all"):
             db.notifications.update_many(query, {"$set": {"read": True}})
@@ -441,7 +872,7 @@ def notifications(request):
             if notification_id:
                 db.notifications.update_one({"_id": notification_id, **query}, {"$set": {"read": True}})
     docs = db.notifications.find(query).sort("created_at", DESCENDING).limit(50)
-    return Response([{**{key: doc.get(key) for key in ("kind", "title", "message", "read", "chat_user_id")}, "id": str(doc["_id"]), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None} for doc in docs])
+    return Response([{**{key: doc.get(key) for key in ("kind", "title", "message", "read", "chat_user_id")}, "id": str(doc["_id"]), "created_at": serialize_datetime(doc.get("created_at"))} for doc in docs])
 
 
 @api_view(["GET", "POST", "PATCH", "DELETE"])
@@ -487,7 +918,7 @@ def support_chat(request):
                 "typing": bool(typing_until and utcnow() < typing_until),
                 "unread_count": unread_count,
                 "last_message": latest.get("content", "") if latest else "",
-                "last_message_at": latest.get("created_at").isoformat() if latest and latest.get("created_at") else None,
+                "last_message_at": serialize_datetime(latest.get("created_at")) if latest else None,
             })
         return Response(summaries)
     if request.method == "POST":
@@ -516,7 +947,7 @@ def support_chat(request):
         if owner in doc.get("deleted_for", []):
             continue
         attachment = doc.get("attachment", "")
-        result.append({**{key: doc.get(key) for key in ("content", "sender", "message_type")}, "deleted": bool(doc.get("deleted")), "id": str(doc["_id"]), "user_id": str(doc["user_id"]), "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None, "attachment_url": request.build_absolute_uri(f"{settings.MEDIA_URL}{attachment}") if attachment else ""})
+        result.append({**{key: doc.get(key) for key in ("content", "sender", "message_type")}, "deleted": bool(doc.get("deleted")), "id": str(doc["_id"]), "user_id": str(doc["user_id"]), "created_at": serialize_datetime(doc.get("created_at")), "attachment_url": request.build_absolute_uri(f"{settings.MEDIA_URL}{attachment}") if attachment else ""})
     return Response(result)
 
 
@@ -633,7 +1064,6 @@ def platforms(request):
         "updated_at": utcnow(),
     }
     result = db.platforms.insert_one(doc)
-    create_notification("platform", "Platform added", f"{doc['name']} was added to your account.", owner)
     doc["_id"] = result.inserted_id
     return Response(serialize_platform(doc, request), status=status.HTTP_201_CREATED)
 
@@ -672,7 +1102,6 @@ def platform_detail(request, platform_id):
         updates["logo"] = save_logo(data["logo"])
     db.platforms.update_one({"_id": platform_oid, "owner_id": owner}, {"$set": updates})
     doc.update(updates)
-    create_notification("platform", "Platform updated", f"{doc['name']} was updated.", owner)
     return Response(serialize_platform(doc, request))
 
 
@@ -739,7 +1168,6 @@ def earnings(request):
     }
     result = db.earnings.insert_one(doc)
     doc["_id"] = result.inserted_id
-    create_notification("earning", "Earning added", f"An earning was added for {platform.get('name', 'a platform')}.", owner)
     return Response(serialize_earning(doc, platform, current_currency_rates()), status=status.HTTP_201_CREATED)
 
 
@@ -787,7 +1215,6 @@ def earning_detail(request, earning_id):
     doc.update(updates)
     if platform is None:
         platform = db.platforms.find_one({"_id": doc.get("platform_id"), "owner_id": owner})
-    create_notification("earning", "Earning updated", "An earning was updated.", owner)
     return Response(serialize_earning(doc, platform, current_currency_rates()))
 
 

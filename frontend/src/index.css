@@ -1,11 +1,11 @@
-@import url('https://fonts.googleapis.com/css2?family=Josefin+Sans:ital,wght@0,100..700;1,100..700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@200..1000&display=swap');
 @import "tailwindcss";
 @plugin "../hero-ui.ts";
 @source "../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}";
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  font-family: "Josefin Sans", sans-serif;
+  font-family: "Cairo", sans-serif;
   color-scheme: light;
   background: hsl(var(--heroui-background));
   color: hsl(var(--heroui-foreground));
