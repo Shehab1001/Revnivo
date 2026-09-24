@@ -18,34 +18,34 @@ const platformLineColors = ['#48a4ff', '#b993ff', '#28d8e9', '#37dc8d', '#ffb020
 function Metric({ label, value, note, icon: Icon, accent, trend }) {
   const [visible, setVisible] = useState(true)
   const accents = {
-    blue: 'bg-[#1688ff]/12 text-[#4aa3ff]',
-    violet: 'bg-[#a679ff]/12 text-[#b993ff]',
-    cyan: 'bg-[#16c8db]/12 text-[#28d8e9]',
-    green: 'bg-[#25d17f]/12 text-[#37dc8d]',
+    blue: 'bg-primary/10 text-primary',
+    violet: 'bg-secondary/10 text-secondary',
+    cyan: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400',
+    green: 'bg-success/10 text-success',
   }
-  return <Card className="dashboard-reveal dashboard-panel border-white/6 bg-[#15161a] text-white shadow-none" radius="lg">
+  return <Card className="dashboard-reveal dashboard-panel border border-default-200/60 bg-content1 text-foreground shadow-sm dark:border-white/5 dark:shadow-none" radius="lg">
     <CardBody className="p-4 sm:p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-medium text-[#858891]">{label}</p>
+          <p className="text-xs font-medium text-default-500">{label}</p>
           <p className="mt-2 truncate text-2xl font-semibold tracking-tight sm:text-[28px]">{visible ? value : '* * * * *'}</p>
-          <div className="mt-2 flex items-center gap-2"><p className="truncate text-[11px] text-[#676a73]">{visible ? note : '*****'}</p>{visible && trend && <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${trend.direction === 'up' ? 'bg-[#25d17f]/12 text-[#37dc8d]' : 'bg-[#ff5d73]/12 text-[#ff8090]'}`}>{trend.direction === 'up' ? <TrendingUp size={11}/> : <TrendingDown size={11}/>} {trend.label}</span>}</div>
+          <div className="mt-2 flex items-center gap-2"><p className="truncate text-[11px] text-default-400">{visible ? note : '*****'}</p>{visible && trend && <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${trend.direction === 'up' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'}`}>{trend.direction === 'up' ? <TrendingUp size={11}/> : <TrendingDown size={11}/>} {trend.label}</span>}</div>
         </div>
-        <div className="flex shrink-0 items-center gap-2"><Button isIconOnly size="sm" variant="light" className="h-8 w-8 min-w-8 text-[#858891] hover:text-white" onPress={() => setVisible((current) => !current)} aria-label={visible ? `Hide ${label}` : `Show ${label}`} title={visible ? 'Hide data' : 'Show data'}>{visible ? <Eye size={16}/> : <EyeOff size={16}/>}</Button><span className={`grid h-9 w-9 place-items-center rounded-xl ${accents[accent]}`}><Icon size={17}/></span></div>
+        <div className="flex shrink-0 items-center gap-2"><Button isIconOnly size="sm" variant="light" className="h-8 w-8 min-w-8 text-default-500 hover:text-foreground" onPress={() => setVisible((current) => !current)} aria-label={visible ? `Hide ${label}` : `Show ${label}`} title={visible ? 'Hide data' : 'Show data'}>{visible ? <Eye size={16}/> : <EyeOff size={16}/>}</Button><span className={`grid h-9 w-9 place-items-center rounded-xl ${accents[accent]}`}><Icon size={17}/></span></div>
       </div>
     </CardBody>
   </Card>
 }
 
 function Panel({ children, className = '' }) {
-  return <Card className={`dashboard-reveal dashboard-panel border-white/6 bg-[#15161a] text-white shadow-none ${className}`} radius="lg">
+  return <Card className={`dashboard-reveal dashboard-panel border border-default-200/60 bg-content1 text-foreground shadow-sm dark:border-white/5 dark:shadow-none ${className}`} radius="lg">
     <CardBody className="p-4 sm:p-5">{children}</CardBody>
   </Card>
 }
 
 function PanelHeading({ title, subtitle, action }) {
   return <div className="mb-5 flex items-start justify-between gap-3">
-    <div><h2 className="text-sm font-semibold text-white">{title}</h2>{subtitle && <p className="mt-1 text-xs text-[#70737c]">{subtitle}</p>}</div>
+    <div><h2 className="text-sm font-semibold text-foreground">{title}</h2>{subtitle && <p className="mt-1 text-xs text-default-500">{subtitle}</p>}</div>
     {action}
   </div>
 }
@@ -54,8 +54,8 @@ export default function Dashboard() {
   const { user } = useAuth()
   const { theme } = useTheme()
   const chartTheme = theme === 'dark'
-    ? { tooltip: { backgroundColor: '#18191d', border: '1px solid #303239', borderRadius: 12, color: '#fff' }, axis: { fill: '#c5c7cc', fontSize: 11 }, grid: '#25272c', legend: '#c5c7cc' }
-    : { tooltip: { backgroundColor: '#ffffff', border: '1px solid #d4d8df', borderRadius: 12, color: '#11181c' }, axis: { fill: '#525a65', fontSize: 11 }, grid: '#e4e7eb', legend: '#525a65' }
+    ? { tooltip: { backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: 12, color: '#f4f4f5' }, axis: { fill: '#a1a1aa', fontSize: 11 }, grid: '#27272a', legend: '#a1a1aa', primary: '#338ef7' }
+    : { tooltip: { backgroundColor: '#ffffff', border: '1px solid #e4e4e7', borderRadius: 12, color: '#18181b' }, axis: { fill: '#71717a', fontSize: 11 }, grid: '#e4e4e7', legend: '#71717a', primary: '#006fee' }
   const tooltipStyle = chartTheme.tooltip
   const axisStyle = chartTheme.axis
   const navigate = useNavigate()
@@ -108,15 +108,15 @@ export default function Dashboard() {
 
   if (loading && !data) return <Loading label="Loading your income dashboard..." />
 
-  return <div className="dashboard-page -m-4 min-h-[calc(100vh-4rem)] bg-[#0b0c0f] p-4 text-white sm:-m-6 sm:p-6 lg:-m-8 lg:p-8">
+  return <div className="dashboard-page -m-4 min-h-[calc(100vh-4rem)] bg-background p-4 text-foreground transition-colors duration-300 sm:-m-6 sm:p-6 lg:-m-8 lg:p-8">
     <div className="mx-auto max-w-360 space-y-5">
       <div className="dashboard-reveal flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
       
-        <div className="flex items-center justify-between gap-3 text-xs text-[#777a84] sm:justify-end"><span className="hidden sm:inline">Live income workspace</span><span className="h-2 w-2 rounded-full bg-[#25d17f] shadow-[0_0_12px_#25d17f]"/><Button size="sm" color="primary" radius="full" onPress={() => navigate('/earnings')} startContent={<ArrowUpRight size={14}/>}>Add earning</Button></div>
+        <div className="flex items-center justify-between gap-3 text-xs text-default-500 sm:justify-end"><span className="hidden sm:inline">Live income workspace</span><span className="h-2 w-2 rounded-full bg-success shadow-[0_0_12px_hsl(var(--heroui-success))]"/><Button size="sm" color="primary" radius="full" onPress={() => navigate('/earnings')} startContent={<ArrowUpRight size={14}/>}>Add earning</Button></div>
       </div>
 
-      <div className="dashboard-reveal flex flex-col gap-4 border-b border-white/8 pb-5 md:flex-row md:items-end md:justify-between">
-        <div><p className="text-xs font-medium uppercase tracking-[0.22em] text-[#1688ff]">{activeTab}</p><h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">Welcome back, {user?.name || 'there'}</h1><p className="mt-1 text-sm text-[#777a84]">Here is what is happening with your income today.</p></div>
+      <div className="dashboard-reveal flex flex-col gap-4 border-b border-divider pb-5 md:flex-row md:items-end md:justify-between">
+        <div><p className="text-xs font-medium uppercase tracking-[0.22em] text-primary">{activeTab}</p><h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Welcome back, {user?.name || 'there'}</h1><p className="mt-1 text-sm text-default-500">Here is what is happening with your income today.</p></div>
         
         <div className="flex flex-wrap justify-end gap-2">
           <Select aria-label="Platform" className="w-full sm:w-40" size="md" variant="bordered" selectedKeys={new Set([String(platformId)])} onSelectionChange={(keys) => setPlatformId(Array.from(keys)[0] || 'all')}><SelectItem key="all">All platforms</SelectItem>{(data?.filters?.platforms || []).map((platform) => <SelectItem key={String(platform.id)}>{platform.name}</SelectItem>)}</Select>
@@ -133,7 +133,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {error && <div className="rounded-xl border border-danger-400/30 bg-danger-400/10 p-3 text-sm text-danger-200">{error}</div>}
+      {error && <div className="rounded-xl border border-danger/25 bg-danger/10 p-3 text-sm text-danger">{error}</div>}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric label="Revenue" value={formatMoney(summary.total_income, currency)} note={period === 'all' ? 'Across all time' : period === 'custom' ? `${dateFrom || 'Start'} to ${dateTo || 'End'}` : period.replaceAll('_', ' ')} icon={CircleDollarSign} accent="blue"/>
         <Metric label="This month income" value={formatMoney(currentMonthIncome, currency)} note="vs last month" trend={monthTrend} icon={CircleDollarSign} accent="green"/>
@@ -142,16 +142,16 @@ export default function Dashboard() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.18fr_.82fr]">
-        <Panel><PanelHeading title="Sales performance" subtitle={`Monthly income in ${currency}`} action={<Select aria-label="Chart period" size="sm" className="w-32" variant="flat" defaultSelectedKeys={['all']}><SelectItem key="all">All time</SelectItem></Select>}/>{yearly.length ? <div className="h-72"><ResponsiveContainer width="100%" height="100%"><BarChart data={yearly} barCategoryGap="22%"><CartesianGrid stroke="#25272c" vertical={false}/><XAxis dataKey="label" axisLine={false} tickLine={false} tick={axisStyle}/><YAxis axisLine={false} tickLine={false} tick={axisStyle}/><Tooltip contentStyle={tooltipStyle} formatter={(value) => formatMoney(value, currency)}/><Bar dataKey="total" fill="#1688ff" radius={[7, 7, 2, 2]} /></BarChart></ResponsiveContainer></div> : <EmptyState title="No earnings history" text="Add dated earnings to build this chart."/>}</Panel>
-        <Panel><PanelHeading title="Income by platform" subtitle="Each line represents a platform" action={<Button isIconOnly size="sm" variant="light" className="text-[#858891]" onPress={() => load()} aria-label="Refresh chart"><RefreshCw size={15}/></Button>}/>{monthlyByPlatform.length && platformLines.length ? <div className="h-72"><ResponsiveContainer width="100%" height="100%"><LineChart data={monthlyByPlatform}><CartesianGrid stroke="#25272c" vertical={false}/><XAxis dataKey="label" axisLine={false} tickLine={false} tick={axisStyle}/><YAxis axisLine={false} tickLine={false} tick={axisStyle}/><Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatMoney(value, currency), platformLines.find((platform) => platform.dataKey === name)?.name || name]}/><Legend wrapperStyle={{ color: '#9da0a8', fontSize: 11 }} formatter={(value) => platformLines.find((platform) => platform.dataKey === value)?.name || value}/>{platformLines.map((platform) => <Line key={platform.dataKey} type="monotone" dataKey={platform.dataKey} name={platform.dataKey} stroke={platform.color} strokeWidth={2.5} dot={false} connectNulls activeDot={{ r: 4 }}/>)}</LineChart></ResponsiveContainer></div> : <EmptyState title="No platform trend" text="Add earnings to see a line for each platform."/>}</Panel>
+        <Panel><PanelHeading title="Sales performance" subtitle={`Monthly income in ${currency}`} action={<Select aria-label="Chart period" size="sm" className="w-32" variant="flat" defaultSelectedKeys={['all']}><SelectItem key="all">All time</SelectItem></Select>}/>{yearly.length ? <div className="h-72"><ResponsiveContainer width="100%" height="100%"><BarChart data={yearly} barCategoryGap="22%"><CartesianGrid stroke={chartTheme.grid} vertical={false}/><XAxis dataKey="label" axisLine={false} tickLine={false} tick={axisStyle}/><YAxis axisLine={false} tickLine={false} tick={axisStyle}/><Tooltip contentStyle={tooltipStyle} labelStyle={{ color: chartTheme.tooltip.color }} itemStyle={{ color: chartTheme.tooltip.color }} formatter={(value) => formatMoney(value, currency)}/><Bar dataKey="total" fill={chartTheme.primary} radius={[7, 7, 2, 2]} /></BarChart></ResponsiveContainer></div> : <EmptyState title="No earnings history" text="Add dated earnings to build this chart."/>}</Panel>
+        <Panel><PanelHeading title="Income by platform" subtitle="Each line represents a platform" action={<Button isIconOnly size="sm" variant="light" className="text-default-500 hover:text-foreground" onPress={() => load()} aria-label="Refresh chart"><RefreshCw size={15}/></Button>}/>{monthlyByPlatform.length && platformLines.length ? <div className="h-72"><ResponsiveContainer width="100%" height="100%"><LineChart data={monthlyByPlatform}><CartesianGrid stroke={chartTheme.grid} vertical={false}/><XAxis dataKey="label" axisLine={false} tickLine={false} tick={axisStyle}/><YAxis axisLine={false} tickLine={false} tick={axisStyle}/><Tooltip contentStyle={tooltipStyle} labelStyle={{ color: chartTheme.tooltip.color }} itemStyle={{ color: chartTheme.tooltip.color }} formatter={(value, name) => [formatMoney(value, currency), platformLines.find((platform) => platform.dataKey === name)?.name || name]}/><Legend wrapperStyle={{ color: chartTheme.legend, fontSize: 11 }} formatter={(value) => platformLines.find((platform) => platform.dataKey === value)?.name || value}/>{platformLines.map((platform) => <Line key={platform.dataKey} type="monotone" dataKey={platform.dataKey} name={platform.dataKey} stroke={platform.color} strokeWidth={2.5} dot={false} connectNulls activeDot={{ r: 4 }}/>)}</LineChart></ResponsiveContainer></div> : <EmptyState title="No platform trend" text="Add earnings to see a line for each platform."/>}</Panel>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[.8fr_1.2fr]">
-        <Panel><PanelHeading title="Platform mix" subtitle="Where your selected income comes from"/>{platformBreakdown.length ? <div className="space-y-4">{platformBreakdown.slice(0, 5).map((platform, index) => { const total = platformBreakdown.reduce((sum, item) => sum + Number(item.total || 0), 0); const percent = total ? Math.round((Number(platform.total || 0) / total) * 100) : 0; return <div key={platform.platform_id}><div className="mb-2 flex items-center justify-between text-xs"><span className="truncate text-[#c5c7cc]">{platform.name}</span><span className="text-[#777a84]">{percent}%</span></div><div className="h-3 overflow-hidden rounded-full border border-default-300 bg-content1"><div className={`h-full rounded-full ${['bg-[#1688ff]', 'bg-[#a679ff]', 'bg-[#16c8db]', 'bg-[#25d17f]', 'bg-[#ffb020]'][index % 5]}`} style={{ width: `${percent}%` }}/></div></div>})}</div> : <EmptyState title="No platform totals" text="Your platform mix will appear here."/>}</Panel>
-        <Panel><PanelHeading title="Recent earnings" subtitle="Latest entries for the selected filters" action={<Button size="sm" variant="flat" color="primary" onPress={() => navigate('/earnings')} endContent={<ArrowUpRight size={14}/>}>View all</Button>}/>{data?.recent?.length ? <div className="overflow-x-auto"><table className="w-full min-w-130 text-left"><thead><tr className="border-b border-white/8 text-[10px] uppercase tracking-wider text-[#70737c]"><th className="pb-3 font-medium">Description</th><th className="pb-3 font-medium">Platform</th><th className="pb-3 font-medium">Date</th><th className="pb-3 text-right font-medium">Amount</th></tr></thead><tbody className="divide-y divide-white/6">{data.recent.map((item) => <tr key={item.id} className="text-xs transition hover:bg-white/2.5"><td className="py-3 pr-3"><div className="flex items-center gap-2"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#1688ff]/12 text-[#4aa3ff]"><ReceiptText size={13}/></span><span className="truncate text-[#d8d9dd]">{item.category || 'Uncategorized'}</span></div></td><td className="py-3 pr-3 text-[#94979f]">{item.platform_name || '—'}</td><td className="py-3 pr-3 text-[#777a84]">{item.earned_at}</td><td className="py-3 text-right font-semibold text-[#35d989]">+{formatMoney(item.amount_usd, 'USD')}</td></tr>)}</tbody></table></div> : <EmptyState title="No earnings yet" text="Add your first payment to start the timeline."/>}</Panel>
+        <Panel><PanelHeading title="Platform mix" subtitle="Where your selected income comes from"/>{platformBreakdown.length ? <div className="space-y-5">{platformBreakdown.slice(0, 5).map((platform, index) => { const total = platformBreakdown.reduce((sum, item) => sum + Number(item.total || 0), 0); const percent = total ? Math.round((Number(platform.total || 0) / total) * 100) : 0; const barColors = ['bg-primary', 'bg-secondary', 'bg-cyan-500', 'bg-success', 'bg-warning']; return <div key={platform.platform_id} className="group"><div className="mb-2.5 flex items-center justify-between gap-3 text-xs"><span className="truncate font-medium text-foreground/85">{platform.name}</span><span className="rounded-full bg-default-100 px-2 py-0.5 text-[10px] font-semibold text-default-500 ring-1 ring-inset ring-default-200/70">{percent}%</span></div><div className="relative h-2.5 overflow-hidden rounded-full bg-default-200/60"><div className={`relative h-full rounded-full ${barColors[index % barColors.length]} transition-all duration-700 ease-out group-hover:brightness-110`} style={{ width: `${percent}%` }}><div className="absolute inset-0 bg-gradient-to-b from-white/25 to-transparent"/></div></div></div>})}</div> : <EmptyState title="No platform totals" text="Your platform mix will appear here."/>}</Panel>
+        <Panel><PanelHeading title="Recent earnings" subtitle="Latest entries for the selected filters" action={<Button size="sm" variant="flat" color="primary" onPress={() => navigate('/earnings')} endContent={<ArrowUpRight size={14}/>}>View all</Button>}/>{data?.recent?.length ? <div className="overflow-x-auto"><table className="w-full min-w-130 text-left"><thead><tr className="border-b border-divider text-[10px] uppercase tracking-wider text-default-500"><th className="pb-3 font-medium">Description</th><th className="pb-3 font-medium">Platform</th><th className="pb-3 font-medium">Date</th><th className="pb-3 text-right font-medium">Amount</th></tr></thead><tbody className="divide-y divide-divider">{data.recent.map((item) => <tr key={item.id} className="text-xs transition-colors hover:bg-default-100/60"><td className="py-3 pr-3"><div className="flex items-center gap-2"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><ReceiptText size={13}/></span><span className="truncate text-foreground/90">{item.category || 'Uncategorized'}</span></div></td><td className="py-3 pr-3 text-default-500">{item.platform_name || '—'}</td><td className="py-3 pr-3 text-default-400">{item.earned_at}</td><td className="py-3 text-right font-semibold text-success">+{formatMoney(item.amount_usd, 'USD')}</td></tr>)}</tbody></table></div> : <EmptyState title="No earnings yet" text="Add your first payment to start the timeline."/>}</Panel>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/8 pt-4 text-xs text-[#62656e]"><span>Updated just now from your income records</span><div className="flex items-center gap-2"><Button size="sm" variant="light" className="text-[#777a84]" startContent={<CalendarDays size={14}/>}>{period === 'all' ? 'All time' : period.replaceAll('_', ' ')}</Button><Button size="sm" variant="light" className="text-[#777a84]" startContent={<Download size={14}/>} onPress={() => navigate('/earnings')}>Export view</Button></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-divider pt-4 text-xs text-default-400"><span>Updated just now from your income records</span><div className="flex items-center gap-2"><Button size="sm" variant="light" className="text-default-500 hover:text-foreground" startContent={<CalendarDays size={14}/>}>{period === 'all' ? 'All time' : period.replaceAll('_', ' ')}</Button><Button size="sm" variant="light" className="text-default-500 hover:text-foreground" startContent={<Download size={14}/>} onPress={() => navigate('/earnings')}>Export view</Button></div></div>
     </div>
   </div>
 }
