@@ -63,11 +63,18 @@ def serialize_user(doc, request):
     if avatar:
         path = f"{settings.MEDIA_URL}{avatar}".replace("//", "/")
         avatar_url = request.build_absolute_uri(path)
+
+    # If the user explicitly removed their avatar, do not fall back to the
+    # Google account photo. Returning an empty URL lets the frontend render
+    # /profile_logo.jpg as the intentional default avatar.
+    profile_image_removed = bool(doc.get("profile_image_removed"))
+    profile_image_url = "" if profile_image_removed else (avatar_url or doc.get("google_picture", ""))
+
     return {
         "id": str(doc["_id"]),
         "name": doc.get("name", ""),
         "email": doc.get("email", ""),
-        "profile_image_url": avatar_url or doc.get("google_picture", ""),
+        "profile_image_url": profile_image_url,
         "role": "admin" if is_admin_doc(doc) else doc.get("role", "user"),
         "trial_ends_at": serialize_datetime(doc.get("trial_ends_at")),
         "subscription_status": doc.get("subscription_status", "trial"),
@@ -704,10 +711,12 @@ def profile(request):
         if doc.get("profile_image"):
             delete_logo(doc["profile_image"])
         updates["profile_image"] = save_logo(request.FILES["profile_image"], "profiles")
+        updates["profile_image_removed"] = False
     elif str(request.data.get("remove_profile_image", "")).lower() == "true":
         if doc.get("profile_image"):
             delete_logo(doc["profile_image"])
         updates["profile_image"] = ""
+        updates["profile_image_removed"] = True
     db.users.update_one({"_id": owner}, {"$set": updates})
     doc.update(updates)
     return Response(serialize_user(doc, request))
