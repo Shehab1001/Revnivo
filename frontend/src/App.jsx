@@ -15,13 +15,27 @@ import Subscriptions from './pages/Subscriptions'
 import SupportChat from './pages/SupportChat'
 
 function Protected({ children }) {
-  const { isAuthenticated } = useAuth()
-  return isAuthenticated ? children : <Navigate to="/login" replace />
+  const { isAuthenticated, sessionChecked } = useAuth()
+
+  if (!sessionChecked) {
+    return null
+  }
+
+  return isAuthenticated
+    ? children
+    : <Navigate to="/login" replace />
 }
 
 function PublicOnly({ children }) {
-  const { isAuthenticated } = useAuth()
-  return isAuthenticated ? <Navigate to="/" replace /> : children
+  const { isAuthenticated, sessionChecked } = useAuth()
+
+  if (!sessionChecked) {
+    return null
+  }
+
+  return isAuthenticated
+    ? <Navigate to="/" replace />
+    : children
 }
 
 export default function App() {
