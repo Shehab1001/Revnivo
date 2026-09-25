@@ -27,7 +27,7 @@ from google.oauth2 import id_token
 from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import DuplicateKeyError, PyMongoError
 from rest_framework import status
-from rest_framework.decorators import api_view, parser_classes, permission_classes, throttle_classes
+from rest_framework.decorators import api_view, authentication_classes, parser_classes, permission_classes, throttle_classes
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -57,6 +57,7 @@ def owner_oid(request):
 
 
 SUPERADMIN_EMAIL = settings.SUPERADMIN_EMAIL
+DUMMY_PASSWORD_HASH = make_password(secrets.token_urlsafe(32))
 
 
 def is_admin_doc(doc):
@@ -196,6 +197,7 @@ def dashboard_amount_expression(currency, rates):
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
+@authentication_classes([])
 def health(request):
     try:
         get_db().command("ping")
@@ -206,6 +208,7 @@ def health(request):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@authentication_classes([])
 @throttle_classes([RegistrationThrottle])
 def register(request):
     serializer = RegisterSerializer(data=request.data)
@@ -247,17 +250,20 @@ def register(request):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@authentication_classes([])
 @throttle_classes([AuthBurstThrottle])
 def login(request):
     serializer = LoginSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     email = serializer.validated_data["email"].strip().lower()
     doc = get_db().users.find_one({"email": email})
-
-    if not doc or not check_password(
+    password_hash = doc.get("password_hash") if doc and doc.get("password_hash") else DUMMY_PASSWORD_HASH
+    password_ok = check_password(
         serializer.validated_data["password"],
-        doc.get("password_hash", ""),
-    ):
+        password_hash,
+    )
+
+    if not doc or not password_ok:
         return Response(
             {"detail": "Invalid email or password."},
             status=status.HTTP_401_UNAUTHORIZED,
@@ -619,6 +625,7 @@ def send_password_reset_email(email, code):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@authentication_classes([])
 @throttle_classes([PasswordResetThrottle])
 def forgot_password(request):
     email = str(request.data.get("email", "")).strip().lower()
@@ -634,8 +641,15 @@ def forgot_password(request):
         # Keep the response identical to avoid confirming registered email addresses.
         return Response({"detail": "If this email has an account, a verification code has been sent."})
 
-    code = f"{secrets.randbelow(1_000_000):06d}"
     now = utcnow()
+    existing = db.password_reset_otps.find_one({"email": email}, {"created_at": 1})
+    created_at = existing.get("created_at") if existing else None
+    if created_at and created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    if created_at and (now - created_at).total_seconds() < settings.PASSWORD_RESET_COOLDOWN_SECONDS:
+        return Response({"detail": "If this email has an account, a verification code has been sent."})
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
     reset = {
         "email": email,
         "code_hash": make_password(code),
@@ -656,6 +670,7 @@ def forgot_password(request):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@authentication_classes([])
 @throttle_classes([PasswordResetThrottle])
 def reset_password(request):
     email = str(request.data.get("email", "")).strip().lower()
@@ -705,6 +720,7 @@ def reset_password(request):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@authentication_classes([])
 @throttle_classes([AuthBurstThrottle])
 def google_login(request):
     credential = request.data.get("credential")
@@ -1280,6 +1296,7 @@ def paymob_checkout(request):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@authentication_classes([])
 @parser_classes([JSONParser])
 def paymob_webhook(request):
     if not settings.PAYMOB_HMAC_SECRET:
