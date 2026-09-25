@@ -1978,10 +1978,15 @@ def dashboard(request):
         now = datetime.now(timezone.utc)
         current_week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         current_month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
-        current_year_start = datetime(now.year, 1, 1, tzinfo=timezone.utc)
         previous_month_start = datetime(now.year if now.month > 1 else now.year - 1, now.month - 1 if now.month > 1 else 12, 1, tzinfo=timezone.utc)
         previous_three_months_start = datetime(now.year if now.month > 3 else now.year - 1, now.month - 3 if now.month > 3 else now.month + 9, 1, tzinfo=timezone.utc)
-        previous_year_start = datetime(now.year - 1, 1, 1, tzinfo=timezone.utc)
+
+        try:
+            one_year_ago = now.replace(year=now.year - 1)
+        except ValueError:
+            # Feb 29 -> Feb 28 in a non-leap previous year.
+            one_year_ago = now.replace(year=now.year - 1, day=28)
+
         if period == "last_week":
             match["earned_at"] = {"$gte": current_week_start - timedelta(days=7), "$lt": current_week_start}
         elif period == "last_month":
@@ -1989,7 +1994,8 @@ def dashboard(request):
         elif period == "last_3_months":
             match["earned_at"] = {"$gte": previous_three_months_start, "$lt": current_month_start}
         else:
-            match["earned_at"] = {"$gte": previous_year_start, "$lt": current_year_start}
+            # Rolling year: same date/time last year through right now.
+            match["earned_at"] = {"$gte": one_year_ago, "$lte": now}
     elif period == "custom" and date_from and date_to:
         try:
             start = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
@@ -2130,6 +2136,6 @@ def dashboard(request):
             for r in yearly
         ],
         "platform_breakdown": platform_breakdown,
-        "recent": [serialize_earning(d, None if platform_id != "all" else recent_pmap.get(d.get("platform_id")), rates) for d in recent_docs],
+        "recent": [serialize_earning(d, recent_pmap.get(d.get("platform_id")), rates) for d in recent_docs],
         "filters": {"currencies": currencies, "years": years, "platforms": platforms},
     })
