@@ -313,7 +313,7 @@ export default function Register() {
                         : 'password'
                     }
                     isRequired
-                    minLength={8}
+                    minLength={10}
                     labelPlacement="outside"
                     variant="flat"
                     radius="lg"
@@ -326,7 +326,7 @@ export default function Register() {
                         password,
                       })
                     }
-                    description="Must be at least 8 characters."
+                    description="Use at least 10 characters and avoid common passwords."
                     classNames={{
                       base: 'gap-1.5',
                       label:
