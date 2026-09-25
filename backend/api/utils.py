@@ -2,11 +2,32 @@ import os
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 
 from bson import ObjectId
 from bson.decimal128 import Decimal128
 from django.conf import settings
+from PIL import Image, UnidentifiedImageError
+from rest_framework.exceptions import ValidationError
+
+
+IMAGE_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+}
+CHAT_FILE_TYPES = {
+    "application/pdf": ".pdf",
+    "audio/webm": ".webm",
+    "audio/ogg": ".ogg",
+    "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
+    "text/plain": ".txt",
+    "text/csv": ".csv",
+}
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_CHAT_BYTES = 10 * 1024 * 1024
 
 
 def oid(value):
@@ -53,8 +74,9 @@ def serialize_platform(doc, request=None):
     logo = doc.get("logo") or ""
     logo_url = ""
     if logo:
-        path = f"{settings.MEDIA_URL}{logo}".replace("//", "/")
-        logo_url = request.build_absolute_uri(path) if request else path
+        # Keep media URLs same-origin. In development Vite proxies /media to
+        # Django; in production the reverse proxy serves the same path.
+        logo_url = f"{settings.MEDIA_URL}{logo}".replace("//", "/")
     return {
         "id": str(doc["_id"]),
         "name": doc.get("name", ""),
@@ -104,28 +126,158 @@ def serialize_note(doc):
     }
 
 
-def save_logo(uploaded_file, folder="platforms"):
-    return save_upload(uploaded_file, folder)
+def _read_upload(uploaded_file, max_bytes):
+    size = getattr(uploaded_file, "size", 0) or 0
+    if size <= 0:
+        raise ValidationError("The uploaded file is empty.")
+    if size > max_bytes:
+        raise ValidationError(
+            f"File is too large. Maximum size is {max_bytes // (1024 * 1024)} MB."
+        )
+
+    uploaded_file.seek(0)
+    data = uploaded_file.read(max_bytes + 1)
+    uploaded_file.seek(0)
+
+    if len(data) > max_bytes:
+        raise ValidationError("The uploaded file exceeds the allowed size.")
+
+    return data
 
 
-def save_upload(uploaded_file, folder="uploads"):
-    ext = Path(uploaded_file.name).suffix.lower() or ".png"
-    filename = f"{uuid.uuid4().hex}{ext}"
-    rel = Path(folder) / filename
-    target = Path(settings.MEDIA_ROOT) / rel
+def _upload_root(folder):
+    return Path(
+        settings.PRIVATE_MEDIA_ROOT
+        if str(folder).strip().strip("/") == "chat"
+        else settings.MEDIA_ROOT
+    ).resolve()
+
+
+def _save_bytes(data, folder, extension):
+    safe_folder = str(folder).strip().replace("\\", "/").strip("/")
+    if not safe_folder or ".." in safe_folder.split("/"):
+        raise ValidationError("Invalid upload destination.")
+
+    rel = Path(safe_folder) / f"{uuid.uuid4().hex}{extension}"
+    upload_root = _upload_root(safe_folder)
+    target = (upload_root / rel).resolve()
+
+    if upload_root not in target.parents:
+        raise ValidationError("Invalid upload destination.")
+
     target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open("wb+") as destination:
-        for chunk in uploaded_file.chunks():
-            destination.write(chunk)
+    target.write_bytes(data)
     return str(rel).replace("\\", "/")
 
 
-def delete_logo(relative_path):
-    if not relative_path:
-        return
-    target = Path(settings.MEDIA_ROOT) / relative_path
+def _save_image(uploaded_file, folder):
+    data = _read_upload(uploaded_file, MAX_IMAGE_BYTES)
+    mime = str(getattr(uploaded_file, "content_type", "") or "").split(";", 1)[0].lower()
+
+    if mime not in IMAGE_MIME_TYPES:
+        raise ValidationError("Only JPEG, PNG, and WebP images are allowed.")
+
     try:
-        if target.is_file():
-            os.remove(target)
+        probe = Image.open(BytesIO(data))
+        probe.verify()
+
+        image = Image.open(BytesIO(data))
+        if image.width > 8000 or image.height > 8000:
+            raise ValidationError("Image dimensions are too large.")
+
+        # Re-encoding strips active metadata/polyglot payloads and gives every
+        # user image a controlled server-generated extension.
+        if image.mode not in ("RGB", "RGBA"):
+            image = image.convert("RGBA" if "transparency" in image.info else "RGB")
+
+        output = BytesIO()
+        image.save(output, format="WEBP", quality=90, method=4)
+        return _save_bytes(output.getvalue(), folder, ".webp")
+    except (UnidentifiedImageError, OSError, ValueError):
+        raise ValidationError("The uploaded image is invalid.")
+
+
+def _validate_chat_file(data, mime):
+    if mime == "application/pdf":
+        return data.startswith(b"%PDF-")
+
+    if mime == "audio/webm":
+        return data.startswith(b"\x1a\x45\xdf\xa3")
+
+    if mime == "audio/ogg":
+        return data.startswith(b"OggS")
+
+    if mime == "audio/mpeg":
+        return data.startswith(b"ID3") or (
+            len(data) >= 2 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0
+        )
+
+    if mime == "audio/mp4":
+        return len(data) >= 12 and b"ftyp" in data[4:12]
+
+    if mime in {"text/plain", "text/csv"}:
+        if b"\x00" in data:
+            return False
+        try:
+            data.decode("utf-8")
+            return True
+        except UnicodeDecodeError:
+            return False
+
+    return False
+
+
+def save_logo(uploaded_file, folder="platforms"):
+    return _save_image(uploaded_file, folder)
+
+
+def save_upload(uploaded_file, folder="uploads"):
+    if folder in {"profiles", "platforms"}:
+        return _save_image(uploaded_file, folder)
+
+    data = _read_upload(uploaded_file, MAX_CHAT_BYTES)
+    mime = str(getattr(uploaded_file, "content_type", "") or "").split(";", 1)[0].lower()
+
+    if mime in IMAGE_MIME_TYPES:
+        return _save_image(uploaded_file, folder)
+
+    extension = CHAT_FILE_TYPES.get(mime)
+    if not extension or not _validate_chat_file(data, mime):
+        raise ValidationError(
+            "Unsupported file. Allowed: JPEG, PNG, WebP, PDF, WebM/OGG/MP3/M4A audio, TXT, and CSV."
+        )
+
+    return _save_bytes(data, folder, extension)
+
+
+def resolve_upload_path(relative_path):
+    if not relative_path:
+        return None
+
+    relative = str(relative_path).replace("\\", "/").lstrip("/")
+    roots = []
+
+    if relative.startswith("chat/"):
+        roots.append(Path(settings.PRIVATE_MEDIA_ROOT).resolve())
+        # Legacy fallback for chat files created before private-media hardening.
+        roots.append(Path(settings.MEDIA_ROOT).resolve())
+    else:
+        roots.append(Path(settings.MEDIA_ROOT).resolve())
+
+    for root in roots:
+        target = (root / relative).resolve()
+        if root in target.parents and target.is_file():
+            return target
+
+    return None
+
+
+def delete_logo(relative_path):
+    target = resolve_upload_path(relative_path)
+    if not target:
+        return
+
+    try:
+        os.remove(target)
     except OSError:
         pass
