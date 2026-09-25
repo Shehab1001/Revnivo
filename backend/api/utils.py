@@ -23,6 +23,8 @@ CHAT_FILE_TYPES = {
     "audio/ogg": ".ogg",
     "audio/mpeg": ".mp3",
     "audio/mp4": ".m4a",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
     "text/plain": ".txt",
     "text/csv": ".csv",
 }
@@ -212,8 +214,11 @@ def _validate_chat_file(data, mime):
             len(data) >= 2 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0
         )
 
-    if mime == "audio/mp4":
+    if mime in {"audio/mp4", "video/mp4"}:
         return len(data) >= 12 and b"ftyp" in data[4:12]
+
+    if mime == "video/webm":
+        return data.startswith(b"\x1a\x45\xdf\xa3")
 
     if mime in {"text/plain", "text/csv"}:
         if b"\x00" in data:
@@ -244,7 +249,7 @@ def save_upload(uploaded_file, folder="uploads"):
     extension = CHAT_FILE_TYPES.get(mime)
     if not extension or not _validate_chat_file(data, mime):
         raise ValidationError(
-            "Unsupported file. Allowed: JPEG, PNG, WebP, PDF, WebM/OGG/MP3/M4A audio, TXT, and CSV."
+            "Unsupported file. Allowed: JPEG, PNG, WebP, MP4/WebM video, PDF, WebM/OGG/MP3/M4A audio, TXT, and CSV."
         )
 
     return _save_bytes(data, folder, extension)
