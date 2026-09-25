@@ -69,6 +69,7 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('revnivo_user')
     localStorage.removeItem('incomeflow_token')
     localStorage.removeItem('incomeflow_user')
+    sessionStorage.removeItem('revnivo_csrf')
 
     setUser(null)
   }
