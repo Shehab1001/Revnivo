@@ -32,5 +32,6 @@ urlpatterns = [
     path("earnings/import/", views.import_earnings_csv),
     path("earnings/<str:earning_id>/", views.earning_detail),
     path("goals/", views.income_goals),
+    path("dashboard/preferences/", views.dashboard_preferences),
     path("dashboard/", views.dashboard),
 ]
