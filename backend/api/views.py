@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import re
 import secrets
 from time import monotonic
 from urllib.parse import urlencode
@@ -782,6 +783,89 @@ def _paymob_configured():
     ])
 
 
+def _payment_method_code(value):
+    code = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+    return code[:60]
+
+
+def _ensure_default_payment_methods(db):
+    initialized = db.settings.find_one({"key": "payment_methods_initialized"})
+    if initialized:
+        return
+
+    if db.payment_methods.count_documents({}) == 0:
+        now = utcnow()
+        defaults = [
+            {
+                "code": "paymob",
+                "name": "Paymob",
+                "provider": "paymob",
+                "description": "Cards and supported Paymob payment methods through secure Unified Checkout.",
+                "active": True,
+                "sort_order": 10,
+                "created_at": now,
+                "updated_at": now,
+            },
+            {
+                "code": "fawry",
+                "name": "Fawry",
+                "provider": "fawry",
+                "description": "Pay through Fawry channels and supported local methods.",
+                "active": True,
+                "sort_order": 20,
+                "created_at": now,
+                "updated_at": now,
+            },
+            {
+                "code": "paypal",
+                "name": "PayPal",
+                "provider": "paypal",
+                "description": "Pay with a PayPal account or supported PayPal checkout.",
+                "active": True,
+                "sort_order": 30,
+                "created_at": now,
+                "updated_at": now,
+            },
+            {
+                "code": "kashier",
+                "name": "Kashier",
+                "provider": "kashier",
+                "description": "Online card and digital checkout.",
+                "active": True,
+                "sort_order": 40,
+                "created_at": now,
+                "updated_at": now,
+            },
+        ]
+        db.payment_methods.insert_many(defaults)
+
+    db.settings.update_one(
+        {"key": "payment_methods_initialized"},
+        {"$set": {"key": "payment_methods_initialized", "initialized_at": utcnow()}},
+        upsert=True,
+    )
+
+
+def _payment_method_configured(method):
+    provider = str(method.get("provider") or method.get("code") or "").lower()
+    if provider == "paymob":
+        return _paymob_configured()
+    return bool(method.get("configured", False))
+
+
+def _serialize_payment_method(method):
+    return {
+        "id": str(method["_id"]),
+        "code": method.get("code", ""),
+        "name": method.get("name", ""),
+        "provider": method.get("provider", method.get("code", "")),
+        "description": method.get("description", ""),
+        "active": method.get("active", True),
+        "sort_order": int(method.get("sort_order", 0) or 0),
+        "configured": _payment_method_configured(method),
+    }
+
+
 def _paymob_amount_cents(plan):
     amount = Decimal(str(plan.get("price", 0)))
     source_currency = str(plan.get("currency", "USD")).upper()
@@ -890,32 +974,21 @@ def payments(request):
             "trial_days": 30,
         })
 
-    gateways = [
-        {
-            "id": "paymob",
-            "name": "Paymob",
-            "description": "Cards and supported Paymob payment methods through secure Unified Checkout.",
-            "configured": _paymob_configured(),
-        },
-        {
-            "id": "fawry",
-            "name": "Fawry",
-            "description": "Pay through Fawry channels and supported local methods.",
-            "configured": False,
-        },
-        {
-            "id": "paypal",
-            "name": "PayPal",
-            "description": "Pay with a PayPal account or supported PayPal checkout.",
-            "configured": False,
-        },
-        {
-            "id": "kashier",
-            "name": "Kashier",
-            "description": "Online card and digital checkout.",
-            "configured": False,
-        },
-    ]
+    _ensure_default_payment_methods(db)
+    gateways = []
+    for method in db.payment_methods.find({"active": {"$ne": False}}).sort(
+        [("sort_order", ASCENDING), ("created_at", ASCENDING)]
+    ):
+        item = _serialize_payment_method(method)
+        gateways.append({
+            "id": item["code"],
+            "record_id": item["id"],
+            "code": item["code"],
+            "name": item["name"],
+            "provider": item["provider"],
+            "description": item["description"],
+            "configured": item["configured"],
+        })
 
     payment_rows = [
         _serialize_payment(payment)
@@ -1199,37 +1272,203 @@ def subscriptions(request):
 def admin_plans(request):
     if not require_admin(request):
         return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
+
     db = get_db()
+
     if request.method == "POST":
         name = str(request.data.get("name", "")).strip()
+        currency = str(request.data.get("currency", "USD")).strip().upper()[:3]
         try:
             price = round(float(request.data.get("price", 0)), 2)
-            trial_days = max(int(request.data.get("trial_days", 30)), 0)
+            trial_days = max(int(request.data.get("trial_days", 0)), 0)
         except (TypeError, ValueError):
             return Response({"detail": "Invalid plan values."}, status=status.HTTP_400_BAD_REQUEST)
-        if not name or price <= 0:
-            return Response({"detail": "Plan name and positive price are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not name or price <= 0 or len(currency) != 3:
+            return Response(
+                {"detail": "Plan name, positive price, and 3-letter currency are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         now = utcnow()
-        result = db.subscription_plans.insert_one({"name": name[:100], "price": price, "trial_days": trial_days, "active": True, "created_at": now, "updated_at": now})
-        return Response({"id": str(result.inserted_id), "name": name[:100], "price": price, "trial_days": trial_days, "active": True}, status=status.HTTP_201_CREATED)
+        result = db.subscription_plans.insert_one({
+            "name": name[:100],
+            "price": price,
+            "currency": currency,
+            "trial_days": trial_days,
+            "active": bool(request.data.get("active", True)),
+            "created_at": now,
+            "updated_at": now,
+        })
+        plan = db.subscription_plans.find_one({"_id": result.inserted_id})
+        return Response({
+            "id": str(plan["_id"]),
+            "name": plan["name"],
+            "price": float(plan["price"]),
+            "currency": plan.get("currency", "USD"),
+            "trial_days": plan.get("trial_days", 0),
+            "active": plan.get("active", True),
+        }, status=status.HTTP_201_CREATED)
+
     if request.method in ("PATCH", "DELETE"):
         plan_id = oid(request.data.get("id"))
         if not plan_id:
             return Response({"detail": "Invalid plan id."}, status=status.HTTP_400_BAD_REQUEST)
+
         if request.method == "DELETE":
-            db.subscription_plans.delete_one({"_id": plan_id})
+            result = db.subscription_plans.delete_one({"_id": plan_id})
+            if not result.deleted_count:
+                return Response({"detail": "Plan not found."}, status=status.HTTP_404_NOT_FOUND)
             return Response(status=status.HTTP_204_NO_CONTENT)
-        updates = {key: request.data[key] for key in ("name", "price", "trial_days", "active") if key in request.data}
-        if "price" in updates: updates["price"] = round(float(updates["price"]), 2)
+
+        updates = {}
+        if "name" in request.data:
+            name = str(request.data.get("name", "")).strip()
+            if not name:
+                return Response({"detail": "Plan name is required."}, status=status.HTTP_400_BAD_REQUEST)
+            updates["name"] = name[:100]
+        if "price" in request.data:
+            try:
+                price = round(float(request.data.get("price")), 2)
+            except (TypeError, ValueError):
+                price = 0
+            if price <= 0:
+                return Response({"detail": "Plan price must be positive."}, status=status.HTTP_400_BAD_REQUEST)
+            updates["price"] = price
+        if "currency" in request.data:
+            currency = str(request.data.get("currency", "")).strip().upper()
+            if len(currency) != 3:
+                return Response({"detail": "Currency must be a 3-letter code."}, status=status.HTTP_400_BAD_REQUEST)
+            updates["currency"] = currency
+        if "trial_days" in request.data:
+            try:
+                updates["trial_days"] = max(int(request.data.get("trial_days", 0)), 0)
+            except (TypeError, ValueError):
+                return Response({"detail": "Trial days must be a number."}, status=status.HTTP_400_BAD_REQUEST)
+        if "active" in request.data:
+            updates["active"] = bool(request.data.get("active"))
+
         updates["updated_at"] = utcnow()
         db.subscription_plans.update_one({"_id": plan_id}, {"$set": updates})
+
     plans = []
     for plan in db.subscription_plans.find({}).sort("created_at", DESCENDING):
-        plans.append({"id": str(plan["_id"]), "name": plan.get("name", ""), "price": float(plan.get("price", 0)), "trial_days": plan.get("trial_days", 0), "active": plan.get("active", True)})
+        plans.append({
+            "id": str(plan["_id"]),
+            "name": plan.get("name", ""),
+            "price": float(plan.get("price", 0)),
+            "currency": plan.get("currency", "USD"),
+            "trial_days": plan.get("trial_days", 0),
+            "active": plan.get("active", True),
+        })
+
     coupons = []
     for coupon in db.subscription_coupons.find({}).sort("created_at", DESCENDING):
-        coupons.append({"id": str(coupon["_id"]), "code": coupon.get("code", ""), "discount_type": coupon.get("discount_type", "percent"), "discount_value": coupon.get("discount_value", 0), "active": coupon.get("active", True)})
+        coupons.append({
+            "id": str(coupon["_id"]),
+            "code": coupon.get("code", ""),
+            "discount_type": coupon.get("discount_type", "percent"),
+            "discount_value": coupon.get("discount_value", 0),
+            "active": coupon.get("active", True),
+        })
+
     return Response({"plans": plans, "coupons": coupons})
+
+
+@api_view(["GET", "POST", "PATCH", "DELETE"])
+def admin_payment_methods(request):
+    if not require_admin(request):
+        return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
+
+    db = get_db()
+    _ensure_default_payment_methods(db)
+
+    if request.method == "POST":
+        name = str(request.data.get("name", "")).strip()
+        provider = _payment_method_code(request.data.get("provider") or name)
+        code = _payment_method_code(request.data.get("code") or name)
+        description = str(request.data.get("description", "")).strip()
+
+        if not name or not code:
+            return Response(
+                {"detail": "Payment method name is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if db.payment_methods.find_one({"code": code}):
+            return Response(
+                {"detail": "A payment method with this code already exists."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        try:
+            sort_order = int(request.data.get("sort_order", 100))
+        except (TypeError, ValueError):
+            sort_order = 100
+
+        now = utcnow()
+        result = db.payment_methods.insert_one({
+            "code": code,
+            "name": name[:100],
+            "provider": provider or code,
+            "description": description[:300],
+            "active": bool(request.data.get("active", True)),
+            "sort_order": sort_order,
+            "created_at": now,
+            "updated_at": now,
+        })
+        method = db.payment_methods.find_one({"_id": result.inserted_id})
+        return Response(_serialize_payment_method(method), status=status.HTTP_201_CREATED)
+
+    if request.method in ("PATCH", "DELETE"):
+        method_id = oid(request.data.get("id"))
+        if not method_id:
+            return Response({"detail": "Invalid payment method id."}, status=status.HTTP_400_BAD_REQUEST)
+
+        method = db.payment_methods.find_one({"_id": method_id})
+        if not method:
+            return Response({"detail": "Payment method not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.method == "DELETE":
+            db.payment_methods.delete_one({"_id": method_id})
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        updates = {}
+        if "name" in request.data:
+            name = str(request.data.get("name", "")).strip()
+            if not name:
+                return Response({"detail": "Payment method name is required."}, status=status.HTTP_400_BAD_REQUEST)
+            updates["name"] = name[:100]
+        if "code" in request.data:
+            code = _payment_method_code(request.data.get("code"))
+            if not code:
+                return Response({"detail": "Payment method code is required."}, status=status.HTTP_400_BAD_REQUEST)
+            existing = db.payment_methods.find_one({"code": code, "_id": {"$ne": method_id}})
+            if existing:
+                return Response({"detail": "Another payment method already uses this code."}, status=status.HTTP_409_CONFLICT)
+            updates["code"] = code
+        if "provider" in request.data:
+            updates["provider"] = _payment_method_code(request.data.get("provider")) or method.get("provider", method.get("code", ""))
+        if "description" in request.data:
+            updates["description"] = str(request.data.get("description", "")).strip()[:300]
+        if "active" in request.data:
+            updates["active"] = bool(request.data.get("active"))
+        if "sort_order" in request.data:
+            try:
+                updates["sort_order"] = int(request.data.get("sort_order", 100))
+            except (TypeError, ValueError):
+                return Response({"detail": "Sort order must be a number."}, status=status.HTTP_400_BAD_REQUEST)
+
+        updates["updated_at"] = utcnow()
+        db.payment_methods.update_one({"_id": method_id}, {"$set": updates})
+
+    methods = [
+        _serialize_payment_method(method)
+        for method in db.payment_methods.find({}).sort(
+            [("sort_order", ASCENDING), ("created_at", ASCENDING)]
+        )
+    ]
+    return Response({"payment_methods": methods})
 
 
 @api_view(["POST", "PATCH", "DELETE"])
