@@ -9,11 +9,11 @@ import {
   Camera,
   CheckCircle2,
   Mail,
+  Trash2,
   RotateCcw,
   Save,
   ShieldCheck,
   Upload,
-  UserRound,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
@@ -35,6 +35,7 @@ export default function Settings() {
     user?.profile_image_url || ''
   )
   const [saving, setSaving] = useState(false)
+  const [removeImage, setRemoveImage] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
@@ -54,9 +55,10 @@ export default function Settings() {
   const hasChanges = useMemo(() => {
     return (
       name.trim() !== (user?.name || '').trim() ||
-      Boolean(image)
+      Boolean(image) ||
+      removeImage
     )
-  }, [name, image, user?.name])
+  }, [name, image, removeImage, user?.name])
 
   const chooseImage = (event) => {
     const file = event.target.files?.[0]
@@ -83,6 +85,7 @@ export default function Settings() {
     }
 
     setImage(file)
+    setRemoveImage(false)
     setPreview(URL.createObjectURL(file))
   }
 
@@ -93,6 +96,7 @@ export default function Settings() {
 
     setName(user?.name || '')
     setImage(null)
+    setRemoveImage(false)
     setPreview(user?.profile_image_url || '')
     setError('')
     setMessage('')
@@ -118,17 +122,18 @@ export default function Settings() {
 
       if (image) {
         form.append('profile_image', image)
+      } else if (removeImage) {
+        form.append('remove_profile_image', 'true')
       }
 
       const updated = await updateProfile(form)
 
       setName(updated?.name || cleanName)
       setPreview(
-        updated?.profile_image_url ||
-          user?.profile_image_url ||
-          preview
+        updated?.profile_image_url || '/profile_logo.jpg'
       )
       setImage(null)
+      setRemoveImage(false)
       setMessage('Profile updated successfully.')
     } catch (err) {
       setError(
@@ -230,15 +235,7 @@ export default function Settings() {
 
               <div className="flex flex-col gap-4 rounded-2xl border border-default-200/70 bg-default-50/60 p-4 dark:border-white/8 dark:bg-default-100/40 sm:flex-row sm:items-center">
                 <div className="relative grid h-24 w-24 shrink-0 place-items-center overflow-hidden rounded-2xl border border-default-200 bg-default-100 text-default-500 dark:border-white/10">
-                  {preview ? (
-                    <img
-                      src={preview}
-                      alt="Profile"
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <UserRound size={36} />
-                  )}
+                  <img src={preview || '/profile_logo.jpg'} alt="Profile" className="h-full w-full object-cover" />
 
                   <label
                     className="
@@ -301,6 +298,23 @@ export default function Settings() {
                     onChange={chooseImage}
                   />
                 </label>
+                {user?.profile_image_url && !removeImage && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="light"
+                    color="danger"
+                    radius="lg"
+                    onPress={() => {
+                      setImage(null)
+                      setRemoveImage(true)
+                      setPreview('/profile_logo.jpg')
+                    }}
+                    startContent={<Trash2 size={14} />}
+                  >
+                    Remove photo
+                  </Button>
+                )}
               </div>
             </section>
 

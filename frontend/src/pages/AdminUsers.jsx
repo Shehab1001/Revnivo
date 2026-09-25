@@ -19,6 +19,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import Loading from '../components/Loading'
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal'
+import ProfileAvatar from '../components/ProfileAvatar'
 import api from '../services/api'
 import { formatDate } from '../utils/format'
 
@@ -356,35 +357,7 @@ export default function AdminUsers() {
                     {/* User */}
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-3">
-                        <div
-                          className="
-                            grid
-                            h-9
-                            w-9
-                            shrink-0
-                            place-items-center
-                            overflow-hidden
-                            rounded-full
-                            bg-primary/10
-                            font-semibold
-                            text-primary
-                            ring-1
-                            ring-inset
-                            ring-primary/10
-                          "
-                        >
-                          {user.profile_image_url ? (
-                            <img
-                              src={user.profile_image_url}
-                              alt=""
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            (user.name || '?')
-                              .slice(0, 1)
-                              .toUpperCase()
-                          )}
-                        </div>
+                        <ProfileAvatar user={user} className="h-9 w-9 ring-1 ring-inset ring-primary/10" alt="" />
 
                         <span className="font-semibold text-foreground">
                           {user.name || 'Unnamed user'}

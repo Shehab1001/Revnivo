@@ -5,6 +5,7 @@ import { useSearchParams } from 'react-router-dom'
 
 import Loading from '../components/Loading'
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal'
+import ProfileAvatar from '../components/ProfileAvatar'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import { formatDate, formatTime } from '../utils/format'
@@ -50,14 +51,8 @@ function Avatar({ user, isAdmin = false }) {
           alt="Revnivo Support"
           className="h-full w-full bg-white object-cover p-1.5"
         />
-      ) : user?.profile_image_url ? (
-        <img
-          src={user.profile_image_url}
-          alt=""
-          className="h-full w-full object-cover"
-        />
       ) : (
-        user?.name?.slice(0, 1).toUpperCase() || '?'
+        <ProfileAvatar user={user} className="h-full w-full" alt="Profile" />
       )}
     </div>
   )
