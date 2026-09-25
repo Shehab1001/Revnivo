@@ -14,6 +14,7 @@ urlpatterns = [
     path("admin/subscriptions/", views.subscriptions),
     path("admin/plans/", views.admin_plans),
     path("admin/coupons/", views.admin_coupons),
+    path("payments/", views.payments),
     path("notifications/", views.notifications),
     path("support-chat/", views.support_chat),
     path("chat-presence/", views.chat_presence),
