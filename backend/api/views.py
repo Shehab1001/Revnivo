@@ -24,6 +24,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.mail import EmailMultiAlternatives
 from django.http import FileResponse, HttpResponse
 from html import escape
+from html.parser import HTMLParser
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from pymongo import ASCENDING, DESCENDING
@@ -2011,14 +2012,83 @@ def chat_presence(request):
 
     return Response(people)
 
+NOTE_ALLOWED_TAGS = {
+    "p", "div", "br", "b", "strong", "i", "em", "u",
+    "h1", "h2", "h3", "ul", "ol", "li", "blockquote",
+    "pre", "code",
+}
+
+
+class _NoteHTMLSanitizer(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in NOTE_ALLOWED_TAGS:
+            self.parts.append(f"<{tag}>")
+
+    def handle_startendtag(self, tag, attrs):
+        tag = tag.lower()
+        if tag == "br":
+            self.parts.append("<br>")
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in NOTE_ALLOWED_TAGS and tag != "br":
+            self.parts.append(f"</{tag}>")
+
+    def handle_data(self, data):
+        self.parts.append(escape(data))
+
+    def get_html(self):
+        return "".join(self.parts)
+
+
+class _NoteTextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() in {"br", "p", "div", "li", "h1", "h2", "h3", "blockquote", "pre"}:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag.lower() in {"p", "div", "li", "h1", "h2", "h3", "blockquote", "pre"}:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+    def get_text(self):
+        text = "".join(self.parts)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+
+def sanitize_note_html(value):
+    parser = _NoteHTMLSanitizer()
+    parser.feed(str(value or "")[:100000])
+    return parser.get_html()
+
+
+def note_plain_text(value):
+    parser = _NoteTextExtractor()
+    parser.feed(str(value or ""))
+    return parser.get_text()[:20000]
+
+
 @api_view(["GET", "POST"])
 @parser_classes([JSONParser])
 def notes(request):
     db = get_db()
     owner = owner_oid(request)
+
     if request.method == "GET":
         page = max(int(request.query_params.get("page", 1)), 1)
-        page_size = 8
+        page_size = 50
         query = {"owner_id": owner}
         search = request.query_params.get("search", "").strip()[:100]
         if search:
@@ -2027,21 +2097,196 @@ def notes(request):
                 {"title": {"$regex": safe_search, "$options": "i"}},
                 {"content": {"$regex": safe_search, "$options": "i"}},
             ]
+
         total = db.notes.count_documents(query)
-        docs = db.notes.find(query).sort("updated_at", DESCENDING).skip((page - 1) * page_size).limit(page_size)
+        docs = (
+            db.notes.find(query)
+            .sort("updated_at", DESCENDING)
+            .skip((page - 1) * page_size)
+            .limit(page_size)
+        )
         return Response({
             "results": [serialize_note(doc) for doc in docs],
-            "pagination": {"page": page, "page_size": page_size, "total": total, "pages": max((total + page_size - 1) // page_size, 1)},
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "pages": max((total + page_size - 1) // page_size, 1),
+            },
         })
 
-    title = str(request.data.get("title", "")).strip()
-    content = str(request.data.get("content", "")).strip()
-    if not content:
-        return Response({"detail": "Note content is required."}, status=status.HTTP_400_BAD_REQUEST)
-    now = utcnow()
-    result = db.notes.insert_one({"owner_id": owner, "title": title[:160], "content": content[:5000], "created_at": now, "updated_at": now})
-    return Response(serialize_note({"_id": result.inserted_id, "title": title[:160], "content": content[:5000], "created_at": now, "updated_at": now}), status=status.HTTP_201_CREATED)
+    title = str(request.data.get("title", "")).strip()[:160]
+    raw_html = request.data.get("content_html")
+    legacy_content = str(request.data.get("content", ""))
 
+    if raw_html is None:
+        safe_text = escape(legacy_content[:20000]).replace("\n", "<br>")
+        content_html = f"<p>{safe_text}</p>" if safe_text else ""
+    else:
+        content_html = sanitize_note_html(raw_html)
+
+    content = note_plain_text(content_html) or legacy_content.strip()[:20000]
+    now = utcnow()
+    doc = {
+        "owner_id": owner,
+        "title": title,
+        "content": content,
+        "content_html": content_html,
+        "attachments": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+    result = db.notes.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return Response(serialize_note(doc), status=status.HTTP_201_CREATED)
+
+
+@api_view(["PATCH", "DELETE"])
+@parser_classes([JSONParser])
+def note_detail(request, note_id):
+    note_oid = oid(note_id)
+    if not note_oid:
+        return Response({"detail": "Invalid note id."}, status=status.HTTP_400_BAD_REQUEST)
+
+    db = get_db()
+    owner = owner_oid(request)
+    note = db.notes.find_one({"_id": note_oid, "owner_id": owner})
+    if not note:
+        return Response({"detail": "Note not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "PATCH":
+        updates = {}
+
+        if "title" in request.data:
+            updates["title"] = str(request.data.get("title", "")).strip()[:160]
+
+        if "content_html" in request.data:
+            content_html = sanitize_note_html(request.data.get("content_html", ""))
+            updates["content_html"] = content_html
+            updates["content"] = note_plain_text(content_html)
+        elif "content" in request.data:
+            legacy_content = str(request.data.get("content", ""))[:20000]
+            updates["content"] = legacy_content
+            updates["content_html"] = (
+                f"<p>{escape(legacy_content).replace(chr(10), '<br>')}</p>"
+                if legacy_content
+                else ""
+            )
+
+        updates["updated_at"] = utcnow()
+        db.notes.update_one(
+            {"_id": note_oid, "owner_id": owner},
+            {"$set": updates},
+        )
+        doc = db.notes.find_one({"_id": note_oid, "owner_id": owner})
+        return Response(serialize_note(doc))
+
+    for attachment in note.get("attachments", []) or []:
+        delete_logo(attachment.get("path"))
+
+    result = db.notes.delete_one({"_id": note_oid, "owner_id": owner})
+    if not result.deleted_count:
+        return Response({"detail": "Note not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["POST"])
+@parser_classes([MultiPartParser, FormParser])
+def note_attachments(request, note_id):
+    note_oid = oid(note_id)
+    if not note_oid:
+        return Response({"detail": "Invalid note id."}, status=status.HTTP_400_BAD_REQUEST)
+
+    db = get_db()
+    owner = owner_oid(request)
+    note = db.notes.find_one({"_id": note_oid, "owner_id": owner})
+    if not note:
+        return Response({"detail": "Note not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    uploaded = request.FILES.get("file")
+    if not uploaded:
+        return Response({"detail": "Choose a file to upload."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if len(note.get("attachments", []) or []) >= 30:
+        return Response(
+            {"detail": "A note can contain up to 30 attachments."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    path = save_upload(uploaded, "notes")
+    attachment_id = secrets.token_hex(12)
+    mime = str(getattr(uploaded, "content_type", "") or "").split(";", 1)[0].lower()
+    attachment = {
+        "id": attachment_id,
+        "path": path,
+        "name": str(getattr(uploaded, "name", "Attachment"))[:180],
+        "mime": mime,
+        "size": int(getattr(uploaded, "size", 0) or 0),
+        "kind": "image" if mime.startswith("image/") else "video" if mime.startswith("video/") else "audio" if mime.startswith("audio/") else "file",
+        "created_at": utcnow(),
+    }
+
+    db.notes.update_one(
+        {"_id": note_oid, "owner_id": owner},
+        {
+            "$push": {"attachments": attachment},
+            "$set": {"updated_at": utcnow()},
+        },
+    )
+    updated = db.notes.find_one({"_id": note_oid, "owner_id": owner})
+    serialized = serialize_note(updated)
+    return Response(serialized["attachments"][-1], status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "DELETE"])
+def note_attachment(request, note_id, attachment_id):
+    note_oid = oid(note_id)
+    if not note_oid:
+        return Response({"detail": "Invalid note id."}, status=status.HTTP_400_BAD_REQUEST)
+
+    db = get_db()
+    owner = owner_oid(request)
+    note = db.notes.find_one({"_id": note_oid, "owner_id": owner})
+    if not note:
+        return Response({"detail": "Note not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    attachment = next(
+        (
+            item
+            for item in note.get("attachments", []) or []
+            if str(item.get("id")) == str(attachment_id)
+        ),
+        None,
+    )
+    if not attachment:
+        return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "DELETE":
+        delete_logo(attachment.get("path"))
+        db.notes.update_one(
+            {"_id": note_oid, "owner_id": owner},
+            {
+                "$pull": {"attachments": {"id": attachment.get("id")}},
+                "$set": {"updated_at": utcnow()},
+            },
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    target = resolve_upload_path(attachment.get("path"))
+    if not target:
+        return Response({"detail": "Attachment file not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    response = FileResponse(
+        open(target, "rb"),
+        content_type=attachment.get("mime") or "application/octet-stream",
+    )
+    response["Content-Disposition"] = (
+        f'inline; filename="{attachment.get("name", "attachment").replace(chr(34), "")}"'
+    )
+    response["Cache-Control"] = "private, max-age=3600"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 @api_view(["PATCH", "DELETE"])
 @parser_classes([JSONParser])
