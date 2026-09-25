@@ -26,13 +26,15 @@ const ALLOWED_IMAGE_TYPES = [
   'image/webp',
 ]
 
+const DEFAULT_PROFILE_IMAGE = '/profile_logo.jpg'
+
 export default function Settings() {
   const { user, updateProfile } = useAuth()
 
   const [name, setName] = useState(user?.name || '')
   const [image, setImage] = useState(null)
   const [preview, setPreview] = useState(
-    user?.profile_image_url || ''
+    user?.profile_image_url || DEFAULT_PROFILE_IMAGE
   )
   const [saving, setSaving] = useState(false)
   const [removeImage, setRemoveImage] = useState(false)
@@ -41,7 +43,7 @@ export default function Settings() {
 
   useEffect(() => {
     setName(user?.name || '')
-    setPreview(user?.profile_image_url || '')
+    setPreview(user?.profile_image_url || DEFAULT_PROFILE_IMAGE)
   }, [user?.name, user?.profile_image_url])
 
   useEffect(() => {
@@ -97,7 +99,7 @@ export default function Settings() {
     setName(user?.name || '')
     setImage(null)
     setRemoveImage(false)
-    setPreview(user?.profile_image_url || '')
+    setPreview(user?.profile_image_url || DEFAULT_PROFILE_IMAGE)
     setError('')
     setMessage('')
   }
@@ -130,7 +132,7 @@ export default function Settings() {
 
       setName(updated?.name || cleanName)
       setPreview(
-        updated?.profile_image_url || '/profile_logo.jpg'
+        updated?.profile_image_url || DEFAULT_PROFILE_IMAGE
       )
       setImage(null)
       setRemoveImage(false)
@@ -235,7 +237,15 @@ export default function Settings() {
 
               <div className="flex flex-col gap-4 rounded-2xl border border-default-200/70 bg-default-50/60 p-4 dark:border-white/8 dark:bg-default-100/40 sm:flex-row sm:items-center">
                 <div className="relative grid h-24 w-24 shrink-0 place-items-center overflow-hidden rounded-2xl border border-default-200 bg-default-100 text-default-500 dark:border-white/10">
-                  <img src={preview || '/profile_logo.jpg'} alt="Profile" className="h-full w-full object-cover" />
+                  <img
+                    src={preview || DEFAULT_PROFILE_IMAGE}
+                    alt="Profile"
+                    className="h-full w-full object-cover"
+                    onError={(event) => {
+                      event.currentTarget.onerror = null
+                      event.currentTarget.src = DEFAULT_PROFILE_IMAGE
+                    }}
+                  />
 
                   <label
                     className="
@@ -308,7 +318,7 @@ export default function Settings() {
                     onPress={() => {
                       setImage(null)
                       setRemoveImage(true)
-                      setPreview('/profile_logo.jpg')
+                      setPreview(DEFAULT_PROFILE_IMAGE)
                     }}
                     startContent={<Trash2 size={14} />}
                   >
