@@ -451,3 +451,25 @@ html.dark .note-inline-file-card {
   padding-right: 1rem;
   padding-left: 0;
 }
+
+
+.note-inline-attachment[draggable="true"] {
+  cursor: grab;
+}
+
+.note-inline-attachment[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.note-attachment-dragging {
+  opacity: 0.45;
+  outline-color: hsl(var(--heroui-primary) / 0.45) !important;
+}
+
+.note-inline-image-frame {
+  user-select: none;
+}
+
+.note-inline-image-frame img {
+  pointer-events: none;
+}
