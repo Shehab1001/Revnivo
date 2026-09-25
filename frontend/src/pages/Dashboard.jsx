@@ -1,5 +1,5 @@
-import { ArrowUpRight, CalendarDays, CircleDollarSign, Download, Eye, EyeOff, Layers3, ReceiptText, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react'
-import { Autocomplete, AutocompleteItem, Button, Card, CardBody, Input, Select, SelectItem } from '@heroui/react'
+import { ArrowUpRight, CalendarDays, CircleDollarSign, Download, Layers3, ReceiptText, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react'
+import { Autocomplete, AutocompleteItem, Button, Card, CardBody, Input, Select, SelectItem, Switch } from '@heroui/react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
@@ -155,6 +155,19 @@ export default function Dashboard() {
   const [error, setError] = useState('')
   const [dataVisible, setDataVisible] = useState(true)
   const effectiveCurrency = currency || localCurrency
+  const visibilityStorageKey = user?.id ? `revnivo_dashboard_data_visible_${user.id}` : ''
+
+  useEffect(() => {
+    if (!visibilityStorageKey) return
+    setDataVisible(localStorage.getItem(visibilityStorageKey) !== 'false')
+  }, [visibilityStorageKey])
+
+  const toggleDataVisibility = (visible) => {
+    setDataVisible(visible)
+    if (visibilityStorageKey) {
+      localStorage.setItem(visibilityStorageKey, String(visible))
+    }
+  }
 
   const load = async (selectedCurrency = effectiveCurrency, selectedPeriod = period, selectedPlatform = platformId, selectedFrom = dateFrom, selectedTo = dateTo) => {
     setLoading(true)
@@ -227,32 +240,14 @@ export default function Dashboard() {
         <div><p className="text-xs font-medium uppercase tracking-[0.22em] text-primary">{activeTab}</p><h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Welcome back, {user?.name || 'there'}</h1><p className="mt-1 text-sm text-default-500">Here is what is happening with your income today.</p></div>
         
         <div className="flex w-full flex-col items-stretch gap-3 md:w-auto md:items-end">
-          <Button
-            isIconOnly
-            radius="full"
-            variant="flat"
-            size="lg"
-            onPress={() => setDataVisible((current) => !current)}
-            aria-label={dataVisible ? 'Hide dashboard data' : 'Show dashboard data'}
-            title={dataVisible ? 'Hide dashboard data' : 'Show dashboard data'}
-            className="
-              h-12
-              w-12
-              min-w-12
-              border
-              border-default-200/70
-              bg-content1
-              text-foreground
-              shadow-sm
-              transition-all
-              duration-200
-              hover:scale-105
-              hover:bg-default-100
-              dark:border-white/8
-            "
+          <Switch
+            isSelected={!dataVisible}
+            onValueChange={(hidden) => toggleDataVisibility(!hidden)}
+            size="sm"
+            classNames={{ label: 'text-sm font-medium text-default-600' }}
           >
-            {dataVisible ? <Eye size={23} /> : <EyeOff size={23} />}
-          </Button>
+            Hide data
+          </Switch>
 
           <div className="flex w-full flex-wrap justify-end gap-2">
             <Select
