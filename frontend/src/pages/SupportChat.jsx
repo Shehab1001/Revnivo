@@ -105,6 +105,7 @@ function VoiceMessage({ src, own }) {
       <audio
         ref={audioRef}
         src={src}
+        crossOrigin="use-credentials"
         preload="metadata"
         onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
         onDurationChange={(event) => setDuration(event.currentTarget.duration || 0)}
@@ -170,16 +171,18 @@ function VoiceMessage({ src, own }) {
   )
 }
 
-function AttachmentPreview({ url, file, own }) {
+function AttachmentPreview({ url, file, own, messageType = '' }) {
   const imageUrl = file ? URL.createObjectURL(file) : url
 
   if (!imageUrl) return null
 
   const isImage =
+    messageType === 'image' ||
     file?.type?.startsWith('image/') ||
     Boolean(url?.match(/\.(jpe?g|png|gif|webp)(\?|$)/i))
 
   const isAudio =
+    messageType === 'audio' ||
     file?.type?.startsWith('audio/') ||
     Boolean(url?.match(/\.(webm|mp3|ogg|wav|m4a)(\?|$)/i))
 
@@ -191,6 +194,7 @@ function AttachmentPreview({ url, file, own }) {
     return (
       <img
         src={imageUrl}
+        crossOrigin="use-credentials"
         alt="Attachment"
         className="mt-2 max-h-56 w-auto max-w-full rounded-xl object-contain sm:max-h-64"
       />
@@ -1381,6 +1385,7 @@ export default function SupportChat() {
                                         message.attachment_url
                                       }
                                       own={own}
+                                      messageType={message.message_type}
                                     />
                                   </>
                                 )}
