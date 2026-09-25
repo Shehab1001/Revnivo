@@ -181,9 +181,6 @@ export default function Notes() {
             <span class="note-inline-image-frame">
               <img src="${attachment.url}" alt="" draggable="false" />
               <span class="note-image-resize-handle" data-resize-handle="true" title="Drag to resize"></span>
-              <span class="note-inline-attachment-caption">
-                ${escapeHtml(attachment.name)}
-              </span>
             </span>
           `
         } else {
@@ -203,6 +200,29 @@ export default function Notes() {
           event.preventDefault()
           event.stopPropagation()
           setSelectedAttachmentId(id)
+        }
+
+        block.setAttribute('draggable', 'true')
+        block.ondragstart = (event) => {
+          if (event.target.closest?.('[data-resize-handle="true"]')) {
+            event.preventDefault()
+            return
+          }
+
+          event.stopPropagation()
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData(
+            'application/x-revnivo-note-attachment',
+            id
+          )
+          event.dataTransfer.setData('text/plain', id)
+          block.classList.add('note-attachment-dragging')
+          setSelectedAttachmentId(id)
+        }
+
+        block.ondragend = () => {
+          block.classList.remove('note-attachment-dragging')
+          setDraggingFiles(false)
         }
 
         const resizeHandle = block.querySelector(
@@ -618,6 +638,94 @@ export default function Notes() {
     runCommand('formatBlock', tag)
   }
 
+  const isInternalAttachmentDrag = (event) =>
+    Array.from(event.dataTransfer?.types || []).includes(
+      'application/x-revnivo-note-attachment'
+    )
+
+  const moveAttachmentToDropPoint = (event) => {
+    const attachmentId = event.dataTransfer.getData(
+      'application/x-revnivo-note-attachment'
+    )
+
+    if (!attachmentId || !editorRef.current) {
+      return false
+    }
+
+    const block = editorRef.current.querySelector(
+      `[data-note-attachment="${attachmentId}"]`
+    )
+
+    if (!block) return false
+
+    let range =
+      document.caretRangeFromPoint?.(
+        event.clientX,
+        event.clientY
+      ) || null
+
+    if (!range && document.caretPositionFromPoint) {
+      const position = document.caretPositionFromPoint(
+        event.clientX,
+        event.clientY
+      )
+
+      if (position) {
+        range = document.createRange()
+        range.setStart(
+          position.offsetNode,
+          position.offset
+        )
+        range.collapse(true)
+      }
+    }
+
+    if (
+      !range ||
+      !editorRef.current.contains(
+        range.commonAncestorContainer
+      )
+    ) {
+      range = document.createRange()
+      range.selectNodeContents(editorRef.current)
+      range.collapse(false)
+    }
+
+    // Dropping onto the same image should not nest it inside itself.
+    if (
+      block === range.commonAncestorContainer ||
+      block.contains(range.commonAncestorContainer)
+    ) {
+      return true
+    }
+
+    range.collapse(true)
+    range.insertNode(block)
+
+    const spacer = document.createTextNode('\u00A0')
+    block.after(spacer)
+
+    const nextRange = document.createRange()
+    nextRange.setStartAfter(spacer)
+    nextRange.collapse(true)
+
+    const selection = window.getSelection()
+    selection.removeAllRanges()
+    selection.addRange(nextRange)
+    lastRangeRef.current = nextRange.cloneRange()
+
+    block.classList.remove('note-attachment-dragging')
+    setSelectedAttachmentId(attachmentId)
+    setDraggingFiles(false)
+    handleEditorInput()
+    queueMicrotask(() => {
+      hydrateAttachmentBlocks()
+      applyEditorDirections()
+    })
+
+    return true
+  }
+
   const uploadFiles = async (files) => {
     if (!activeIdRef.current || !files?.length) return
 
@@ -877,11 +985,20 @@ export default function Notes() {
               }`}
               onDragEnter={(event) => {
                 event.preventDefault()
-                setDraggingFiles(true)
+                if (!isInternalAttachmentDrag(event)) {
+                  setDraggingFiles(true)
+                }
               }}
               onDragOver={(event) => {
                 event.preventDefault()
-                setDraggingFiles(true)
+
+                if (isInternalAttachmentDrag(event)) {
+                  event.dataTransfer.dropEffect = 'move'
+                  setDraggingFiles(false)
+                } else {
+                  event.dataTransfer.dropEffect = 'copy'
+                  setDraggingFiles(true)
+                }
               }}
               onDragLeave={(event) => {
                 if (
@@ -894,6 +1011,11 @@ export default function Notes() {
               }}
               onDrop={(event) => {
                 event.preventDefault()
+
+                if (isInternalAttachmentDrag(event)) {
+                  moveAttachmentToDropPoint(event)
+                  return
+                }
 
                 const caretRange =
                   document.caretRangeFromPoint?.(
