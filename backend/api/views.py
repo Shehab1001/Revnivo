@@ -2127,6 +2127,7 @@ def notes(request):
             query["$or"] = [
                 {"title": {"$regex": safe_search, "$options": "i"}},
                 {"content": {"$regex": safe_search, "$options": "i"}},
+                {"content_html": {"$regex": safe_search, "$options": "i"}},
                 {"attachments.name": {"$regex": safe_search, "$options": "i"}},
             ]
 
@@ -2331,27 +2332,6 @@ def note_attachment(request, note_id, attachment_id):
     response["Cache-Control"] = "private, max-age=3600"
     response["X-Content-Type-Options"] = "nosniff"
     return response
-
-@api_view(["PATCH", "DELETE"])
-@parser_classes([JSONParser])
-def note_detail(request, note_id):
-    note_oid = oid(note_id)
-    if not note_oid:
-        return Response({"detail": "Invalid note id."}, status=status.HTTP_400_BAD_REQUEST)
-    db = get_db()
-    if request.method == "PATCH":
-        updates = {key: str(request.data[key]).strip() for key in ("title", "content") if key in request.data}
-        if not updates.get("content"):
-            return Response({"detail": "Note content is required."}, status=status.HTTP_400_BAD_REQUEST)
-        updates["updated_at"] = utcnow()
-        db.notes.update_one({"_id": note_oid, "owner_id": owner_oid(request)}, {"$set": updates})
-        doc = db.notes.find_one({"_id": note_oid, "owner_id": owner_oid(request)})
-        return Response(serialize_note(doc))
-    result = db.notes.delete_one({"_id": note_oid, "owner_id": owner_oid(request)})
-    if not result.deleted_count:
-        return Response({"detail": "Note not found."}, status=status.HTTP_404_NOT_FOUND)
-    return Response(status=status.HTTP_204_NO_CONTENT)
-
 
 @api_view(["GET", "POST"])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
