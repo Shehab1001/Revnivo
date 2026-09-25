@@ -1,4 +1,4 @@
-import { ArrowUpRight, CalendarDays, CircleDollarSign, Download, Layers3, ReceiptText, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react'
+import { ArrowUpRight, CalendarDays, CircleDollarSign, Download, Layers3, ReceiptText, TrendingDown, TrendingUp } from 'lucide-react'
 import { Autocomplete, AutocompleteItem, Button, Card, CardBody, Input, Select, SelectItem, Switch } from '@heroui/react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -414,23 +414,8 @@ export default function Dashboard() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.18fr_.82fr]">
-        <Panel><PanelHeading title="Sales performance" subtitle={`Monthly income in ${effectiveCurrency}`} action={<Select
-          aria-label="Chart period"
-          size="sm"
-          className="w-32"
-          variant="flat"
-          radius="lg"
-          defaultSelectedKeys={['all']}
-          classNames={{
-            trigger:
-              'rounded-xl border-0 bg-[#eceef2] shadow-none transition-colors data-[hover=true]:bg-[#e4e7ec] dark:bg-content1 dark:data-[hover=true]:bg-default-100',
-            value: 'font-semibold text-foreground dark:text-white',
-            selectorIcon: 'text-default-500 dark:text-zinc-200',
-            popoverContent:
-              'rounded-2xl border border-default-200 bg-content1 p-1 shadow-xl dark:border-white/10 dark:bg-[#202023]',
-          }}
-        ><SelectItem key="all">All time</SelectItem></Select>}/>{yearly.length ? <div className={`h-72 transition-all duration-300 ${dataVisible ? '' : 'pointer-events-none select-none blur-md'} `}><ResponsiveContainer width="100%" height="100%"><BarChart data={yearly} barCategoryGap="22%"><CartesianGrid stroke={chartTheme.grid} vertical={false}/><XAxis dataKey="label" axisLine={false} tickLine={false} tick={axisStyle}/><YAxis axisLine={false} tickLine={false} tick={axisStyle}/><Tooltip contentStyle={tooltipStyle} labelStyle={{ color: chartTheme.tooltip.color }} itemStyle={{ color: chartTheme.tooltip.color }} formatter={(value) => formatMoney(value, effectiveCurrency)}/><Bar dataKey="total" fill={chartTheme.primary} radius={[7, 7, 2, 2]} /></BarChart></ResponsiveContainer></div> : <EmptyState title="No earnings history" text="Add dated earnings to build this chart."/>}</Panel>
-        <Panel><PanelHeading title="Income by platform" subtitle="Each line represents a platform" action={<Button isIconOnly size="sm" variant="light" className="text-default-500 hover:text-foreground" onPress={() => load()} aria-label="Refresh chart"><RefreshCw size={15}/></Button>}/>{monthlyByPlatform.length && platformLines.length ? <div className={`h-72 transition-all duration-300 ${dataVisible ? '' : 'pointer-events-none select-none blur-md'} `}><ResponsiveContainer width="100%" height="100%"><LineChart data={monthlyByPlatform}><CartesianGrid stroke={chartTheme.grid} vertical={false}/><XAxis dataKey="label" axisLine={false} tickLine={false} tick={axisStyle}/><YAxis axisLine={false} tickLine={false} tick={axisStyle}/><Tooltip contentStyle={tooltipStyle} labelStyle={{ color: chartTheme.tooltip.color }} itemStyle={{ color: chartTheme.tooltip.color }} formatter={(value, name) => [formatMoney(value, effectiveCurrency), platformLines.find((platform) => platform.dataKey === name)?.name || name]}/><Legend wrapperStyle={{ color: chartTheme.legend, fontSize: 11 }} formatter={(value) => platformLines.find((platform) => platform.dataKey === value)?.name || value}/>{platformLines.map((platform) => <Line key={platform.dataKey} type="monotone" dataKey={platform.dataKey} name={platform.dataKey} stroke={platform.color} strokeWidth={2.5} dot={false} connectNulls activeDot={{ r: 4 }}/>)}</LineChart></ResponsiveContainer></div> : <EmptyState title="No platform trend" text="Add earnings to see a line for each platform."/>}</Panel>
+        <Panel><PanelHeading title="Sales performance" subtitle={`Monthly income in ${effectiveCurrency}`}/>{yearly.length ? <div className={`h-72 transition-all duration-300 ${dataVisible ? '' : 'pointer-events-none select-none blur-md'} `}><ResponsiveContainer width="100%" height="100%"><BarChart data={yearly} barCategoryGap="22%"><CartesianGrid stroke={chartTheme.grid} vertical={false}/><XAxis dataKey="label" axisLine={false} tickLine={false} tick={axisStyle}/><YAxis axisLine={false} tickLine={false} tick={axisStyle}/><Tooltip contentStyle={tooltipStyle} labelStyle={{ color: chartTheme.tooltip.color }} itemStyle={{ color: chartTheme.tooltip.color }} formatter={(value) => formatMoney(value, effectiveCurrency)}/><Bar dataKey="total" fill={chartTheme.primary} radius={[7, 7, 2, 2]} /></BarChart></ResponsiveContainer></div> : <EmptyState title="No earnings history" text="Add dated earnings to build this chart."/>}</Panel>
+        <Panel><PanelHeading title="Income by platform" subtitle="Each line represents a platform"/>{monthlyByPlatform.length && platformLines.length ? <div className={`h-72 transition-all duration-300 ${dataVisible ? '' : 'pointer-events-none select-none blur-md'} `}><ResponsiveContainer width="100%" height="100%"><LineChart data={monthlyByPlatform}><CartesianGrid stroke={chartTheme.grid} vertical={false}/><XAxis dataKey="label" axisLine={false} tickLine={false} tick={axisStyle}/><YAxis axisLine={false} tickLine={false} tick={axisStyle}/><Tooltip contentStyle={tooltipStyle} labelStyle={{ color: chartTheme.tooltip.color }} itemStyle={{ color: chartTheme.tooltip.color }} formatter={(value, name) => [formatMoney(value, effectiveCurrency), platformLines.find((platform) => platform.dataKey === name)?.name || name]}/><Legend wrapperStyle={{ color: chartTheme.legend, fontSize: 11 }} formatter={(value) => platformLines.find((platform) => platform.dataKey === value)?.name || value}/>{platformLines.map((platform) => <Line key={platform.dataKey} type="monotone" dataKey={platform.dataKey} name={platform.dataKey} stroke={platform.color} strokeWidth={2.5} dot={false} connectNulls activeDot={{ r: 4 }}/>)}</LineChart></ResponsiveContainer></div> : <EmptyState title="No platform trend" text="Add earnings to see a line for each platform."/>}</Panel>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[.8fr_1.2fr]">
