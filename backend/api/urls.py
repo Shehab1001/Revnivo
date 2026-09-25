@@ -14,6 +14,7 @@ urlpatterns = [
     path("admin/subscriptions/", views.subscriptions),
     path("admin/plans/", views.admin_plans),
     path("admin/coupons/", views.admin_coupons),
+    path("admin/payment-methods/", views.admin_payment_methods),
     path("payments/", views.payments),
     path("payments/paymob/checkout/", views.paymob_checkout),
     path("payments/paymob/webhook/", views.paymob_webhook),
