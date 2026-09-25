@@ -952,7 +952,6 @@ def _ensure_default_payment_methods(db):
                 "provider": "paymob",
                 "description": "Cards and supported Paymob payment methods through secure Unified Checkout.",
                 "active": True,
-                "sort_order": 10,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -962,7 +961,6 @@ def _ensure_default_payment_methods(db):
                 "provider": "fawry",
                 "description": "Pay through Fawry channels and supported local methods.",
                 "active": True,
-                "sort_order": 20,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -972,7 +970,6 @@ def _ensure_default_payment_methods(db):
                 "provider": "paypal",
                 "description": "Pay with a PayPal account or supported PayPal checkout.",
                 "active": True,
-                "sort_order": 30,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -982,7 +979,6 @@ def _ensure_default_payment_methods(db):
                 "provider": "kashier",
                 "description": "Online card and digital checkout.",
                 "active": True,
-                "sort_order": 40,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -1011,7 +1007,6 @@ def _serialize_payment_method(method):
         "provider": method.get("provider", method.get("code", "")),
         "description": method.get("description", ""),
         "active": method.get("active", True),
-        "sort_order": int(method.get("sort_order", 0) or 0),
         "configured": _payment_method_configured(method),
     }
 
@@ -1105,7 +1100,7 @@ def payments(request):
         return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
     plans = []
-    for plan in db.subscription_plans.find({"active": {"$ne": False}}).sort("created_at", ASCENDING):
+    for plan in db.subscription_plans.find({"active": {"$ne": False}}).sort("created_at", ASCENDING).limit(1):
         plans.append({
             "id": str(plan["_id"]),
             "name": plan.get("name", "Revnivo"),
@@ -1127,7 +1122,7 @@ def payments(request):
     _ensure_default_payment_methods(db)
     gateways = []
     for method in db.payment_methods.find({"active": {"$ne": False}}).sort(
-        [("sort_order", ASCENDING), ("created_at", ASCENDING)]
+        "created_at", ASCENDING
     ):
         item = _serialize_payment_method(method)
         gateways.append({
@@ -1451,6 +1446,12 @@ def admin_plans(request):
     db = get_db()
 
     if request.method == "POST":
+        if db.subscription_plans.count_documents({}) > 0:
+            return Response(
+                {"detail": "Revnivo supports one subscription plan. Edit the existing plan instead."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
         name = str(request.data.get("name", "")).strip()
         currency = str(request.data.get("currency", "USD")).strip().upper()[:3]
         try:
@@ -1491,10 +1492,10 @@ def admin_plans(request):
             return Response({"detail": "Invalid plan id."}, status=status.HTTP_400_BAD_REQUEST)
 
         if request.method == "DELETE":
-            result = db.subscription_plans.delete_one({"_id": plan_id})
-            if not result.deleted_count:
-                return Response({"detail": "Plan not found."}, status=status.HTTP_404_NOT_FOUND)
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            return Response(
+                {"detail": "The subscription plan cannot be deleted. Hide it from users instead."},
+                status=status.HTTP_405_METHOD_NOT_ALLOWED,
+            )
 
         updates = {}
         if "name" in request.data:
@@ -1527,7 +1528,7 @@ def admin_plans(request):
         db.subscription_plans.update_one({"_id": plan_id}, {"$set": updates})
 
     plans = []
-    for plan in db.subscription_plans.find({}).sort("created_at", DESCENDING):
+    for plan in db.subscription_plans.find({}).sort("created_at", ASCENDING).limit(1):
         plans.append({
             "id": str(plan["_id"]),
             "name": plan.get("name", ""),
@@ -1576,11 +1577,6 @@ def admin_payment_methods(request):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        try:
-            sort_order = int(request.data.get("sort_order", 100))
-        except (TypeError, ValueError):
-            sort_order = 100
-
         now = utcnow()
         result = db.payment_methods.insert_one({
             "code": code,
@@ -1588,7 +1584,6 @@ def admin_payment_methods(request):
             "provider": provider or code,
             "description": description[:300],
             "active": bool(request.data.get("active", True)),
-            "sort_order": sort_order,
             "created_at": now,
             "updated_at": now,
         })
@@ -1628,11 +1623,6 @@ def admin_payment_methods(request):
             updates["description"] = str(request.data.get("description", "")).strip()[:300]
         if "active" in request.data:
             updates["active"] = bool(request.data.get("active"))
-        if "sort_order" in request.data:
-            try:
-                updates["sort_order"] = int(request.data.get("sort_order", 100))
-            except (TypeError, ValueError):
-                return Response({"detail": "Sort order must be a number."}, status=status.HTTP_400_BAD_REQUEST)
 
         updates["updated_at"] = utcnow()
         db.payment_methods.update_one({"_id": method_id}, {"$set": updates})
@@ -1640,7 +1630,7 @@ def admin_payment_methods(request):
     methods = [
         _serialize_payment_method(method)
         for method in db.payment_methods.find({}).sort(
-            [("sort_order", ASCENDING), ("created_at", ASCENDING)]
+            "created_at", ASCENDING
         )
     ]
     return Response({"payment_methods": methods})
