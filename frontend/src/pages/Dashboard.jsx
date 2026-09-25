@@ -234,7 +234,7 @@ export default function Dashboard() {
     <div className="mx-auto max-w-360 space-y-5">
       <div className="dashboard-reveal flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
       
-        <div className="flex items-center justify-between gap-3 text-xs text-default-500 sm:justify-end"><span className="hidden sm:inline">Live income workspace</span><span className="h-2 w-2 rounded-full bg-success shadow-[0_0_12px_hsl(var(--heroui-success))]"/><Button size="sm" color="primary" radius="full" onPress={() => navigate('/earnings')} startContent={<ArrowUpRight size={14}/>}>Add earning</Button></div>
+        <div className="flex items-center justify-between gap-3 text-xs text-default-500 sm:justify-end"><span className="hidden sm:inline">Live income workspace</span><span className="live-income-dot h-2 w-2 rounded-full bg-success shadow-[0_0_12px_hsl(var(--heroui-success))]"/><Button size="sm" color="primary" radius="full" onPress={() => navigate('/earnings')} startContent={<ArrowUpRight size={14}/>}>Add earning</Button></div>
       </div>
 
       <div className="dashboard-reveal flex flex-col gap-4 border-b border-divider pb-5 md:flex-row md:items-end md:justify-between">
