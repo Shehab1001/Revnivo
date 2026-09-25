@@ -704,6 +704,10 @@ def profile(request):
         if doc.get("profile_image"):
             delete_logo(doc["profile_image"])
         updates["profile_image"] = save_logo(request.FILES["profile_image"], "profiles")
+    elif str(request.data.get("remove_profile_image", "")).lower() == "true":
+        if doc.get("profile_image"):
+            delete_logo(doc["profile_image"])
+        updates["profile_image"] = ""
     db.users.update_one({"_id": owner}, {"$set": updates})
     doc.update(updates)
     return Response(serialize_user(doc, request))
