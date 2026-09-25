@@ -7,11 +7,9 @@ import {
 import {
   Bold,
   Code2,
-  File,
   FileText,
   Heading1,
   Heading2,
-  Image as ImageIcon,
   Italic,
   List,
   ListOrdered,
@@ -52,11 +50,6 @@ const legacyHtml = (note) => {
   return `<p>${escapeHtml(note.content).replaceAll('\n', '<br>')}</p>`
 }
 
-const attachmentIcon = (attachment) => {
-  if (attachment.kind === 'image') return ImageIcon
-  return File
-}
-
 const formatBytes = (value = 0) => {
   if (!value) return '0 KB'
   const units = ['B', 'KB', 'MB', 'GB']
@@ -79,6 +72,7 @@ export default function Notes() {
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const [draggingFiles, setDraggingFiles] = useState(false)
+  const [selectedAttachmentId, setSelectedAttachmentId] = useState('')
 
   const [draftTitle, setDraftTitle] = useState('')
   const [draftHtml, setDraftHtml] = useState('')
@@ -89,11 +83,174 @@ export default function Notes() {
   const activeIdRef = useRef('')
   const draftTitleRef = useRef('')
   const draftHtmlRef = useRef('')
+  const lastRangeRef = useRef(null)
 
   const activeNote = useMemo(
     () => items.find((item) => item.id === activeId) || null,
     [items, activeId]
   )
+
+  const attachmentMap = useMemo(
+    () =>
+      Object.fromEntries(
+        (activeNote?.attachments || []).map(
+          (attachment) => [attachment.id, attachment]
+        )
+      ),
+    [activeNote?.attachments]
+  )
+
+  const rememberSelection = () => {
+    const selection = window.getSelection()
+    if (
+      !selection ||
+      !selection.rangeCount ||
+      !editorRef.current
+    ) {
+      return
+    }
+
+    const range = selection.getRangeAt(0)
+    if (
+      editorRef.current.contains(
+        range.commonAncestorContainer
+      )
+    ) {
+      lastRangeRef.current = range.cloneRange()
+    }
+  }
+
+  const hydrateAttachmentBlocks = () => {
+    if (!editorRef.current || !activeNote) return
+
+    editorRef.current
+      .querySelectorAll('[data-note-attachment]')
+      .forEach((block) => {
+        const id = block.getAttribute(
+          'data-note-attachment'
+        )
+        const attachment = attachmentMap[id]
+        if (!attachment) return
+
+        const width =
+          block.getAttribute('data-width') || '100'
+
+        block.setAttribute(
+          'contenteditable',
+          'false'
+        )
+        block.className = 'note-inline-attachment'
+        block.style.width = `${width}%`
+        block.dataset.kind = attachment.kind
+
+        if (attachment.kind === 'image') {
+          block.innerHTML = `
+            <span class="note-inline-image-frame">
+              <img src="${attachment.url}" alt="" draggable="false" />
+              <span class="note-inline-attachment-caption">
+                ${escapeHtml(attachment.name)}
+              </span>
+            </span>
+          `
+        } else {
+          block.innerHTML = `
+            <span class="note-inline-file-card">
+              <span class="note-inline-file-icon">📄</span>
+              <span class="note-inline-file-meta">
+                <strong>${escapeHtml(attachment.name)}</strong>
+                <small>${formatBytes(attachment.size)}</small>
+              </span>
+              <a href="${attachment.url}" target="_blank" rel="noreferrer">Open</a>
+            </span>
+          `
+        }
+
+        block.onclick = (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          setSelectedAttachmentId(id)
+        }
+      })
+  }
+
+  const insertAttachmentPlaceholder = (
+    attachment
+  ) => {
+    const editor = editorRef.current
+    if (!editor) return
+
+    editor.focus()
+
+    let range = lastRangeRef.current
+
+    if (
+      !range ||
+      !editor.contains(
+        range.commonAncestorContainer
+      )
+    ) {
+      range = document.createRange()
+      range.selectNodeContents(editor)
+      range.collapse(false)
+    }
+
+    const placeholder =
+      document.createElement('span')
+    placeholder.setAttribute(
+      'data-note-attachment',
+      attachment.id
+    )
+    placeholder.setAttribute(
+      'data-width',
+      '100'
+    )
+    placeholder.setAttribute(
+      'contenteditable',
+      'false'
+    )
+    placeholder.innerHTML = '&nbsp;'
+
+    const trailing =
+      document.createTextNode('\u00A0')
+
+    range.deleteContents()
+    range.insertNode(trailing)
+    range.insertNode(placeholder)
+
+    const nextRange = document.createRange()
+    nextRange.setStartAfter(trailing)
+    nextRange.collapse(true)
+
+    const selection = window.getSelection()
+    selection.removeAllRanges()
+    selection.addRange(nextRange)
+    lastRangeRef.current =
+      nextRange.cloneRange()
+
+    handleEditorInput()
+  }
+
+  const changeAttachmentWidth = (width) => {
+    if (
+      !selectedAttachmentId ||
+      !editorRef.current
+    ) {
+      return
+    }
+
+    const block = editorRef.current.querySelector(
+      `[data-note-attachment="${selectedAttachmentId}"]`
+    )
+
+    if (!block) return
+
+    block.setAttribute(
+      'data-width',
+      String(width)
+    )
+    block.style.width = `${width}%`
+    handleEditorInput()
+  }
 
   const load = async (query = search, preferredId = activeIdRef.current) => {
     setLoading(true)
@@ -161,8 +318,9 @@ export default function Notes() {
 
     if (editorRef.current) {
       editorRef.current.innerHTML = html
+      queueMicrotask(hydrateAttachmentBlocks)
     }
-  }, [activeId])
+  }, [activeId, activeNote?.attachments])
 
   useEffect(
     () => () => {
@@ -316,6 +474,8 @@ export default function Notes() {
               : note
           )
         )
+
+        insertAttachmentPlaceholder(data)
       }
     } catch (err) {
       setError(
@@ -336,6 +496,13 @@ export default function Notes() {
         `/notes/${activeIdRef.current}/attachments/${attachment.id}/`
       )
 
+      const block = editorRef.current?.querySelector(
+        `[data-note-attachment="${attachment.id}"]`
+      )
+      block?.remove()
+
+      setSelectedAttachmentId('')
+
       setItems((current) =>
         current.map((note) =>
           note.id === activeIdRef.current
@@ -351,6 +518,8 @@ export default function Notes() {
             : note
         )
       )
+
+      handleEditorInput()
     } catch (err) {
       setError(
         err.response?.data?.detail ||
@@ -415,8 +584,7 @@ export default function Notes() {
             Notes
           </h1>
           <p className="mt-1 text-sm text-default-500">
-            A flexible workspace for ideas, files,
-            images, and working notes.
+            Search across your notes and place images or documents directly inside your writing.
           </p>
         </div>
 
@@ -543,7 +711,26 @@ export default function Notes() {
               }}
               onDrop={(event) => {
                 event.preventDefault()
-                uploadFiles(event.dataTransfer.files)
+
+                const caretRange =
+                  document.caretRangeFromPoint?.(
+                    event.clientX,
+                    event.clientY
+                  )
+
+                if (
+                  caretRange &&
+                  editorRef.current?.contains(
+                    caretRange.commonAncestorContainer
+                  )
+                ) {
+                  lastRangeRef.current =
+                    caretRange.cloneRange()
+                }
+
+                uploadFiles(
+                  event.dataTransfer.files
+                )
               }}
             >
               {draggingFiles && (
@@ -681,6 +868,54 @@ export default function Notes() {
                 </div>
               </div>
 
+              {selectedAttachmentId && (
+                <div className="flex flex-wrap items-center gap-2 border-b border-divider bg-default-50/60 px-4 py-2 dark:bg-white/[0.02] sm:px-7">
+                  <span className="mr-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-default-400">
+                    Attachment size
+                  </span>
+
+                  {[25, 50, 75, 100].map(
+                    (size) => (
+                      <Button
+                        key={size}
+                        size="sm"
+                        variant="flat"
+                        radius="lg"
+                        onPress={() =>
+                          changeAttachmentWidth(
+                            size
+                          )
+                        }
+                      >
+                        {size === 100
+                          ? 'Full'
+                          : `${size}%`}
+                      </Button>
+                    )
+                  )}
+
+                  <Button
+                    size="sm"
+                    variant="light"
+                    color="danger"
+                    className="ml-auto"
+                    onPress={() => {
+                      const attachment =
+                        attachmentMap[
+                          selectedAttachmentId
+                        ]
+                      if (attachment) {
+                        deleteAttachment(
+                          attachment
+                        )
+                      }
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              )}
+
               <div className="mx-auto w-full max-w-4xl flex-1 px-5 py-8 sm:px-10 sm:py-10">
                 <input
                   value={draftTitle}
@@ -724,42 +959,23 @@ export default function Notes() {
                   contentEditable
                   suppressContentEditableWarning
                   onInput={handleEditorInput}
+                  onMouseUp={rememberSelection}
+                  onKeyUp={rememberSelection}
+                  onFocus={rememberSelection}
+                  onClick={(event) => {
+                    if (
+                      !event.target.closest(
+                        '[data-note-attachment]'
+                      )
+                    ) {
+                      setSelectedAttachmentId('')
+                    }
+                  }}
                   data-placeholder="Start writing…"
                   className="note-editor mt-7 min-h-[300px] w-full text-[15px] leading-7 text-foreground outline-none"
                 />
 
-                {(activeNote.attachments || [])
-                  .length > 0 && (
-                  <section className="mt-10 border-t border-divider pt-6">
-                    <div className="mb-4 flex items-center justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-foreground">
-                          Attachments
-                        </h3>
-                        <p className="mt-0.5 text-xs text-default-400">
-                          Images, documents, video,
-                          audio, and working files.
-                        </p>
-                      </div>
-                    </div>
 
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {activeNote.attachments.map(
-                        (attachment) => (
-                          <AttachmentCard
-                            key={attachment.id}
-                            attachment={attachment}
-                            onDelete={() =>
-                              deleteAttachment(
-                                attachment
-                              )
-                            }
-                          />
-                        )
-                      )}
-                    </div>
-                  </section>
-                )}
               </div>
             </div>
           ) : (
@@ -827,90 +1043,5 @@ function ToolbarButton({
         <Icon size={15} />
       </Button>
     </Tooltip>
-  )
-}
-
-function AttachmentCard({
-  attachment,
-  onDelete,
-}) {
-  const Icon = attachmentIcon(attachment)
-
-  if (attachment.kind === 'image') {
-    return (
-      <div className="group relative overflow-hidden rounded-2xl border border-default-200/70 bg-default-50/50 dark:border-white/8 dark:bg-white/[0.02]">
-        <a
-          href={attachment.url}
-          target="_blank"
-          rel="noreferrer"
-          className="block"
-        >
-          <img
-            src={attachment.url}
-            alt={attachment.name}
-            className="h-44 w-full object-cover transition duration-200 group-hover:scale-[1.015]"
-          />
-        </a>
-
-        <div className="flex items-center gap-2 p-3">
-          <ImageIcon
-            size={15}
-            className="shrink-0 text-primary"
-          />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-semibold">
-              {attachment.name}
-            </p>
-            <p className="text-[10px] text-default-400">
-              {formatBytes(attachment.size)}
-            </p>
-          </div>
-
-          <Button
-            isIconOnly
-            size="sm"
-            variant="light"
-            color="danger"
-            onPress={onDelete}
-            aria-label="Remove attachment"
-          >
-            <Trash2 size={14} />
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex items-center gap-3 rounded-2xl border border-default-200/70 bg-default-50/50 p-3 dark:border-white/8 dark:bg-white/[0.02]">
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-        <Icon size={18} />
-      </span>
-
-      <a
-        href={attachment.url}
-        target="_blank"
-        rel="noreferrer"
-        className="min-w-0 flex-1"
-      >
-        <p className="truncate text-xs font-semibold text-foreground hover:text-primary">
-          {attachment.name}
-        </p>
-        <p className="mt-0.5 text-[10px] text-default-400">
-          {formatBytes(attachment.size)}
-        </p>
-      </a>
-
-      <Button
-        isIconOnly
-        size="sm"
-        variant="light"
-        color="danger"
-        onPress={onDelete}
-        aria-label="Remove attachment"
-      >
-        <Trash2 size={14} />
-      </Button>
-    </div>
   )
 }
