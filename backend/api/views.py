@@ -2461,6 +2461,8 @@ def import_earnings_csv(request):
     })
 
 
+DASHBOARD_PREFERENCES_VERSION = 2
+
 DASHBOARD_WIDGET_IDS = [
     "gross_revenue",
     "net_income",
@@ -2469,7 +2471,8 @@ DASHBOARD_WIDGET_IDS = [
     "transactions",
     "platforms",
     "goals",
-    "charts",
+    "sales_performance",
+    "income_by_platform",
     "platform_mix",
     "recent_earnings",
 ]
@@ -2477,6 +2480,17 @@ DASHBOARD_WIDGET_IDS = [
 
 def _normalize_dashboard_preferences(value):
     value = value if isinstance(value, dict) else {}
+
+    # Preferences created before the per-card dashboard layout used different
+    # widget ids/order. Reset those once so every user starts from the real
+    # default dashboard positions, then persist future customizations normally.
+    if value.get("version") != DASHBOARD_PREFERENCES_VERSION:
+        return {
+            "version": DASHBOARD_PREFERENCES_VERSION,
+            "order": list(DASHBOARD_WIDGET_IDS),
+            "hidden": [],
+        }
+
     raw_order = value.get("order") if isinstance(value.get("order"), list) else []
     raw_hidden = value.get("hidden") if isinstance(value.get("hidden"), list) else []
 
@@ -2497,6 +2511,7 @@ def _normalize_dashboard_preferences(value):
             hidden.append(item)
 
     return {
+        "version": DASHBOARD_PREFERENCES_VERSION,
         "order": order,
         "hidden": hidden,
     }
@@ -2768,37 +2783,6 @@ def dashboard(request):
     ]), None)
     current_month_net = decimal_to_float(current_month_net_doc.get("total")) if current_month_net_doc else 0.0
 
-    insights = []
-    if previous_month_income > 0:
-        change = ((current_month_income - previous_month_income) / previous_month_income) * 100
-        direction = "increased" if change >= 0 else "decreased"
-        insights.append(
-            f"Your income {direction} {abs(change):.1f}% compared with last month."
-        )
-    elif current_month_income > 0:
-        insights.append("You recorded income this month after no paid income last month.")
-
-    if platform_breakdown and total > 0:
-        top = platform_breakdown[0]
-        share = (top["total"] / total) * 100 if total else 0
-        insights.append(
-            f"{top['name']} generated {share:.0f}% of the income in your current view."
-        )
-
-    if pending_count:
-        insights.append(
-            f"You have {pending_count} pending payment{'s' if pending_count != 1 else ''} worth {pending_net_total:,.2f} {currency} net."
-        )
-
-    if overdue_count:
-        insights.append(
-            f"{overdue_count} pending payment{'s are' if overdue_count != 1 else ' is'} overdue."
-        )
-
-    if monthly_goal > 0:
-        progress = min((current_month_net / monthly_goal) * 100, 100)
-        insights.append(f"You are {progress:.0f}% toward your monthly income goal.")
-
     currencies = sorted(set(db.earnings.distinct("currency", {"owner_id": owner})) | {"EGP"})
     year_rows = list(db.earnings.aggregate([
         {"$match": {"owner_id": owner}},
@@ -2852,6 +2836,5 @@ def dashboard(request):
             "current_year_net": current_year_net,
             "currency": currency,
         },
-        "insights": insights[:5],
         "filters": {"currencies": currencies, "years": years, "platforms": platforms},
     })
