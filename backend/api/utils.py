@@ -74,8 +74,9 @@ def serialize_platform(doc, request=None):
     logo = doc.get("logo") or ""
     logo_url = ""
     if logo:
-        path = f"{settings.MEDIA_URL}{logo}".replace("//", "/")
-        logo_url = request.build_absolute_uri(path) if request else path
+        # Keep media URLs same-origin. In development Vite proxies /media to
+        # Django; in production the reverse proxy serves the same path.
+        logo_url = f"{settings.MEDIA_URL}{logo}".replace("//", "/")
     return {
         "id": str(doc["_id"]),
         "name": doc.get("name", ""),
