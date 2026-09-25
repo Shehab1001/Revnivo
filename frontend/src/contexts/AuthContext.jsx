@@ -1,63 +1,113 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
+
 import api from '../services/api'
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('revnivo_user') || localStorage.getItem('incomeflow_user')) } catch { return null }
-  })
+  const [user, setUser] = useState(null)
+  const [sessionChecked, setSessionChecked] = useState(false)
 
-  const saveSession = (data) => {
-    localStorage.setItem('revnivo_token', data.token)
-    localStorage.setItem('revnivo_user', JSON.stringify(data.user))
+  const saveUser = (data) => {
     setUser(data.user)
+    return data
   }
 
   const login = async (email, password) => {
-    const { data } = await api.post('/auth/login/', { email, password })
-    saveSession(data)
-    return data
+    const { data } = await api.post('/auth/login/', {
+      email,
+      password,
+    })
+    return saveUser(data)
   }
 
   const loginWithGoogle = async (credential) => {
-    const { data } = await api.post('/auth/google/', { credential })
-    saveSession(data)
-    return data
+    const { data } = await api.post('/auth/google/', {
+      credential,
+    })
+    return saveUser(data)
   }
 
   const register = async (name, email, password) => {
-    const { data } = await api.post('/auth/register/', { name, email, password })
-    saveSession(data)
-    return data
+    const { data } = await api.post('/auth/register/', {
+      name,
+      email,
+      password,
+    })
+    return saveUser(data)
   }
 
   const updateProfile = async (form) => {
-    const { data } = await api.patch('/auth/profile/', form, { headers: { 'Content-Type': 'multipart/form-data' } })
-    localStorage.setItem('revnivo_user', JSON.stringify(data))
+    const { data } = await api.patch(
+      '/auth/profile/',
+      form,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    )
     setUser(data)
     return data
   }
 
   const logout = async () => {
-    await api.post('/chat-presence/', { offline: true }).catch(() => {})
+    await api
+      .post('/chat-presence/', { offline: true })
+      .catch(() => {})
+
+    await api.post('/auth/logout/').catch(() => {})
+
+    // Remove legacy credentials left by older Revnivo versions.
     localStorage.removeItem('revnivo_token')
     localStorage.removeItem('revnivo_user')
     localStorage.removeItem('incomeflow_token')
     localStorage.removeItem('incomeflow_user')
+    sessionStorage.removeItem('revnivo_csrf')
+
     setUser(null)
   }
 
-  const value = useMemo(() => ({ user, login, loginWithGoogle, register, updateProfile, logout, isAuthenticated: !!user }), [user])
-    useEffect(() => {
-      const token = localStorage.getItem('revnivo_token') || localStorage.getItem('incomeflow_token')
-      if (!token) return
-      api.get('/auth/me/').then(({ data }) => {
-        localStorage.setItem('revnivo_user', JSON.stringify(data))
-        setUser(data)
-      }).catch(() => {})
-    }, [])
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+  useEffect(() => {
+    // Remove old bearer tokens from localStorage. New sessions live only in
+    // HttpOnly cookies that JavaScript cannot read.
+    localStorage.removeItem('revnivo_token')
+    localStorage.removeItem('incomeflow_token')
+    localStorage.removeItem('revnivo_user')
+    localStorage.removeItem('incomeflow_user')
+
+    api
+      .get('/auth/me/')
+      .then(({ data }) => setUser(data))
+      .catch(() => setUser(null))
+      .finally(() => setSessionChecked(true))
+  }, [])
+
+  const value = useMemo(
+    () => ({
+      user,
+      login,
+      loginWithGoogle,
+      register,
+      updateProfile,
+      logout,
+      isAuthenticated: !!user,
+      sessionChecked,
+    }),
+    [user, sessionChecked]
+  )
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  )
 }
 
 export const useAuth = () => useContext(AuthContext)

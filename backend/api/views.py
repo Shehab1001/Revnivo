@@ -2,30 +2,40 @@ from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 import base64
 import binascii
+import hashlib
+import hmac
 import json
+import mimetypes
+import re
 import secrets
 from time import monotonic
+from urllib.parse import urlencode
 from urllib.request import urlopen
+
+import requests as http_requests
 
 from bson import ObjectId
 from bson.decimal128 import Decimal128
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
+from django.contrib.auth.password_validation import validate_password
 from django.core.mail import EmailMultiAlternatives
+from django.http import FileResponse
 from html import escape
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import DuplicateKeyError, PyMongoError
 from rest_framework import status
-from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, parser_classes, permission_classes, throttle_classes
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .authentication import create_access_token
+from .authentication import clear_auth_cookies, create_access_token, set_auth_cookies
 from .mongo import ensure_indexes, get_db
 from .serializers import EarningSerializer, LoginSerializer, PlatformSerializer, RegisterSerializer
+from .throttles import AuthBurstThrottle, PasswordResetThrottle, RegistrationThrottle
 from .utils import (
     decimal128,
     decimal_to_float,
@@ -33,6 +43,7 @@ from .utils import (
     oid,
     save_logo,
     save_upload,
+    resolve_upload_path,
     serialize_datetime,
     serialize_note,
     serialize_earning,
@@ -45,24 +56,30 @@ def owner_oid(request):
     return ObjectId(request.user.id)
 
 
-ADMIN_EMAIL = "dev.shehabsaid@gmail.com"
-SUPERADMIN_EMAIL = ADMIN_EMAIL
+SUPERADMIN_EMAIL = settings.SUPERADMIN_EMAIL
+DUMMY_PASSWORD_HASH = make_password(secrets.token_urlsafe(32))
 
 
 def is_admin_doc(doc):
-    return bool(doc and (doc.get("role") == "admin" or doc.get("email", "").lower() == ADMIN_EMAIL))
+    # Never infer administrator privileges from a self-registered email address.
+    # Admin access is an explicit database role.
+    return bool(doc and doc.get("role") == "admin")
 
 
 def is_superadmin_doc(doc):
-    return bool(doc and doc.get("email", "").lower() == SUPERADMIN_EMAIL)
+    return bool(
+        doc
+        and doc.get("role") == "admin"
+        and SUPERADMIN_EMAIL
+        and doc.get("email", "").lower() == SUPERADMIN_EMAIL
+    )
 
 
 def serialize_user(doc, request):
     avatar = doc.get("profile_image") or ""
     avatar_url = ""
     if avatar:
-        path = f"{settings.MEDIA_URL}{avatar}".replace("//", "/")
-        avatar_url = request.build_absolute_uri(path)
+        avatar_url = f"{settings.MEDIA_URL}{avatar}".replace("//", "/")
 
     # If the user explicitly removed their avatar, do not fall back to the
     # Google account photo. Returning an empty URL lets the frontend render
@@ -89,12 +106,29 @@ def create_user_doc(name, email, password_hash="", google_picture=""):
         "password_hash": password_hash,
         "google_picture": google_picture,
         "auth_provider": "google" if google_picture else "password",
-        "role": "admin" if email.lower() == ADMIN_EMAIL else "user",
+        "role": "user",
+        "token_version": 0,
         "created_at": now,
+        "updated_at": now,
         "trial_ends_at": now + timedelta(days=30),
         "subscription_status": "trial",
         "payment_method": None,
     }
+
+
+def auth_success_response(doc, request, status_code=status.HTTP_200_OK):
+    token, csrf_token = create_access_token(
+        str(doc["_id"]),
+        doc.get("email", ""),
+        doc.get("token_version", 0),
+    )
+    response = Response(
+        {"user": serialize_user(doc, request)},
+        status=status_code,
+    )
+    set_auth_cookies(response, token, csrf_token)
+    response["Cache-Control"] = "no-store, private"
+    return response
 
 
 def is_active_trial(value):
@@ -162,17 +196,19 @@ def dashboard_amount_expression(currency, rates):
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
+@authentication_classes([])
 def health(request):
     try:
         get_db().command("ping")
-        mongo = "ok"
     except Exception:
-        mongo = "unavailable"
-    return Response({"status": "ok", "mongodb": mongo})
+        return Response({"status": "unavailable"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    return Response({"status": "ok"})
 
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@authentication_classes([])
+@throttle_classes([RegistrationThrottle])
 def register(request):
     serializer = RegisterSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
@@ -180,32 +216,59 @@ def register(request):
     db = get_db()
     ensure_indexes()
     email = data["email"].strip().lower()
-    try:
-        result = db.users.insert_one(create_user_doc(data["name"].strip(), email, make_password(data["password"])))
-    except DuplicateKeyError:
-        return Response({"detail": "An account with this email already exists."}, status=status.HTTP_409_CONFLICT)
-    doc = {"_id": result.inserted_id, "name": data["name"].strip(), "email": email}
-    admin_doc = db.users.find_one({"email": ADMIN_EMAIL}, {"_id": 1})
-    create_notification("user", "New user registered", f"{email} created a Revnivo account.", admin_doc["_id"] if admin_doc else None)
-    token = create_access_token(str(result.inserted_id), email)
-    return Response({
-        "token": token,
-        "user": serialize_user(doc, request),
-    }, status=status.HTTP_201_CREATED)
 
+    user_doc = create_user_doc(
+        data["name"].strip(),
+        email,
+        make_password(data["password"]),
+    )
+
+    try:
+        result = db.users.insert_one(user_doc)
+    except DuplicateKeyError:
+        return Response(
+            {"detail": "An account with this email already exists."},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    user_doc["_id"] = result.inserted_id
+
+    for admin_doc in db.users.find({"role": "admin"}, {"_id": 1}):
+        create_notification(
+            "user",
+            "New user registered",
+            f"{email} created a Revnivo account.",
+            admin_doc["_id"],
+        )
+
+    return auth_success_response(
+        user_doc,
+        request,
+        status.HTTP_201_CREATED,
+    )
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@authentication_classes([])
+@throttle_classes([AuthBurstThrottle])
 def login(request):
     serializer = LoginSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     email = serializer.validated_data["email"].strip().lower()
     doc = get_db().users.find_one({"email": email})
-    if not doc or not check_password(serializer.validated_data["password"], doc.get("password_hash", "")):
-        return Response({"detail": "Invalid email or password."}, status=status.HTTP_401_UNAUTHORIZED)
-    token = create_access_token(str(doc["_id"]), email)
-    return Response({"token": token, "user": serialize_user(doc, request)})
+    password_hash = doc.get("password_hash") if doc and doc.get("password_hash") else DUMMY_PASSWORD_HASH
+    password_ok = check_password(
+        serializer.validated_data["password"],
+        password_hash,
+    )
 
+    if not doc or not password_ok:
+        return Response(
+            {"detail": "Invalid email or password."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    return auth_success_response(doc, request)
 
 def send_password_reset_email(email, code):
     """
@@ -561,6 +624,8 @@ def send_password_reset_email(email, code):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@authentication_classes([])
+@throttle_classes([PasswordResetThrottle])
 def forgot_password(request):
     email = str(request.data.get("email", "")).strip().lower()
     if not email:
@@ -575,8 +640,15 @@ def forgot_password(request):
         # Keep the response identical to avoid confirming registered email addresses.
         return Response({"detail": "If this email has an account, a verification code has been sent."})
 
-    code = f"{secrets.randbelow(1_000_000):06d}"
     now = utcnow()
+    existing = db.password_reset_otps.find_one({"email": email}, {"created_at": 1})
+    created_at = existing.get("created_at") if existing else None
+    if created_at and created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    if created_at and (now - created_at).total_seconds() < settings.PASSWORD_RESET_COOLDOWN_SECONDS:
+        return Response({"detail": "If this email has an account, a verification code has been sent."})
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
     reset = {
         "email": email,
         "code_hash": make_password(code),
@@ -597,6 +669,8 @@ def forgot_password(request):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@authentication_classes([])
+@throttle_classes([PasswordResetThrottle])
 def reset_password(request):
     email = str(request.data.get("email", "")).strip().lower()
     code = str(request.data.get("code", "")).strip()
@@ -605,8 +679,14 @@ def reset_password(request):
         return Response({"detail": "Email, verification code, and new password are required."}, status=status.HTTP_400_BAD_REQUEST)
     if len(code) != 6 or not code.isdigit():
         return Response({"detail": "Enter the 6-digit verification code."}, status=status.HTTP_400_BAD_REQUEST)
-    if len(password) < 8:
-        return Response({"detail": "Password must contain at least 8 characters."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        validate_password(password)
+    except Exception as exc:
+        messages = getattr(exc, "messages", None) or [str(exc)]
+        return Response(
+            {"detail": " ".join(messages)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     db = get_db()
     reset = db.password_reset_otps.find_one({"email": email})
@@ -620,7 +700,17 @@ def reset_password(request):
         db.password_reset_otps.update_one({"_id": reset["_id"]}, {"$inc": {"attempts": 1}})
         return Response({"detail": "Incorrect verification code."}, status=status.HTTP_400_BAD_REQUEST)
 
-    result = db.users.update_one({"email": email}, {"$set": {"password_hash": make_password(password), "auth_provider": "password", "updated_at": utcnow()}})
+    result = db.users.update_one(
+        {"email": email},
+        {
+            "$set": {
+                "password_hash": make_password(password),
+                "auth_provider": "password",
+                "updated_at": utcnow(),
+            },
+            "$inc": {"token_version": 1},
+        },
+    )
     db.password_reset_otps.delete_one({"_id": reset["_id"]})
     if not result.matched_count:
         return Response({"detail": "Unable to reset this password."}, status=status.HTTP_400_BAD_REQUEST)
@@ -629,6 +719,8 @@ def reset_password(request):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@authentication_classes([])
+@throttle_classes([AuthBurstThrottle])
 def google_login(request):
     credential = request.data.get("credential")
     if not settings.GOOGLE_CLIENT_ID:
@@ -676,15 +768,37 @@ def google_login(request):
             doc = {"_id": result.inserted_id, **new_doc}
         except DuplicateKeyError:
             doc = db.users.find_one({"email": email})
-        admin_doc = db.users.find_one({"email": ADMIN_EMAIL}, {"_id": 1})
-        create_notification("user", "New user registered", f"{email} created a Revnivo account.", admin_doc["_id"] if admin_doc else None)
+        for admin_doc in db.users.find({"role": "admin"}, {"_id": 1}):
+            create_notification(
+                "user",
+                "New user registered",
+                f"{email} created a Revnivo account.",
+                admin_doc["_id"],
+            )
 
     if google_user.get("picture") and doc.get("google_picture") != google_user["picture"]:
         db.users.update_one({"_id": doc["_id"]}, {"$set": {"google_picture": google_user["picture"]}})
         doc["google_picture"] = google_user["picture"]
 
-    token = create_access_token(str(doc["_id"]), email)
-    return Response({"token": token, "user": serialize_user(doc, request)})
+    return auth_success_response(doc, request)
+
+
+@api_view(["POST"])
+def logout(request):
+    db = get_db()
+    owner = owner_oid(request)
+
+    # Revoke every token minted before logout. This also protects against a
+    # stolen bearer/cookie token continuing to work after the user signs out.
+    db.users.update_one(
+        {"_id": owner},
+        {"$inc": {"token_version": 1}, "$set": {"last_seen": None}},
+    )
+
+    response = Response({"status": "logged_out"})
+    clear_auth_cookies(response)
+    response["Cache-Control"] = "no-store, private"
+    return response
 
 
 @api_view(["GET"])
@@ -764,8 +878,504 @@ def admin_users(request):
             "users": sum(1 for doc in docs if not is_admin_doc(doc)),
             "active_trials": sum(1 for doc in docs if is_active_trial(doc.get("trial_ends_at"))),
         },
-        "users": [serialize_user(doc, request) for doc in docs],
+        "users": [
+            {
+                **serialize_user(doc, request),
+                "created_at": serialize_datetime(doc.get("created_at")),
+            }
+            for doc in docs
+        ],
     })
+
+
+def _paymob_configured():
+    return all([
+        settings.PAYMOB_SECRET_KEY,
+        settings.PAYMOB_PUBLIC_KEY,
+        settings.PAYMOB_HMAC_SECRET,
+        settings.PAYMOB_INTEGRATION_ID_CARD,
+    ])
+
+
+def _payment_method_code(value):
+    code = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+    return code[:60]
+
+
+def _ensure_default_payment_methods(db):
+    initialized = db.settings.find_one({"key": "payment_methods_initialized"})
+    if initialized:
+        return
+
+    if db.payment_methods.count_documents({}) == 0:
+        now = utcnow()
+        defaults = [
+            {
+                "code": "paymob",
+                "name": "Paymob",
+                "provider": "paymob",
+                "description": "Cards and supported Paymob payment methods through secure Unified Checkout.",
+                "active": True,
+                "sort_order": 10,
+                "created_at": now,
+                "updated_at": now,
+            },
+            {
+                "code": "fawry",
+                "name": "Fawry",
+                "provider": "fawry",
+                "description": "Pay through Fawry channels and supported local methods.",
+                "active": True,
+                "sort_order": 20,
+                "created_at": now,
+                "updated_at": now,
+            },
+            {
+                "code": "paypal",
+                "name": "PayPal",
+                "provider": "paypal",
+                "description": "Pay with a PayPal account or supported PayPal checkout.",
+                "active": True,
+                "sort_order": 30,
+                "created_at": now,
+                "updated_at": now,
+            },
+            {
+                "code": "kashier",
+                "name": "Kashier",
+                "provider": "kashier",
+                "description": "Online card and digital checkout.",
+                "active": True,
+                "sort_order": 40,
+                "created_at": now,
+                "updated_at": now,
+            },
+        ]
+        db.payment_methods.insert_many(defaults)
+
+    db.settings.update_one(
+        {"key": "payment_methods_initialized"},
+        {"$set": {"key": "payment_methods_initialized", "initialized_at": utcnow()}},
+        upsert=True,
+    )
+
+
+def _payment_method_configured(method):
+    provider = str(method.get("provider") or method.get("code") or "").lower()
+    if provider == "paymob":
+        return _paymob_configured()
+    return bool(method.get("configured", False))
+
+
+def _serialize_payment_method(method):
+    return {
+        "id": str(method["_id"]),
+        "code": method.get("code", ""),
+        "name": method.get("name", ""),
+        "provider": method.get("provider", method.get("code", "")),
+        "description": method.get("description", ""),
+        "active": method.get("active", True),
+        "sort_order": int(method.get("sort_order", 0) or 0),
+        "configured": _payment_method_configured(method),
+    }
+
+
+def _paymob_amount_cents(plan):
+    amount = Decimal(str(plan.get("price", 0)))
+    source_currency = str(plan.get("currency", "USD")).upper()
+    target_currency = settings.PAYMOB_CURRENCY
+
+    if source_currency == target_currency:
+        target_amount = amount
+    elif source_currency == "USD" and target_currency == "EGP":
+        target_amount = amount * settings.EGP_PER_USD
+    else:
+        raise ValueError(
+            f"Paymob checkout cannot convert {source_currency} to {target_currency}. "
+            "Configure the plan currency to match PAYMOB_CURRENCY."
+        )
+
+    cents = int((target_amount * Decimal("100")).quantize(Decimal("1")))
+    if cents <= 0:
+        raise ValueError("Payment amount must be greater than zero.")
+    return cents, target_currency, float(target_amount.quantize(Decimal("0.01")))
+
+
+def _paymob_bool(value):
+    return "true" if bool(value) else "false"
+
+
+def _verify_paymob_transaction_hmac(obj, received_hmac):
+    try:
+        order = obj.get("order") or {}
+        source = obj.get("source_data") or {}
+        fields = [
+            obj["amount_cents"],
+            obj["created_at"],
+            obj["currency"],
+            obj["error_occured"],
+            obj["has_parent_transaction"],
+            obj["id"],
+            obj["integration_id"],
+            obj["is_3d_secure"],
+            obj["is_auth"],
+            obj["is_capture"],
+            obj["is_refunded"],
+            obj["is_standalone_payment"],
+            obj["is_voided"],
+            order["id"],
+            obj["owner"],
+            obj["pending"],
+            source.get("pan", ""),
+            source.get("sub_type", ""),
+            source.get("type", ""),
+            obj["success"],
+        ]
+    except (KeyError, TypeError):
+        return False
+
+    concat = "".join(
+        _paymob_bool(value) if isinstance(value, bool) else str(value)
+        for value in fields
+    )
+    computed = hmac.new(
+        settings.PAYMOB_HMAC_SECRET.encode(),
+        concat.encode(),
+        hashlib.sha512,
+    ).hexdigest()
+    return hmac.compare_digest(computed, str(received_hmac or ""))
+
+
+def _serialize_payment(payment):
+    return {
+        "id": str(payment["_id"]),
+        "gateway": payment.get("gateway", ""),
+        "amount": float(payment.get("amount", 0)),
+        "currency": payment.get("currency", "USD"),
+        "status": payment.get("status", "pending"),
+        "provider_transaction_id": str(payment.get("provider_transaction_id") or ""),
+        "created_at": serialize_datetime(payment.get("created_at")),
+        "updated_at": serialize_datetime(payment.get("updated_at")),
+    }
+
+
+@api_view(["GET"])
+def payments(request):
+    db = get_db()
+    owner = owner_oid(request)
+    user_doc = db.users.find_one({"_id": owner})
+
+    if not user_doc:
+        return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    plans = []
+    for plan in db.subscription_plans.find({"active": {"$ne": False}}).sort("created_at", ASCENDING):
+        plans.append({
+            "id": str(plan["_id"]),
+            "name": plan.get("name", "Revnivo"),
+            "price": float(plan.get("price", 0)),
+            "currency": plan.get("currency", "USD"),
+            "trial_days": plan.get("trial_days", 0),
+        })
+
+    if not plans:
+        fallback = db.settings.find_one({"key": "subscription_plan"}) or {"price": 3.0}
+        plans.append({
+            "id": "default",
+            "name": "Revnivo",
+            "price": float(fallback.get("price", 3.0)),
+            "currency": "USD",
+            "trial_days": 30,
+        })
+
+    _ensure_default_payment_methods(db)
+    gateways = []
+    for method in db.payment_methods.find({"active": {"$ne": False}}).sort(
+        [("sort_order", ASCENDING), ("created_at", ASCENDING)]
+    ):
+        item = _serialize_payment_method(method)
+        gateways.append({
+            "id": item["code"],
+            "record_id": item["id"],
+            "code": item["code"],
+            "name": item["name"],
+            "provider": item["provider"],
+            "description": item["description"],
+            "configured": item["configured"],
+        })
+
+    payment_rows = [
+        _serialize_payment(payment)
+        for payment in db.payment_transactions.find({"owner_id": owner})
+        .sort("created_at", DESCENDING)
+        .limit(50)
+    ]
+
+    return Response({
+        "subscription": {
+            "status": user_doc.get("subscription_status", "trial"),
+            "payment_method": user_doc.get("payment_method"),
+            "trial_ends_at": serialize_datetime(user_doc.get("trial_ends_at")),
+        },
+        "plans": plans,
+        "gateways": gateways,
+        "payments": payment_rows,
+    })
+
+
+@api_view(["POST"])
+def paymob_checkout(request):
+    if not _paymob_configured():
+        return Response(
+            {"detail": "Paymob is not configured yet. Add the Paymob keys to backend/.env and restart Django."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    db = get_db()
+    owner = owner_oid(request)
+    user_doc = db.users.find_one({"_id": owner})
+    if not user_doc:
+        return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    phone = str(request.data.get("phone", "")).strip()
+    if not re.fullmatch(r"\+?[0-9]{8,15}", phone):
+        return Response(
+            {"detail": "Enter a valid phone number using 8 to 15 digits."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    plan_id = str(request.data.get("plan_id", "")).strip()
+    if plan_id and plan_id != "default":
+        plan_oid = oid(plan_id)
+        plan = db.subscription_plans.find_one({"_id": plan_oid, "active": {"$ne": False}}) if plan_oid else None
+    else:
+        plan = None
+
+    if not plan:
+        fallback = db.settings.find_one({"key": "subscription_plan"}) or {"price": 3.0}
+        plan = {
+            "_id": None,
+            "name": "Revnivo",
+            "price": float(fallback.get("price", 3.0)),
+            "currency": "USD",
+            "trial_days": 30,
+        }
+
+    try:
+        amount_cents, paymob_currency, paymob_amount = _paymob_amount_cents(plan)
+        integration_id = int(settings.PAYMOB_INTEGRATION_ID_CARD)
+    except (TypeError, ValueError) as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    name_parts = (user_doc.get("name") or "Revnivo User").strip().split()
+    first_name = name_parts[0] if name_parts else "Revnivo"
+    last_name = " ".join(name_parts[1:]) or "User"
+    reference = f"revnivo-{owner}-{secrets.token_hex(6)}"
+    now = utcnow()
+
+    payment_doc = {
+        "owner_id": owner,
+        "plan_id": plan.get("_id"),
+        "plan_name": plan.get("name", "Revnivo"),
+        "gateway": "paymob",
+        "amount": paymob_amount,
+        "currency": paymob_currency,
+        "original_amount": float(plan.get("price", 0)),
+        "original_currency": str(plan.get("currency", "USD")).upper(),
+        "status": "creating",
+        "special_reference": reference,
+        "created_at": now,
+        "updated_at": now,
+    }
+    payment_result = db.payment_transactions.insert_one(payment_doc)
+
+    payload = {
+        "amount": amount_cents,
+        "currency": paymob_currency,
+        "payment_methods": [integration_id],
+        "items": [{
+            "name": plan.get("name", "Revnivo Subscription")[:120],
+            "amount": amount_cents,
+            "description": "Revnivo subscription",
+            "quantity": 1,
+        }],
+        "billing_data": {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": user_doc.get("email", ""),
+            "phone_number": phone,
+            "apartment": "NA",
+            "floor": "NA",
+            "street": "NA",
+            "building": "NA",
+            "shipping_method": "NA",
+            "postal_code": "NA",
+            "city": "NA",
+            "state": "NA",
+            "country": "EGY",
+        },
+        "customer": {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": user_doc.get("email", ""),
+        },
+        "special_reference": reference,
+        "expiration": 3600,
+    }
+
+    if settings.PAYMOB_WEBHOOK_URL:
+        payload["notification_url"] = settings.PAYMOB_WEBHOOK_URL
+    if settings.PAYMOB_REDIRECT_URL:
+        payload["redirection_url"] = settings.PAYMOB_REDIRECT_URL
+
+    try:
+        response = http_requests.post(
+            f"{settings.PAYMOB_BASE_URL}/v1/intention/",
+            headers={
+                "Authorization": f"Token {settings.PAYMOB_SECRET_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=25,
+        )
+        response.raise_for_status()
+        intention = response.json()
+    except http_requests.RequestException as exc:
+        detail = "Paymob could not create the checkout session."
+        if getattr(exc, "response", None) is not None:
+            try:
+                paymob_error = exc.response.json()
+                detail = paymob_error.get("detail") or paymob_error.get("message") or detail
+            except Exception:
+                pass
+        db.payment_transactions.update_one(
+            {"_id": payment_result.inserted_id},
+            {"$set": {"status": "failed", "failure_reason": detail, "updated_at": utcnow()}},
+        )
+        return Response({"detail": detail}, status=status.HTTP_502_BAD_GATEWAY)
+
+    client_secret = intention.get("client_secret")
+    paymob_order_id = intention.get("intention_order_id")
+    intention_id = intention.get("id")
+
+    if not client_secret:
+        db.payment_transactions.update_one(
+            {"_id": payment_result.inserted_id},
+            {"$set": {"status": "failed", "failure_reason": "Missing client secret.", "updated_at": utcnow()}},
+        )
+        return Response(
+            {"detail": "Paymob returned an incomplete checkout response."},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    checkout_url = (
+        f"{settings.PAYMOB_BASE_URL}/unifiedcheckout/?"
+        + urlencode({
+            "publicKey": settings.PAYMOB_PUBLIC_KEY,
+            "clientSecret": client_secret,
+        })
+    )
+
+    db.payment_transactions.update_one(
+        {"_id": payment_result.inserted_id},
+        {"$set": {
+            "status": "pending",
+            "paymob_intention_id": intention_id,
+            "paymob_order_id": paymob_order_id,
+            "checkout_url": checkout_url,
+            "updated_at": utcnow(),
+        }},
+    )
+
+    return Response({
+        "payment_id": str(payment_result.inserted_id),
+        "checkout_url": checkout_url,
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+@authentication_classes([])
+@parser_classes([JSONParser])
+def paymob_webhook(request):
+    if not settings.PAYMOB_HMAC_SECRET:
+        return Response(
+            {"detail": "Paymob HMAC secret is not configured."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    body = request.data or {}
+    if body.get("type") != "TRANSACTION":
+        return Response({"received": True})
+
+    obj = body.get("obj") or {}
+    received_hmac = request.query_params.get("hmac", "")
+
+    if not _verify_paymob_transaction_hmac(obj, received_hmac):
+        return Response({"detail": "Invalid Paymob HMAC."}, status=status.HTTP_401_UNAUTHORIZED)
+
+    order = obj.get("order") or {}
+    paymob_order_id = order.get("id")
+    db = get_db()
+
+    payment = db.payment_transactions.find_one({"paymob_order_id": paymob_order_id})
+    if not payment:
+        merchant_reference = str(order.get("merchant_order_id") or "")
+        if merchant_reference:
+            payment = db.payment_transactions.find_one({"special_reference": merchant_reference})
+
+    if not payment:
+        return Response({"received": True})
+
+    expected_amount_cents = int(
+        (Decimal(str(payment.get("amount", 0))) * Decimal("100")).quantize(Decimal("1"))
+    )
+    received_amount_cents = int(obj.get("amount_cents") or 0)
+    received_currency = str(obj.get("currency") or "").upper()
+    expected_currency = str(payment.get("currency") or "").upper()
+    received_integration = str(obj.get("integration_id") or "")
+    expected_integration = str(settings.PAYMOB_INTEGRATION_ID_CARD)
+
+    payment_matches = (
+        received_amount_cents == expected_amount_cents
+        and received_currency == expected_currency
+        and received_integration == expected_integration
+    )
+
+    success = (
+        payment_matches
+        and bool(obj.get("success"))
+        and not bool(obj.get("pending"))
+    )
+    failed = not bool(obj.get("pending")) and not success
+    payment_status = "paid" if success else "failed" if failed else "pending"
+
+    update = {
+        "status": payment_status,
+        "provider_transaction_id": str(obj.get("id") or ""),
+        "provider_response": str((obj.get("data") or {}).get("message") or "")[:500],
+        "provider_amount_cents": received_amount_cents,
+        "provider_currency": received_currency,
+        "updated_at": utcnow(),
+    }
+
+    if not payment_matches:
+        update["failure_reason"] = "Payment verification mismatch."
+
+    db.payment_transactions.update_one({"_id": payment["_id"]}, {"$set": update})
+
+    if success:
+        db.users.update_one(
+            {"_id": payment["owner_id"]},
+            {"$set": {
+                "subscription_status": "active",
+                "payment_method": "Paymob",
+                "subscription_activated_at": utcnow(),
+                "updated_at": utcnow(),
+            }},
+        )
+
+    return Response({"received": True})
 
 
 @api_view(["GET", "PATCH"])
@@ -801,37 +1411,203 @@ def subscriptions(request):
 def admin_plans(request):
     if not require_admin(request):
         return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
+
     db = get_db()
+
     if request.method == "POST":
         name = str(request.data.get("name", "")).strip()
+        currency = str(request.data.get("currency", "USD")).strip().upper()[:3]
         try:
             price = round(float(request.data.get("price", 0)), 2)
-            trial_days = max(int(request.data.get("trial_days", 30)), 0)
+            trial_days = max(int(request.data.get("trial_days", 0)), 0)
         except (TypeError, ValueError):
             return Response({"detail": "Invalid plan values."}, status=status.HTTP_400_BAD_REQUEST)
-        if not name or price <= 0:
-            return Response({"detail": "Plan name and positive price are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not name or price <= 0 or len(currency) != 3:
+            return Response(
+                {"detail": "Plan name, positive price, and 3-letter currency are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         now = utcnow()
-        result = db.subscription_plans.insert_one({"name": name[:100], "price": price, "trial_days": trial_days, "active": True, "created_at": now, "updated_at": now})
-        return Response({"id": str(result.inserted_id), "name": name[:100], "price": price, "trial_days": trial_days, "active": True}, status=status.HTTP_201_CREATED)
+        result = db.subscription_plans.insert_one({
+            "name": name[:100],
+            "price": price,
+            "currency": currency,
+            "trial_days": trial_days,
+            "active": bool(request.data.get("active", True)),
+            "created_at": now,
+            "updated_at": now,
+        })
+        plan = db.subscription_plans.find_one({"_id": result.inserted_id})
+        return Response({
+            "id": str(plan["_id"]),
+            "name": plan["name"],
+            "price": float(plan["price"]),
+            "currency": plan.get("currency", "USD"),
+            "trial_days": plan.get("trial_days", 0),
+            "active": plan.get("active", True),
+        }, status=status.HTTP_201_CREATED)
+
     if request.method in ("PATCH", "DELETE"):
         plan_id = oid(request.data.get("id"))
         if not plan_id:
             return Response({"detail": "Invalid plan id."}, status=status.HTTP_400_BAD_REQUEST)
+
         if request.method == "DELETE":
-            db.subscription_plans.delete_one({"_id": plan_id})
+            result = db.subscription_plans.delete_one({"_id": plan_id})
+            if not result.deleted_count:
+                return Response({"detail": "Plan not found."}, status=status.HTTP_404_NOT_FOUND)
             return Response(status=status.HTTP_204_NO_CONTENT)
-        updates = {key: request.data[key] for key in ("name", "price", "trial_days", "active") if key in request.data}
-        if "price" in updates: updates["price"] = round(float(updates["price"]), 2)
+
+        updates = {}
+        if "name" in request.data:
+            name = str(request.data.get("name", "")).strip()
+            if not name:
+                return Response({"detail": "Plan name is required."}, status=status.HTTP_400_BAD_REQUEST)
+            updates["name"] = name[:100]
+        if "price" in request.data:
+            try:
+                price = round(float(request.data.get("price")), 2)
+            except (TypeError, ValueError):
+                price = 0
+            if price <= 0:
+                return Response({"detail": "Plan price must be positive."}, status=status.HTTP_400_BAD_REQUEST)
+            updates["price"] = price
+        if "currency" in request.data:
+            currency = str(request.data.get("currency", "")).strip().upper()
+            if len(currency) != 3:
+                return Response({"detail": "Currency must be a 3-letter code."}, status=status.HTTP_400_BAD_REQUEST)
+            updates["currency"] = currency
+        if "trial_days" in request.data:
+            try:
+                updates["trial_days"] = max(int(request.data.get("trial_days", 0)), 0)
+            except (TypeError, ValueError):
+                return Response({"detail": "Trial days must be a number."}, status=status.HTTP_400_BAD_REQUEST)
+        if "active" in request.data:
+            updates["active"] = bool(request.data.get("active"))
+
         updates["updated_at"] = utcnow()
         db.subscription_plans.update_one({"_id": plan_id}, {"$set": updates})
+
     plans = []
     for plan in db.subscription_plans.find({}).sort("created_at", DESCENDING):
-        plans.append({"id": str(plan["_id"]), "name": plan.get("name", ""), "price": float(plan.get("price", 0)), "trial_days": plan.get("trial_days", 0), "active": plan.get("active", True)})
+        plans.append({
+            "id": str(plan["_id"]),
+            "name": plan.get("name", ""),
+            "price": float(plan.get("price", 0)),
+            "currency": plan.get("currency", "USD"),
+            "trial_days": plan.get("trial_days", 0),
+            "active": plan.get("active", True),
+        })
+
     coupons = []
     for coupon in db.subscription_coupons.find({}).sort("created_at", DESCENDING):
-        coupons.append({"id": str(coupon["_id"]), "code": coupon.get("code", ""), "discount_type": coupon.get("discount_type", "percent"), "discount_value": coupon.get("discount_value", 0), "active": coupon.get("active", True)})
+        coupons.append({
+            "id": str(coupon["_id"]),
+            "code": coupon.get("code", ""),
+            "discount_type": coupon.get("discount_type", "percent"),
+            "discount_value": coupon.get("discount_value", 0),
+            "active": coupon.get("active", True),
+        })
+
     return Response({"plans": plans, "coupons": coupons})
+
+
+@api_view(["GET", "POST", "PATCH", "DELETE"])
+def admin_payment_methods(request):
+    if not require_admin(request):
+        return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
+
+    db = get_db()
+    _ensure_default_payment_methods(db)
+
+    if request.method == "POST":
+        name = str(request.data.get("name", "")).strip()
+        provider = _payment_method_code(request.data.get("provider") or name)
+        code = _payment_method_code(request.data.get("code") or name)
+        description = str(request.data.get("description", "")).strip()
+
+        if not name or not code:
+            return Response(
+                {"detail": "Payment method name is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if db.payment_methods.find_one({"code": code}):
+            return Response(
+                {"detail": "A payment method with this code already exists."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        try:
+            sort_order = int(request.data.get("sort_order", 100))
+        except (TypeError, ValueError):
+            sort_order = 100
+
+        now = utcnow()
+        result = db.payment_methods.insert_one({
+            "code": code,
+            "name": name[:100],
+            "provider": provider or code,
+            "description": description[:300],
+            "active": bool(request.data.get("active", True)),
+            "sort_order": sort_order,
+            "created_at": now,
+            "updated_at": now,
+        })
+        method = db.payment_methods.find_one({"_id": result.inserted_id})
+        return Response(_serialize_payment_method(method), status=status.HTTP_201_CREATED)
+
+    if request.method in ("PATCH", "DELETE"):
+        method_id = oid(request.data.get("id"))
+        if not method_id:
+            return Response({"detail": "Invalid payment method id."}, status=status.HTTP_400_BAD_REQUEST)
+
+        method = db.payment_methods.find_one({"_id": method_id})
+        if not method:
+            return Response({"detail": "Payment method not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.method == "DELETE":
+            db.payment_methods.delete_one({"_id": method_id})
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        updates = {}
+        if "name" in request.data:
+            name = str(request.data.get("name", "")).strip()
+            if not name:
+                return Response({"detail": "Payment method name is required."}, status=status.HTTP_400_BAD_REQUEST)
+            updates["name"] = name[:100]
+        if "code" in request.data:
+            code = _payment_method_code(request.data.get("code"))
+            if not code:
+                return Response({"detail": "Payment method code is required."}, status=status.HTTP_400_BAD_REQUEST)
+            existing = db.payment_methods.find_one({"code": code, "_id": {"$ne": method_id}})
+            if existing:
+                return Response({"detail": "Another payment method already uses this code."}, status=status.HTTP_409_CONFLICT)
+            updates["code"] = code
+        if "provider" in request.data:
+            updates["provider"] = _payment_method_code(request.data.get("provider")) or method.get("provider", method.get("code", ""))
+        if "description" in request.data:
+            updates["description"] = str(request.data.get("description", "")).strip()[:300]
+        if "active" in request.data:
+            updates["active"] = bool(request.data.get("active"))
+        if "sort_order" in request.data:
+            try:
+                updates["sort_order"] = int(request.data.get("sort_order", 100))
+            except (TypeError, ValueError):
+                return Response({"detail": "Sort order must be a number."}, status=status.HTTP_400_BAD_REQUEST)
+
+        updates["updated_at"] = utcnow()
+        db.payment_methods.update_one({"_id": method_id}, {"$set": updates})
+
+    methods = [
+        _serialize_payment_method(method)
+        for method in db.payment_methods.find({}).sort(
+            [("sort_order", ASCENDING), ("created_at", ASCENDING)]
+        )
+    ]
+    return Response({"payment_methods": methods})
 
 
 @api_view(["POST", "PATCH", "DELETE"])
@@ -901,16 +1677,54 @@ def support_chat(request):
             db.notifications.update_many({"kind": "chat", "chat_user_id": str(chat_user_id), "read": False, "$or": [{"owner_id": None}, {"owner_id": owner}]}, {"$set": {"read": True}})
         return Response({"status": "read"})
     if request.method == "DELETE":
+        if request.data.get("mode") == "chat":
+            if not is_admin_doc(user_doc):
+                return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
+            chat_user_id = oid(request.data.get("user_id"))
+            if not chat_user_id:
+                return Response({"detail": "Invalid user id."}, status=status.HTTP_400_BAD_REQUEST)
+            for chat_message in db.chat_messages.find(
+                {"user_id": chat_user_id},
+                {"attachment": 1},
+            ):
+                if chat_message.get("attachment"):
+                    delete_logo(chat_message["attachment"])
+
+            result = db.chat_messages.delete_many({"user_id": chat_user_id})
+            db.notifications.delete_many({"kind": "chat", "chat_user_id": str(chat_user_id)})
+            return Response({"status": "cleared", "deleted_messages": result.deleted_count})
+
         message_id = oid(request.data.get("id"))
         if not message_id:
             return Response({"detail": "Invalid message id."}, status=status.HTTP_400_BAD_REQUEST)
         message = db.chat_messages.find_one({"_id": message_id})
         if not message:
             return Response({"detail": "Message not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not is_admin_doc(user_doc) and message.get("user_id") != owner:
+            return Response({"detail": "Message not found."}, status=status.HTTP_404_NOT_FOUND)
+
         if request.data.get("mode") == "everyone":
-            db.chat_messages.update_one({"_id": message_id}, {"$set": {"deleted": True, "content": "", "attachment": ""}})
+            allowed = is_admin_doc(user_doc) or (
+                message.get("user_id") == owner
+                and message.get("sender") == "user"
+            )
+            if not allowed:
+                return Response(
+                    {"detail": "You can only delete your own messages for everyone."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if message.get("attachment"):
+                delete_logo(message["attachment"])
+            db.chat_messages.update_one(
+                {"_id": message_id},
+                {"$set": {"deleted": True, "content": "", "attachment": ""}},
+            )
         else:
-            db.chat_messages.update_one({"_id": message_id}, {"$addToSet": {"deleted_for": owner}})
+            db.chat_messages.update_one(
+                {"_id": message_id},
+                {"$addToSet": {"deleted_for": owner}},
+            )
         return Response({"status": "deleted"})
     if request.method == "GET" and is_admin_doc(user_doc) and request.query_params.get("summary"):
         users = [doc for doc in db.users.find({"role": {"$ne": "admin"}}).sort("created_at", DESCENDING)]
@@ -921,16 +1735,23 @@ def support_chat(request):
             unread_count = db.notifications.count_documents({"kind": "chat", "chat_user_id": str(contact_id), "$or": [{"owner_id": None}, {"owner_id": owner}], "read": False})
             last_seen = contact.get("last_seen")
             typing_until = contact.get("typing_until")
+            recording_until = contact.get("recording_until")
             if last_seen and last_seen.tzinfo is None:
                 last_seen = last_seen.replace(tzinfo=timezone.utc)
             if typing_until and typing_until.tzinfo is None:
                 typing_until = typing_until.replace(tzinfo=timezone.utc)
+            if recording_until and recording_until.tzinfo is None:
+                recording_until = recording_until.replace(tzinfo=timezone.utc)
+            latest_message = ""
+            if latest:
+                latest_message = "Voice message" if latest.get("message_type") == "audio" else latest.get("content", "")
             summaries.append({
                 **serialize_user(contact, request),
                 "online": bool(last_seen and utcnow() - last_seen <= timedelta(minutes=2)),
                 "typing": bool(typing_until and utcnow() < typing_until),
+                "recording": bool(recording_until and utcnow() < recording_until),
                 "unread_count": unread_count,
-                "last_message": latest.get("content", "") if latest else "",
+                "last_message": latest_message,
                 "last_message_at": serialize_datetime(latest.get("created_at")) if latest else None,
             })
         return Response(summaries)
@@ -942,12 +1763,27 @@ def support_chat(request):
         target_user = oid(request.data.get("user_id")) if is_admin_doc(user_doc) else owner
         if not target_user:
             return Response({"detail": "Select a user before replying."}, status=status.HTTP_400_BAD_REQUEST)
-        message = {"user_id": target_user, "content": content[:2000], "message_type": str(request.data.get("message_type", "text")), "sender": "admin" if is_admin_doc(user_doc) else "user", "created_at": utcnow()}
+
+        if is_admin_doc(user_doc):
+            target_doc = db.users.find_one({"_id": target_user, "role": {"$ne": "admin"}}, {"_id": 1})
+            if not target_doc:
+                return Response({"detail": "Chat user not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        requested_type = str(request.data.get("message_type", "text")).lower()
+        message_type = requested_type if requested_type in {"text", "image", "audio", "file"} else "file"
+
+        message = {
+            "user_id": target_user,
+            "content": content[:2000],
+            "message_type": message_type,
+            "sender": "admin" if is_admin_doc(user_doc) else "user",
+            "created_at": utcnow(),
+        }
         if attachment:
             message["attachment"] = save_upload(attachment, "chat")
         db.chat_messages.insert_one(message)
         if message["sender"] == "user":
-            admin_ids = [admin["_id"] for admin in db.users.find({"$or": [{"role": "admin"}, {"email": ADMIN_EMAIL}]}, {"_id": 1})]
+            admin_ids = [admin["_id"] for admin in db.users.find({"role": "admin"}, {"_id": 1})]
             for admin_id in admin_ids:
                 create_notification("chat", "New support message", f"{user_doc.get('name', user_doc.get('email'))} sent a support message.", admin_id, target_user)
         else:
@@ -960,8 +1796,49 @@ def support_chat(request):
         if owner in doc.get("deleted_for", []):
             continue
         attachment = doc.get("attachment", "")
-        result.append({**{key: doc.get(key) for key in ("content", "sender", "message_type")}, "deleted": bool(doc.get("deleted")), "id": str(doc["_id"]), "user_id": str(doc["user_id"]), "created_at": serialize_datetime(doc.get("created_at")), "attachment_url": request.build_absolute_uri(f"{settings.MEDIA_URL}{attachment}") if attachment else ""})
+        result.append({**{key: doc.get(key) for key in ("content", "sender", "message_type")}, "deleted": bool(doc.get("deleted")), "id": str(doc["_id"]), "user_id": str(doc["user_id"]), "created_at": serialize_datetime(doc.get("created_at")), "attachment_url": f"/api/support-chat/{doc['_id']}/attachment/" if attachment else ""})
     return Response(result)
+
+
+@api_view(["GET"])
+def support_chat_attachment(request, message_id):
+    message_oid = oid(message_id)
+    if not message_oid:
+        return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    db = get_db()
+    owner = owner_oid(request)
+    viewer = db.users.find_one({"_id": owner})
+    message = db.chat_messages.find_one({"_id": message_oid})
+
+    if not message or not message.get("attachment") or message.get("deleted"):
+        return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if not is_admin_doc(viewer) and message.get("user_id") != owner:
+        return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if owner in message.get("deleted_for", []):
+        return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    target = resolve_upload_path(message["attachment"])
+    if not target:
+        return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    inline = (
+        content_type.startswith("image/")
+        or content_type.startswith("audio/")
+    )
+
+    response = FileResponse(
+        target.open("rb"),
+        content_type=content_type,
+        as_attachment=not inline,
+        filename=target.name,
+    )
+    response["Cache-Control"] = "private, no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @api_view(["GET", "POST"])
@@ -969,35 +1846,85 @@ def support_chat(request):
 def chat_presence(request):
     db = get_db()
     owner = owner_oid(request)
+
     if request.method == "POST":
         if request.data.get("offline"):
-            db.users.update_one({"_id": owner}, {"$set": {"last_seen": None, "typing_until": None, "typing_for": None}})
+            db.users.update_one(
+                {"_id": owner},
+                {"$set": {
+                    "last_seen": None,
+                    "typing_until": None,
+                    "typing_for": None,
+                    "recording_until": None,
+                    "recording_for": None,
+                }},
+            )
             return Response({"status": "offline"})
-        typing_for = request.data.get("user_id") if request.data.get("user_id") else "admin"
-        updates = {"typing_until": utcnow() + timedelta(seconds=4), "typing_for": str(typing_for)} if request.data.get("typing") else {"typing_until": None, "typing_for": None}
+
+        activity_for = request.data.get("user_id") if request.data.get("user_id") else "admin"
+
+        if "recording" in request.data:
+            is_recording = bool(request.data.get("recording"))
+            updates = {
+                "recording_until": utcnow() + timedelta(seconds=5) if is_recording else None,
+                "recording_for": str(activity_for) if is_recording else None,
+            }
+            if is_recording:
+                updates.update({"typing_until": None, "typing_for": None})
+            db.users.update_one({"_id": owner}, {"$set": updates})
+            return Response({"status": "recording" if is_recording else "idle"})
+
+        is_typing = bool(request.data.get("typing"))
+        updates = {
+            "typing_until": utcnow() + timedelta(seconds=4) if is_typing else None,
+            "typing_for": str(activity_for) if is_typing else None,
+        }
+        if is_typing:
+            updates.update({"recording_until": None, "recording_for": None})
         db.users.update_one({"_id": owner}, {"$set": updates})
-        return Response({"status": "typing" if request.data.get("typing") else "idle"})
+        return Response({"status": "typing" if is_typing else "idle"})
+
     db.users.update_one({"_id": owner}, {"$set": {"last_seen": utcnow()}})
     viewer = db.users.find_one({"_id": owner})
     query = {"role": "admin"} if not is_admin_doc(viewer) else {"role": {"$ne": "admin"}}
     people = []
+
     for person in db.users.find(query).sort("created_at", DESCENDING):
         last_seen = person.get("last_seen")
         typing_until = person.get("typing_until")
+        recording_until = person.get("recording_until")
+
         if last_seen and last_seen.tzinfo is None:
             last_seen = last_seen.replace(tzinfo=timezone.utc)
         if typing_until and typing_until.tzinfo is None:
             typing_until = typing_until.replace(tzinfo=timezone.utc)
+        if recording_until and recording_until.tzinfo is None:
+            recording_until = recording_until.replace(tzinfo=timezone.utc)
+
         typing_for = str(person.get("typing_for") or "")
-        is_typing = bool(typing_until and utcnow() < typing_until and (is_admin_doc(viewer) or typing_for in ("admin", str(owner))))
+        recording_for = str(person.get("recording_for") or "")
+        viewer_target = ("admin", str(owner))
+
+        is_typing = bool(
+            typing_until
+            and utcnow() < typing_until
+            and (is_admin_doc(viewer) or typing_for in viewer_target)
+        )
+        is_recording = bool(
+            recording_until
+            and utcnow() < recording_until
+            and (is_admin_doc(viewer) or recording_for in viewer_target)
+        )
+
         people.append({
             "id": str(person["_id"]),
             "name": person.get("name") or person.get("email", ""),
             "online": bool(last_seen and utcnow() - last_seen <= timedelta(minutes=2)),
-            "typing": is_typing,
+            "typing": is_typing and not is_recording,
+            "recording": is_recording,
         })
-    return Response(people)
 
+    return Response(people)
 
 @api_view(["GET", "POST"])
 @parser_classes([JSONParser])
@@ -1008,11 +1935,12 @@ def notes(request):
         page = max(int(request.query_params.get("page", 1)), 1)
         page_size = 8
         query = {"owner_id": owner}
-        search = request.query_params.get("search", "").strip()
+        search = request.query_params.get("search", "").strip()[:100]
         if search:
+            safe_search = re.escape(search)
             query["$or"] = [
-                {"title": {"$regex": search, "$options": "i"}},
-                {"content": {"$regex": search, "$options": "i"}},
+                {"title": {"$regex": safe_search, "$options": "i"}},
+                {"content": {"$regex": safe_search, "$options": "i"}},
             ]
         total = db.notes.count_documents(query)
         docs = db.notes.find(query).sort("updated_at", DESCENDING).skip((page - 1) * page_size).limit(page_size)
@@ -1141,13 +2069,20 @@ def earnings(request):
             end = datetime(y + 1, 1, 1, tzinfo=timezone.utc)
             query["earned_at"] = {"$gte": start, "$lt": end}
 
-        search = request.query_params.get("search", "").strip()
+        search = request.query_params.get("search", "").strip()[:100]
         if search:
-            matching_platform_ids = [platform["_id"] for platform in db.platforms.find({"owner_id": owner, "name": {"$regex": search, "$options": "i"}}, {"_id": 1})]
+            safe_search = re.escape(search)
+            matching_platform_ids = [
+                platform["_id"]
+                for platform in db.platforms.find(
+                    {"owner_id": owner, "name": {"$regex": safe_search, "$options": "i"}},
+                    {"_id": 1},
+                )
+            ]
             query["$or"] = [
-                {"note": {"$regex": search, "$options": "i"}},
-                {"category": {"$regex": search, "$options": "i"}},
-                {"currency": {"$regex": search, "$options": "i"}},
+                {"note": {"$regex": safe_search, "$options": "i"}},
+                {"category": {"$regex": safe_search, "$options": "i"}},
+                {"currency": {"$regex": safe_search, "$options": "i"}},
                 {"platform_id": {"$in": matching_platform_ids}},
             ]
         total = db.earnings.count_documents(query)
@@ -1254,10 +2189,15 @@ def dashboard(request):
         now = datetime.now(timezone.utc)
         current_week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         current_month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
-        current_year_start = datetime(now.year, 1, 1, tzinfo=timezone.utc)
         previous_month_start = datetime(now.year if now.month > 1 else now.year - 1, now.month - 1 if now.month > 1 else 12, 1, tzinfo=timezone.utc)
         previous_three_months_start = datetime(now.year if now.month > 3 else now.year - 1, now.month - 3 if now.month > 3 else now.month + 9, 1, tzinfo=timezone.utc)
-        previous_year_start = datetime(now.year - 1, 1, 1, tzinfo=timezone.utc)
+
+        try:
+            one_year_ago = now.replace(year=now.year - 1)
+        except ValueError:
+            # Feb 29 -> Feb 28 in a non-leap previous year.
+            one_year_ago = now.replace(year=now.year - 1, day=28)
+
         if period == "last_week":
             match["earned_at"] = {"$gte": current_week_start - timedelta(days=7), "$lt": current_week_start}
         elif period == "last_month":
@@ -1265,7 +2205,8 @@ def dashboard(request):
         elif period == "last_3_months":
             match["earned_at"] = {"$gte": previous_three_months_start, "$lt": current_month_start}
         else:
-            match["earned_at"] = {"$gte": previous_year_start, "$lt": current_year_start}
+            # Rolling year: same date/time last year through right now.
+            match["earned_at"] = {"$gte": one_year_ago, "$lte": now}
     elif period == "custom" and date_from and date_to:
         try:
             start = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
@@ -1406,6 +2347,6 @@ def dashboard(request):
             for r in yearly
         ],
         "platform_breakdown": platform_breakdown,
-        "recent": [serialize_earning(d, None if platform_id != "all" else recent_pmap.get(d.get("platform_id")), rates) for d in recent_docs],
+        "recent": [serialize_earning(d, recent_pmap.get(d.get("platform_id")), rates) for d in recent_docs],
         "filters": {"currencies": currencies, "years": years, "platforms": platforms},
     })

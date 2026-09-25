@@ -19,6 +19,7 @@ frontend/.env
 
 # Runtime data, uploads, local databases, and logs
 backend/media/
+backend/private_media/
 backend/db.sqlite3
 *.sqlite3
 *.log

@@ -1,4 +1,4 @@
-import { Bell, BarChart3, ChevronDown, ChevronLeft, ChevronRight, DollarSign, FileText, LogOut, Menu, MessageCircle, Moon, PanelLeft, PanelsTopLeft, Settings as SettingsIcon, Sun, Trash2, Users, WalletCards } from 'lucide-react'
+import { Bell, BarChart3, ChevronDown, ChevronLeft, ChevronRight, CreditCard, DollarSign, FileText, LogOut, Menu, MessageCircle, Moon, PanelLeft, PanelsTopLeft, Settings as SettingsIcon, Sun, Trash2, Users, WalletCards } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
@@ -12,6 +12,10 @@ const baseNav = [
   { to: '/earnings', label: 'Earnings', icon: WalletCards },
   { to: '/notes', label: 'Notes', icon: FileText },
   { to: '/support-chat', label: 'Chat', icon: MessageCircle },
+]
+
+const userOnlyNav = [
+  { to: '/payments', label: 'Payments', icon: CreditCard },
 ]
 
 function formatNotificationDateTime(value) {
@@ -156,9 +160,8 @@ export default function AppShell() {
 
   const Sidebar = () => (
     <aside className={`${collapsed ? 'w-19' : 'w-64'} flex h-full flex-col border-r border-default-200 bg-content1/90 p-3 shadow-[8px_0_30px_rgb(15_23_42_/_.03)] backdrop-blur-xl transition-all dark:border-white/8 dark:bg-[#101114]/95 dark:shadow-none`}>
-      <div className={`mb-8 flex rounded-2xl border border-slate-200/80 bg-slate-50/80 ${collapsed ? 'items-center justify-center p-2' : 'flex-col items-start gap-2 p-3'} dark:border-white/8 dark:bg-white/4`}>
-        <img src={collapsed ? '/logo-mark.svg' : '/logo.svg'} alt="Revnivo" className={`${collapsed ? 'h-10 w-10' : 'h-10 w-32'} brand-logo shrink-0 object-contain`} />
-        {!collapsed && <div className="truncate text-[11px] text-slate-500 dark:text-[#777a84]">Income workspace</div>}
+      <div className={`mb-7 flex items-center justify-center rounded-2xl border border-slate-200/80 bg-slate-50/80 ${collapsed ? 'p-2' : 'px-3 py-2.5'} dark:border-white/8 dark:bg-white/4`}>
+        <img src={collapsed ? '/logo-mark.svg' : '/logo.svg'} alt="Revnivo" className={`${collapsed ? 'h-10 w-10' : 'h-9 w-32'} brand-logo shrink-0 object-contain`} />
       </div>
       <nav className="space-y-1">
         {!collapsed && <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-[#62656e]">Workspace</p>}
@@ -167,6 +170,7 @@ export default function AppShell() {
           {dashboardOpen && <div className={collapsed ? 'mt-1 flex flex-col items-center gap-1' : 'ml-3 border-l border-slate-200 pl-3 dark:border-white/8'}><NavLink to="/" end className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`} title="Income"><DollarSign size={18} />{!collapsed && 'Income'}</NavLink><NavLink to="/admin/users" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`} title="Users"><Users size={18} />{!collapsed && 'Users'}</NavLink></div>}
         </div> : <NavLink to="/" end className={linkClass}><BarChart3 size={18} />{!collapsed && 'Dashboard'}</NavLink>}
         {baseNav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} onClick={() => setMobileOpen(false)} className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title={label}><span className="relative"><Icon size={18} />{label === 'Chat' && unreadChat > 0 && <span className="absolute -right-2 -top-2 grid h-4 min-w-4 place-items-center rounded-full bg-[#23C55E] px-0.5 text-[9px] font-bold text-white">{unreadChat}</span>}</span>{!collapsed && label}</NavLink>)}
+        {!isAdmin && userOnlyNav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} onClick={() => setMobileOpen(false)} className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title={label}><Icon size={18} />{!collapsed && label}</NavLink>)}
         {isAdmin && <>{!collapsed && <p className="mb-2 mt-7 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-[#62656e]">Administration</p>}<NavLink to="/admin/subscriptions" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title="Subscriptions"><WalletCards size={18} />{!collapsed && 'Subscriptions'}</NavLink></>}
       </nav>
       <div ref={profileRef} className="relative mt-auto border-t border-slate-200/80 pt-3 dark:border-white/8">

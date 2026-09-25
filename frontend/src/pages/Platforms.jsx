@@ -45,12 +45,53 @@ const emptyForm = {
 
 const statusColors = {
   working: 'success',
-  applied: 'warning',
-  'under review': 'secondary',
-  'not active': 'default',
+  applied: 'primary',
+  'under review': 'warning',
+  'not active': 'danger',
 }
 
 const currencyOptions = getCurrencyOptions()
+
+const dropdownClassNames = {
+  trigger:
+    'h-11 min-h-11 rounded-xl border-0 bg-[#eceef2] px-3.5 shadow-none transition-colors data-[hover=true]:bg-[#e4e7ec] dark:bg-content1 dark:data-[hover=true]:bg-default-100',
+  value: 'text-sm font-semibold text-foreground dark:text-white',
+  selectorIcon: 'right-3 text-default-500 dark:text-zinc-200',
+  popoverContent:
+    'rounded-2xl border border-default-200 bg-content1 p-1 shadow-xl dark:border-white/10 dark:bg-[#202023]',
+}
+
+const autocompleteInputClassNames = {
+  inputWrapper:
+    'h-11 min-h-11 rounded-xl border-0 bg-[#eceef2] px-3.5 shadow-none transition-colors data-[hover=true]:bg-[#e4e7ec] group-data-[focus=true]:bg-[#eceef2] dark:bg-content1 dark:data-[hover=true]:bg-default-100 dark:group-data-[focus=true]:bg-content1',
+  input:
+    'text-sm font-semibold text-foreground placeholder:text-default-500 dark:text-white',
+  innerWrapper: 'gap-2',
+}
+
+
+const modalDropdownClassNames = {
+  trigger:
+    'h-14 min-h-14 rounded-xl border border-default-300/70 bg-default-100 px-4 shadow-none transition-colors data-[hover=true]:bg-default-200 dark:border-white/12 dark:bg-[#24262b] dark:data-[hover=true]:bg-[#2c2f35]',
+  label:
+    'text-xs font-medium text-default-500 dark:text-zinc-400',
+  value:
+    'text-sm font-semibold text-foreground dark:text-white',
+  selectorIcon:
+    'right-4 text-default-500 dark:text-zinc-300',
+  popoverContent:
+    'rounded-2xl border border-default-200 bg-content1 p-1 shadow-xl dark:border-white/10 dark:bg-[#202226]',
+}
+
+const modalAutocompleteInputClassNames = {
+  inputWrapper:
+    'h-14 min-h-14 rounded-xl border border-default-300/70 bg-default-100 px-4 shadow-none transition-colors data-[hover=true]:bg-default-200 group-data-[focus=true]:border-primary/50 group-data-[focus=true]:bg-default-100 dark:border-white/12 dark:bg-[#24262b] dark:data-[hover=true]:bg-[#2c2f35] dark:group-data-[focus=true]:bg-[#24262b]',
+  label:
+    'text-xs font-medium text-default-500 dark:text-zinc-400',
+  input:
+    'text-sm font-semibold text-foreground placeholder:text-default-500 dark:text-white',
+  innerWrapper: 'gap-2',
+}
 
 export default function Platforms() {
   const [items, setItems] = useState([])
@@ -322,8 +363,12 @@ export default function Platforms() {
               <Chip
                 size="sm"
                 radius="full"
-                variant="flat"
+                variant="bordered"
                 color={statusColors[platform.status] || 'default'}
+                classNames={{
+                  base: 'border font-medium',
+                  content: 'text-[12px] font-medium capitalize',
+                }}
               >
                 {platform.status || 'not active'}
               </Chip>
@@ -506,7 +551,7 @@ export default function Platforms() {
         </div>
       )}
 
-      <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={submit} className="space-y-5">
         <Input
           label="Platform name"
           isRequired
@@ -547,7 +592,14 @@ export default function Platforms() {
           }
           allowsCustomValue={false}
           placeholder="Currency"
-          variant="bordered"
+          size="md"
+          variant="flat"
+          radius="lg"
+          inputProps={{ classNames: modalAutocompleteInputClassNames }}
+          classNames={{
+            selectorButton: modalDropdownClassNames.selectorIcon,
+            popoverContent: modalDropdownClassNames.popoverContent,
+          }}
         >
           {currencyOptions.map((item) => (
             <AutocompleteItem
@@ -576,7 +628,10 @@ export default function Platforms() {
               status: Array.from(keys)[0] || 'not active',
             })
           }
-          variant="bordered"
+          size="md"
+          variant="flat"
+          radius="lg"
+          classNames={modalDropdownClassNames}
         >
           <SelectItem key="working">Working</SelectItem>
           <SelectItem key="applied">Applied</SelectItem>
@@ -725,7 +780,10 @@ export default function Platforms() {
               Array.from(keys)[0] || 'all'
             )
           }
-          variant="bordered"
+          size="md"
+          variant="flat"
+          radius="lg"
+          classNames={dropdownClassNames}
         >
           <SelectItem key="all">All statuses</SelectItem>
           <SelectItem key="working">Working</SelectItem>
