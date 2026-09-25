@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
 import api from '../services/api'
 import { formatDateTime } from '../utils/format'
+import ProfileAvatar from './ProfileAvatar'
 
 const baseNav = [
   { to: '/platforms', label: 'Platforms', icon: PanelsTopLeft },
@@ -170,7 +171,7 @@ export default function AppShell() {
       </nav>
       <div ref={profileRef} className="relative mt-auto border-t border-slate-200/80 pt-3 dark:border-white/8">
         <button onClick={() => setProfileOpen((open) => !open)} className={`flex w-full items-center gap-2 rounded-xl p-2 text-left transition hover:bg-slate-100/80 dark:hover:bg-white/6 ${collapsed ? 'justify-center' : ''}`} aria-expanded={profileOpen} aria-label="Open account menu">
-          <div className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full bg-[#1688ff]/12 font-bold text-[#1688ff] dark:text-[#65b5ff]">{user?.profile_image_url ? <img src={user.profile_image_url} alt="Profile" className="h-full w-full object-cover" /> : user?.name?.slice(0, 2).toUpperCase()}</div>
+          <ProfileAvatar user={user} className="h-9 w-9" />
           {!collapsed && <div className="min-w-0"><div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{user?.name}</div><div className="truncate text-[11px] text-slate-500 dark:text-[#777a84]">{user?.email}</div></div>}
         </button>
         {profileOpen && <div className={`absolute bottom-14 z-50 w-56 rounded-xl border border-slate-200 bg-white p-1 shadow-xl dark:border-white/10 dark:bg-[#1b1c21] ${collapsed ? 'left-12' : 'left-0'}`}>
