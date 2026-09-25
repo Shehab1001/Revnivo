@@ -93,30 +93,54 @@ def serialize_platform(doc, request=None):
 def serialize_earning(doc, platform=None, usd_rate=None):
     if not doc:
         return None
+
     earned_at = doc.get("earned_at")
+    expected_at = doc.get("expected_at")
     if isinstance(earned_at, datetime):
         earned_at = earned_at.date()
+    if isinstance(expected_at, datetime):
+        expected_at = expected_at.date()
+
     amount = decimal_to_float(doc.get("amount"))
+    platform_fee = decimal_to_float(doc.get("platform_fee"))
+    payment_fee = decimal_to_float(doc.get("payment_fee"))
+    net_amount = max(amount - platform_fee - payment_fee, 0)
     currency = doc.get("currency", "USD")
+    status_value = doc.get("status", "paid")
+
+    if status_value == "pending" and expected_at:
+        expected_date = expected_at if isinstance(expected_at, date) else None
+        if expected_date and expected_date < date.today():
+            status_value = "overdue"
+
     if isinstance(usd_rate, dict):
         source_rate = usd_rate.get(currency)
         amount_usd = amount / float(source_rate) if source_rate else amount
+        net_amount_usd = net_amount / float(source_rate) if source_rate else net_amount
     else:
         amount_usd = amount if currency == "USD" else (amount / usd_rate if usd_rate else amount)
+        net_amount_usd = net_amount if currency == "USD" else (net_amount / usd_rate if usd_rate else net_amount)
+
     return {
         "id": str(doc["_id"]),
         "platform_id": str(doc.get("platform_id")) if doc.get("platform_id") else None,
         "platform_name": (platform or {}).get("name", "Deleted platform"),
         "amount": amount,
+        "gross_amount": amount,
+        "platform_fee": platform_fee,
+        "payment_fee": payment_fee,
+        "net_amount": round(net_amount, 2),
         "currency": currency,
         "amount_usd": round(amount_usd, 2),
+        "net_amount_usd": round(net_amount_usd, 2),
+        "status": status_value,
         "earned_at": earned_at.isoformat() if isinstance(earned_at, date) else str(earned_at or ""),
+        "expected_at": expected_at.isoformat() if isinstance(expected_at, date) else str(expected_at or ""),
         "note": doc.get("note", ""),
         "description": doc.get("note", ""),
         "category": doc.get("category", ""),
         "created_at": serialize_datetime(doc.get("created_at")),
     }
-
 
 def serialize_note(doc):
     return {
