@@ -927,7 +927,7 @@ export default function SupportChat() {
         {/* Contacts sidebar */}
         <aside
           className={`
-            h-full min-h-0 overflow-y-auto bg-content1 md:block md:border-r
+            h-full min-h-0 overflow-y-auto bg-content1 md:block md:border-r md:border-slate-200/80 dark:md:border-[#2b2d31]
             ${
               user?.role === 'admin'
                 ? selectedUser
