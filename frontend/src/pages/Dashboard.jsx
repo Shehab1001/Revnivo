@@ -750,12 +750,12 @@ export default function Dashboard() {
         onClose={() => setCustomizeOpen(false)}
         title="Customize dashboard"
       >
-        <div className="space-y-4">
-          <p className="text-sm text-default-500">
-            Customize every card separately. Hide what you do not need, or drag cards to change their order.
+        <div className="space-y-3">
+          <p className="text-xs leading-5 text-default-500">
+            Show, hide, or drag any card. The default layout keeps every card in its original position.
           </p>
 
-          <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {dashboardPreferences.order.map((widgetId) => {
               const hidden = dashboardPreferences.hidden.includes(widgetId)
 
@@ -770,26 +770,32 @@ export default function Dashboard() {
                     moveDashboardWidget(draggingWidget, widgetId)
                     setDraggingWidget(null)
                   }}
-                  className={`flex cursor-grab items-center gap-3 rounded-xl border p-3 transition active:cursor-grabbing ${
+                  className={`group flex min-h-[76px] cursor-grab flex-col justify-between rounded-xl border p-2.5 transition active:cursor-grabbing ${
                     draggingWidget === widgetId
                       ? 'border-primary/40 bg-primary/5 opacity-60'
-                      : 'border-default-200 bg-default-50/60 dark:border-white/8 dark:bg-white/[0.02]'
+                      : hidden
+                        ? 'border-default-200 bg-default-100/40 opacity-65 dark:border-white/8 dark:bg-white/[0.015]'
+                        : 'border-default-200 bg-default-50/70 hover:border-primary/30 hover:bg-primary/[0.035] dark:border-white/8 dark:bg-white/[0.025]'
                   }`}
                 >
-                  <GripVertical size={17} className="shrink-0 text-default-400"/>
-                  <span className="min-w-0 flex-1 text-sm font-semibold text-foreground">
+                  <div className="flex items-start justify-between gap-2">
+                    <GripVertical size={14} className="mt-0.5 shrink-0 text-default-400"/>
+                    <Button
+                      isIconOnly
+                      size="sm"
+                      variant="light"
+                      color={hidden ? 'default' : 'primary'}
+                      className="h-7 min-w-7 w-7"
+                      onPress={() => toggleDashboardWidget(widgetId)}
+                      aria-label={hidden ? 'Show card' : 'Hide card'}
+                    >
+                      {hidden ? <EyeOff size={14}/> : <Eye size={14}/>}
+                    </Button>
+                  </div>
+
+                  <span className="line-clamp-2 pr-1 text-xs font-semibold leading-4 text-foreground">
                     {DASHBOARD_WIDGET_LABELS[widgetId]}
                   </span>
-                  <Button
-                    isIconOnly
-                    size="sm"
-                    variant="light"
-                    color={hidden ? 'default' : 'primary'}
-                    onPress={() => toggleDashboardWidget(widgetId)}
-                    aria-label={hidden ? 'Show section' : 'Hide section'}
-                  >
-                    {hidden ? <EyeOff size={16}/> : <Eye size={16}/>}
-                  </Button>
                 </div>
               )
             })}
