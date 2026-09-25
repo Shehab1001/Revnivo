@@ -1461,6 +1461,7 @@ export default function SupportChat() {
 
                       <input
                         type="file"
+                        accept="image/jpeg,image/png,image/webp,application/pdf,audio/webm,audio/ogg,audio/mpeg,audio/mp4,text/plain,text/csv"
                         className="hidden"
                         onChange={(
                           event
