@@ -69,6 +69,30 @@ const autocompleteInputClassNames = {
   innerWrapper: 'gap-2',
 }
 
+
+const modalDropdownClassNames = {
+  trigger:
+    'h-14 min-h-14 rounded-xl border border-default-300/70 bg-default-100 px-4 shadow-none transition-colors data-[hover=true]:bg-default-200 dark:border-white/12 dark:bg-[#24262b] dark:data-[hover=true]:bg-[#2c2f35]',
+  label:
+    'text-xs font-medium text-default-500 dark:text-zinc-400',
+  value:
+    'text-sm font-semibold text-foreground dark:text-white',
+  selectorIcon:
+    'right-4 text-default-500 dark:text-zinc-300',
+  popoverContent:
+    'rounded-2xl border border-default-200 bg-content1 p-1 shadow-xl dark:border-white/10 dark:bg-[#202226]',
+}
+
+const modalAutocompleteInputClassNames = {
+  inputWrapper:
+    'h-14 min-h-14 rounded-xl border border-default-300/70 bg-default-100 px-4 shadow-none transition-colors data-[hover=true]:bg-default-200 group-data-[focus=true]:border-primary/50 group-data-[focus=true]:bg-default-100 dark:border-white/12 dark:bg-[#24262b] dark:data-[hover=true]:bg-[#2c2f35] dark:group-data-[focus=true]:bg-[#24262b]',
+  label:
+    'text-xs font-medium text-default-500 dark:text-zinc-400',
+  input:
+    'text-sm font-semibold text-foreground placeholder:text-default-500 dark:text-white',
+  innerWrapper: 'gap-2',
+}
+
 export default function Platforms() {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -523,7 +547,7 @@ export default function Platforms() {
         </div>
       )}
 
-      <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={submit} className="space-y-5">
         <Input
           label="Platform name"
           isRequired
@@ -567,10 +591,10 @@ export default function Platforms() {
           size="md"
           variant="flat"
           radius="lg"
-          inputProps={{ classNames: autocompleteInputClassNames }}
+          inputProps={{ classNames: modalAutocompleteInputClassNames }}
           classNames={{
-            selectorButton: dropdownClassNames.selectorIcon,
-            popoverContent: dropdownClassNames.popoverContent,
+            selectorButton: modalDropdownClassNames.selectorIcon,
+            popoverContent: modalDropdownClassNames.popoverContent,
           }}
         >
           {currencyOptions.map((item) => (
@@ -603,7 +627,7 @@ export default function Platforms() {
           size="md"
           variant="flat"
           radius="lg"
-          classNames={dropdownClassNames}
+          classNames={modalDropdownClassNames}
         >
           <SelectItem key="working">Working</SelectItem>
           <SelectItem key="applied">Applied</SelectItem>
