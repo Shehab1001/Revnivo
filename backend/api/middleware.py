@@ -19,4 +19,8 @@ class SecurityHeadersMiddleware:
             response["Cache-Control"] = "no-store, private"
             response["Pragma"] = "no-cache"
 
+        csrf_token = getattr(request, "revnivo_csrf", "")
+        if csrf_token:
+            response["X-CSRF-Token"] = csrf_token
+
         return response
