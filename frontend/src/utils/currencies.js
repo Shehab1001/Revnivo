@@ -21,15 +21,56 @@ export function currencyCountry(code) {
 
 export function detectLocalCurrency() {
   try {
-    const region = new Intl.Locale(navigator.language || '').region?.toUpperCase()
-    if (region && countryCurrencies[region]) return countryCurrencies[region]
+    // Timezone is a better signal for where the browser is currently being used
+    // than navigator.language (which may stay en-US regardless of residence).
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''
-    if (timezone === 'Africa/Cairo') return 'EGP'
-    if (timezone.includes('Tokyo')) return 'JPY'
-    if (timezone.includes('London')) return 'GBP'
-    if (timezone.includes('New_York') || timezone.includes('Los_Angeles')) return 'USD'
-    if (timezone.includes('Europe/')) return 'EUR'
-  } catch { /* Keep the local default when locale data is unavailable. */ }
+
+    const timezoneCurrencies = {
+      'Africa/Cairo': 'EGP',
+      'Asia/Riyadh': 'SAR',
+      'Asia/Dubai': 'AED',
+      'Asia/Qatar': 'QAR',
+      'Asia/Kuwait': 'KWD',
+      'Asia/Muscat': 'OMR',
+      'Asia/Amman': 'JOD',
+      'Asia/Istanbul': 'TRY',
+      'Asia/Tokyo': 'JPY',
+      'Asia/Seoul': 'KRW',
+      'Asia/Kolkata': 'INR',
+      'Asia/Shanghai': 'CNY',
+      'Asia/Hong_Kong': 'HKD',
+      'Asia/Singapore': 'SGD',
+      'Europe/London': 'GBP',
+      'Europe/Zurich': 'CHF',
+      'Europe/Oslo': 'NOK',
+      'Europe/Stockholm': 'SEK',
+      'Europe/Warsaw': 'PLN',
+      'America/New_York': 'USD',
+      'America/Chicago': 'USD',
+      'America/Denver': 'USD',
+      'America/Los_Angeles': 'USD',
+      'America/Toronto': 'CAD',
+      'America/Vancouver': 'CAD',
+      'America/Mexico_City': 'MXN',
+      'America/Sao_Paulo': 'BRL',
+      'Australia/Sydney': 'AUD',
+      'Pacific/Auckland': 'NZD',
+      'Africa/Johannesburg': 'ZAR',
+    }
+
+    if (timezoneCurrencies[timezone]) return timezoneCurrencies[timezone]
+    if (timezone.startsWith('Europe/')) return 'EUR'
+
+    const locales = navigator.languages?.length
+      ? navigator.languages
+      : [navigator.language || '']
+
+    for (const locale of locales) {
+      const region = new Intl.Locale(locale).region?.toUpperCase()
+      if (region && countryCurrencies[region]) return countryCurrencies[region]
+    }
+  } catch { /* Keep the local default when browser locale data is unavailable. */ }
+
   return 'EGP'
 }
 
