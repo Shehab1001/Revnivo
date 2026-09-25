@@ -98,8 +98,8 @@ function VoiceMessage({ src, own }) {
   return (
     <div
       className={`
-        mt-1 flex min-w-[250px] max-w-[320px] items-center gap-3 rounded-2xl px-2.5 py-2
-        ${own ? 'bg-black/10 text-white' : 'bg-black/[0.045] text-foreground dark:bg-white/[0.06]'}
+        mt-1 flex min-w-[250px] max-w-[320px] items-center gap-3 rounded-2xl bg-transparent px-2.5 py-2
+        ${own ? 'text-white' : 'text-foreground'}
       `}
     >
       <audio
