@@ -276,3 +276,128 @@ html.dark .note-editor pre {
   border-color: rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.035);
 }
+
+
+.note-inline-attachment {
+  display: inline-block;
+  max-width: 100%;
+  margin: 0.65rem 0.45rem 0.65rem 0;
+  vertical-align: top;
+  cursor: pointer;
+  border-radius: 0.95rem;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition: outline-color 160ms ease, transform 160ms ease;
+}
+
+.note-inline-attachment:hover {
+  outline-color: hsl(var(--heroui-primary) / 0.28);
+}
+
+.note-inline-image-frame {
+  display: block;
+  overflow: hidden;
+  border: 1px solid hsl(var(--heroui-default-200) / 0.85);
+  border-radius: 0.95rem;
+  background: hsl(var(--heroui-default-50));
+}
+
+.note-inline-image-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 520px;
+  object-fit: contain;
+  background: hsl(var(--heroui-default-100) / 0.45);
+}
+
+.note-inline-attachment-caption {
+  display: block;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.68rem;
+  line-height: 1rem;
+  color: hsl(var(--heroui-default-500));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.note-inline-file-card {
+  display: flex;
+  min-height: 76px;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid hsl(var(--heroui-default-200) / 0.85);
+  border-radius: 0.95rem;
+  background: hsl(var(--heroui-default-50) / 0.72);
+  padding: 0.85rem 0.95rem;
+}
+
+.note-inline-file-icon {
+  display: grid;
+  height: 2.5rem;
+  width: 2.5rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 0.75rem;
+  background: hsl(var(--heroui-primary) / 0.1);
+}
+
+.note-inline-file-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.note-inline-file-meta strong,
+.note-inline-file-meta small {
+  display: block;
+}
+
+.note-inline-file-meta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+}
+
+.note-inline-file-meta small {
+  margin-top: 0.2rem;
+  font-size: 0.66rem;
+  color: hsl(var(--heroui-default-400));
+}
+
+.note-inline-file-card a {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: hsl(var(--heroui-primary));
+  text-decoration: none;
+}
+
+html.dark .note-inline-image-frame,
+html.dark .note-inline-file-card {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.note-editor [data-note-attachment][data-width="25"] {
+  width: 25%;
+}
+
+.note-editor [data-note-attachment][data-width="50"] {
+  width: 50%;
+}
+
+.note-editor [data-note-attachment][data-width="75"] {
+  width: 75%;
+}
+
+.note-editor [data-note-attachment][data-width="100"] {
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .note-editor [data-note-attachment] {
+    width: 100% !important;
+  }
+}
