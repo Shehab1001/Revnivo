@@ -145,8 +145,8 @@ export default function Dashboard() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const localCurrency = useMemo(() => detectLocalCurrency(), [])
-  const [currency, setCurrency] = useState('')
-  const [currencySearch, setCurrencySearch] = useState('')
+  const [currency, setCurrency] = useState(localCurrency)
+  const [currencySearch, setCurrencySearch] = useState(localCurrency)
   const [period, setPeriod] = useState('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -261,7 +261,7 @@ export default function Dashboard() {
               onSelectionChange={(keys) => setPlatformId(Array.from(keys)[0] || 'all')}
               classNames={{
                 trigger:
-                  'h-11 min-h-11 border-0 bg-default-100 px-3.5 shadow-none transition-colors data-[hover=true]:bg-default-200 dark:bg-[#242426] dark:data-[hover=true]:bg-[#303033]',
+                  'h-11 min-h-11 border-0 bg-[#eceef2] px-3.5 shadow-none transition-colors data-[hover=true]:bg-[#e4e7ec] dark:bg-[#242426] dark:data-[hover=true]:bg-[#303033]',
                 value:
                   'text-sm font-semibold text-foreground dark:text-white',
                 selectorIcon:
@@ -315,7 +315,7 @@ export default function Dashboard() {
                 ),
                 classNames: {
                   inputWrapper:
-                    'h-11 min-h-11 border-0 bg-default-100 px-3.5 shadow-none transition-colors data-[hover=true]:bg-default-200 group-data-[focus=true]:bg-default-100 dark:bg-[#242426] dark:data-[hover=true]:bg-[#303033] dark:group-data-[focus=true]:bg-[#242426]',
+                    'h-11 min-h-11 border-0 bg-[#eceef2] px-3.5 shadow-none transition-colors data-[hover=true]:bg-[#e4e7ec] group-data-[focus=true]:bg-[#eceef2] dark:bg-[#242426] dark:data-[hover=true]:bg-[#303033] dark:group-data-[focus=true]:bg-[#242426]',
                   input:
                     'text-sm font-semibold text-foreground placeholder:text-default-500 dark:text-white',
                   innerWrapper: 'gap-2',
@@ -355,7 +355,7 @@ export default function Dashboard() {
               onSelectionChange={(keys) => setPeriod(Array.from(keys)[0] || 'all')}
               classNames={{
                 trigger:
-                  'h-11 min-h-11 border-0 bg-default-100 px-3.5 shadow-none transition-colors data-[hover=true]:bg-default-200 dark:bg-[#242426] dark:data-[hover=true]:bg-[#303033]',
+                  'h-11 min-h-11 border-0 bg-[#eceef2] px-3.5 shadow-none transition-colors data-[hover=true]:bg-[#e4e7ec] dark:bg-[#242426] dark:data-[hover=true]:bg-[#303033]',
                 value:
                   'text-sm font-semibold text-foreground dark:text-white',
                 selectorIcon:
