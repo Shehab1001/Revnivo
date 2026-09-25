@@ -2015,32 +2015,64 @@ def chat_presence(request):
 NOTE_ALLOWED_TAGS = {
     "p", "div", "br", "b", "strong", "i", "em", "u",
     "h1", "h2", "h3", "ul", "ol", "li", "blockquote",
-    "pre", "code",
+    "pre", "code", "span",
 }
+NOTE_ATTACHMENT_WIDTHS = {"25", "33", "50", "66", "75", "100"}
 
 
 class _NoteHTMLSanitizer(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.parts = []
+        self.attachment_depth = 0
 
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
+
+        if tag == "span":
+            attrs = dict(attrs or [])
+            attachment_id = str(attrs.get("data-note-attachment") or "")
+            width = str(attrs.get("data-width") or "100")
+
+            if re.fullmatch(r"[0-9a-f]{24}", attachment_id):
+                if width not in NOTE_ATTACHMENT_WIDTHS:
+                    width = "100"
+                self.parts.append(
+                    f'<span data-note-attachment="{attachment_id}" data-width="{width}"></span>'
+                )
+                self.attachment_depth += 1
+            return
+
+        if self.attachment_depth:
+            return
+
         if tag in NOTE_ALLOWED_TAGS:
             self.parts.append(f"<{tag}>")
 
     def handle_startendtag(self, tag, attrs):
+        if self.attachment_depth:
+            return
+
         tag = tag.lower()
         if tag == "br":
             self.parts.append("<br>")
 
     def handle_endtag(self, tag):
         tag = tag.lower()
-        if tag in NOTE_ALLOWED_TAGS and tag != "br":
+
+        if tag == "span" and self.attachment_depth:
+            self.attachment_depth = max(self.attachment_depth - 1, 0)
+            return
+
+        if self.attachment_depth:
+            return
+
+        if tag in NOTE_ALLOWED_TAGS and tag not in {"br", "span"}:
             self.parts.append(f"</{tag}>")
 
     def handle_data(self, data):
-        self.parts.append(escape(data))
+        if not self.attachment_depth:
+            self.parts.append(escape(data))
 
     def get_html(self):
         return "".join(self.parts)
@@ -2073,7 +2105,6 @@ def sanitize_note_html(value):
     parser.feed(str(value or "")[:100000])
     return parser.get_html()
 
-
 def note_plain_text(value):
     parser = _NoteTextExtractor()
     parser.feed(str(value or ""))
@@ -2096,6 +2127,7 @@ def notes(request):
             query["$or"] = [
                 {"title": {"$regex": safe_search, "$options": "i"}},
                 {"content": {"$regex": safe_search, "$options": "i"}},
+                {"attachments.name": {"$regex": safe_search, "$options": "i"}},
             ]
 
         total = db.notes.count_documents(query)
@@ -2264,11 +2296,23 @@ def note_attachment(request, note_id, attachment_id):
 
     if request.method == "DELETE":
         delete_logo(attachment.get("path"))
+
+        content_html = str(note.get("content_html") or "")
+        placeholder_pattern = re.compile(
+            rf'<span[^>]*data-note-attachment=["\']{re.escape(str(attachment.get("id")))}["\'][^>]*></span>',
+            re.IGNORECASE,
+        )
+        content_html = placeholder_pattern.sub("", content_html)
+
         db.notes.update_one(
             {"_id": note_oid, "owner_id": owner},
             {
                 "$pull": {"attachments": {"id": attachment.get("id")}},
-                "$set": {"updated_at": utcnow()},
+                "$set": {
+                    "content_html": content_html,
+                    "content": note_plain_text(content_html),
+                    "updated_at": utcnow(),
+                },
             },
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
