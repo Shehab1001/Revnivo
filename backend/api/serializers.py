@@ -43,8 +43,62 @@ class EarningSerializer(serializers.Serializer):
     amount = serializers.DecimalField(max_digits=18, decimal_places=2, min_value=0.01)
     currency = serializers.CharField(max_length=8)
     earned_at = serializers.DateField()
+    expected_at = serializers.DateField(required=False, allow_null=True)
     note = serializers.CharField(required=False, allow_blank=True, max_length=500)
     category = serializers.CharField(required=True, allow_blank=False, max_length=80)
+    status = serializers.ChoiceField(
+        choices=["paid", "pending"],
+        required=False,
+        default="paid",
+    )
+    platform_fee = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=0,
+        required=False,
+        default=0,
+    )
+    payment_fee = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=0,
+        required=False,
+        default=0,
+    )
+
+    def validate_currency(self, value):
+        return value.strip().upper()
+
+    def validate(self, attrs):
+        amount = attrs.get("amount")
+        platform_fee = attrs.get("platform_fee", 0)
+        payment_fee = attrs.get("payment_fee", 0)
+
+        if amount is not None and platform_fee + payment_fee > amount:
+            raise serializers.ValidationError(
+                "Total fees cannot be greater than the gross amount."
+            )
+
+        if attrs.get("status") == "pending" and not attrs.get("expected_at"):
+            raise serializers.ValidationError(
+                {"expected_at": "Expected payment date is required for pending income."}
+            )
+
+        return attrs
+
+
+class GoalSerializer(serializers.Serializer):
+    monthly_goal = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=0,
+    )
+    yearly_goal = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=0,
+    )
+    currency = serializers.CharField(max_length=8)
 
     def validate_currency(self, value):
         return value.strip().upper()
