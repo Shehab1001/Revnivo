@@ -1,0 +1,52 @@
+name: One-time frontend dependency hardening
+
+on:
+  push:
+    branches: [V1.1]
+    paths:
+      - ".github/workflows/dependency-fix.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: V1.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Remove unused vulnerable Flowbite packages
+        working-directory: frontend
+        run: npm uninstall flowbite flowbite-react
+
+      - name: Upgrade React Router to patched release
+        working-directory: frontend
+        run: npm install react-router-dom@7.18.4
+
+      - name: Audit production dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
+
+      - name: Verify frontend build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Commit hardened lockfile
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/package.json frontend/package-lock.json
+          if git diff --cached --quiet; then
+            echo "No dependency changes to commit."
+            exit 0
+          fi
+          git commit -m "Harden frontend dependencies"
+          git push origin HEAD:V1.1
