@@ -1,4 +1,4 @@
-import { ArrowUpRight, CalendarDays, CircleDollarSign, Download, Layers3, ReceiptText, TrendingDown, TrendingUp } from 'lucide-react'
+import { ArrowUpRight, CalendarDays, CircleDollarSign, Clock3, Download, Lightbulb, Layers3, ReceiptText, Save, Target, TrendingDown, TrendingUp } from 'lucide-react'
 import { Autocomplete, AutocompleteItem, Button, Card, CardBody, Input, Select, SelectItem, Switch } from '@heroui/react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -155,6 +155,12 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('Overview')
   const [error, setError] = useState('')
   const [dataVisible, setDataVisible] = useState(true)
+  const [goalEditing, setGoalEditing] = useState(false)
+  const [goalSaving, setGoalSaving] = useState(false)
+  const [goalForm, setGoalForm] = useState({
+    monthly_goal: '',
+    yearly_goal: '',
+  })
   const effectiveCurrency = currency || localCurrency
   const visibilityStorageKey = user?.id ? `revnivo_dashboard_data_visible_${user.id}` : ''
 
@@ -193,12 +199,46 @@ export default function Dashboard() {
     if (period !== 'custom' || (dateFrom && dateTo)) load(effectiveCurrency, period, platformId, dateFrom, dateTo)
   }, [currency, period, platformId, dateFrom, dateTo])
 
+  useEffect(() => {
+    if (!data?.goals) return
+    setGoalForm({
+      monthly_goal: data.goals.monthly_goal ? String(data.goals.monthly_goal) : '',
+      yearly_goal: data.goals.yearly_goal ? String(data.goals.yearly_goal) : '',
+    })
+  }, [data?.goals?.monthly_goal, data?.goals?.yearly_goal])
+
+  const saveGoals = async () => {
+    setGoalSaving(true)
+    setError('')
+    try {
+      await api.put('/goals/', {
+        monthly_goal: Number(goalForm.monthly_goal || 0),
+        yearly_goal: Number(goalForm.yearly_goal || 0),
+        currency: effectiveCurrency,
+      })
+      setGoalEditing(false)
+      await load(effectiveCurrency, period, platformId, dateFrom, dateTo)
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not save income goals.')
+    } finally {
+      setGoalSaving(false)
+    }
+  }
+
   const monthly = useMemo(() => (data?.monthly || []).map((item) => ({ ...item, label: monthLabel(item.month, item.year) })), [data])
   const yearly = useMemo(() => (data?.yearly || []).map((item) => ({ ...item, label: `${monthLabel(item.month, item.year)} ${String(item.year).slice(-2)}` })), [data])
   const platformBreakdown = data?.platform_breakdown || []
   const monthlyByPlatform = useMemo(() => (data?.monthly_by_platform || []).map((item) => ({ ...item, label: `${monthLabel(item.month, item.year)} ${String(item.year).slice(-2)}` })), [data])
   const platformLines = useMemo(() => platformBreakdown.map((platform, index) => ({ ...platform, dataKey: platform.platform_id, color: platformLineColors[index % platformLineColors.length] })), [platformBreakdown])
   const summary = data?.summary || {}
+  const goals = data?.goals || {}
+  const insights = data?.insights || []
+  const monthlyGoalProgress = goals.monthly_goal > 0
+    ? Math.min((Number(goals.current_month_net || 0) / Number(goals.monthly_goal)) * 100, 100)
+    : 0
+  const yearlyGoalProgress = goals.yearly_goal > 0
+    ? Math.min((Number(goals.current_year_net || 0) / Number(goals.yearly_goal)) * 100, 100)
+    : 0
   const currencyOptions = useMemo(() => getCurrencyOptions(), [])
   const currencySearchOptions = useMemo(() => {
     let regionNames = null
@@ -406,11 +446,92 @@ export default function Dashboard() {
       </div>
 
       {error && <div className="rounded-xl border border-danger/25 bg-danger/10 p-3 text-sm text-danger">{error}</div>}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Revenue" value={formatMoney(summary.total_income, effectiveCurrency)} note={period === 'all' ? 'Across all time' : period === 'custom' ? `${dateFrom || 'Start'} to ${dateTo || 'End'}` : period.replaceAll('_', ' ')} icon={CircleDollarSign} accent="blue" visible={dataVisible}/>
-        <Metric label="This month income" value={formatMoney(currentMonthIncome, effectiveCurrency)} note="vs last month" trend={monthTrend} icon={CircleDollarSign} accent="green" visible={dataVisible}/>
-        <Metric label="Transactions" value={summary.transactions || 0} note="Recorded payments" icon={ReceiptText} accent="violet" visible={dataVisible}/>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <Metric label="Gross revenue" value={formatMoney(summary.total_income, effectiveCurrency)} note={period === 'all' ? 'Paid income across all time' : period === 'custom' ? `${dateFrom || 'Start'} to ${dateTo || 'End'}` : period.replaceAll('_', ' ')} icon={CircleDollarSign} accent="blue" visible={dataVisible}/>
+        <Metric label="Net income" value={formatMoney(summary.net_income, effectiveCurrency)} note="After platform and payment fees" icon={CircleDollarSign} accent="green" visible={dataVisible}/>
+        <Metric label="Pending" value={formatMoney(summary.pending_net_income, effectiveCurrency)} note={`${summary.pending_count || 0} expected payment${summary.pending_count === 1 ? '' : 's'}`} icon={Clock3} accent="violet" visible={dataVisible}/>
+        <Metric label="This month income" value={formatMoney(currentMonthIncome, effectiveCurrency)} note="vs last month" trend={monthTrend} icon={TrendingUp} accent="green" visible={dataVisible}/>
+        <Metric label="Transactions" value={summary.transactions || 0} note="Paid transactions" icon={ReceiptText} accent="violet" visible={dataVisible}/>
         <Metric label="Platforms" value={summary.platforms || 0} note="Active platform records" icon={Layers3} accent="cyan" visible={dataVisible}/>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.05fr_.95fr]">
+        <Panel>
+          <PanelHeading
+            title="Income goals"
+            subtitle={`Track progress using net income in ${effectiveCurrency}`}
+            action={
+              goalEditing ? (
+                <div className="flex gap-2">
+                  <Button size="sm" variant="light" onPress={() => setGoalEditing(false)}>Cancel</Button>
+                  <Button size="sm" color="primary" isLoading={goalSaving} onPress={saveGoals} startContent={!goalSaving ? <Save size={14}/> : null}>Save</Button>
+                </div>
+              ) : (
+                <Button size="sm" variant="flat" color="primary" onPress={() => setGoalEditing(true)} startContent={<Target size={14}/>}>Set goals</Button>
+              )
+            }
+          />
+
+          {goalEditing ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input
+                label="Monthly goal"
+                type="number"
+                min="0"
+                step="0.01"
+                value={goalForm.monthly_goal}
+                onValueChange={(value) => setGoalForm((current) => ({ ...current, monthly_goal: value }))}
+                startContent={<span className="text-xs text-default-400">{effectiveCurrency}</span>}
+              />
+              <Input
+                label="Yearly goal"
+                type="number"
+                min="0"
+                step="0.01"
+                value={goalForm.yearly_goal}
+                onValueChange={(value) => setGoalForm((current) => ({ ...current, yearly_goal: value }))}
+                startContent={<span className="text-xs text-default-400">{effectiveCurrency}</span>}
+              />
+            </div>
+          ) : (
+            <div className="grid gap-5 sm:grid-cols-2">
+              {[
+                ['Monthly', goals.current_month_net || 0, goals.monthly_goal || 0, monthlyGoalProgress],
+                ['Yearly', goals.current_year_net || 0, goals.yearly_goal || 0, yearlyGoalProgress],
+              ].map(([label, current, target, progress]) => (
+                <div key={label} className="rounded-2xl border border-default-200/70 bg-default-50/50 p-4 dark:border-white/8 dark:bg-white/[0.02]">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-semibold text-foreground">{label} goal</span>
+                    <span className="text-xs font-semibold text-primary">{target > 0 ? `${Math.round(progress)}%` : 'Not set'}</span>
+                  </div>
+                  <div className="mt-3 text-sm font-semibold text-foreground">
+                    {formatMoney(current, effectiveCurrency)}
+                    <span className="ml-1 text-xs font-normal text-default-400">/ {target > 0 ? formatMoney(target, effectiveCurrency) : '—'}</span>
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-default-200/70">
+                    <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${target > 0 ? progress : 0}%` }}/>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel>
+          <PanelHeading title="Smart insights" subtitle="Automatic observations from your income data" action={<Lightbulb size={17} className="text-warning"/>}/>
+          {insights.length ? (
+            <div className="space-y-2.5">
+              {insights.map((insight, index) => (
+                <div key={index} className="flex gap-3 rounded-xl border border-default-200/60 bg-default-50/50 p-3 text-xs leading-5 text-default-600 dark:border-white/6 dark:bg-white/[0.02]">
+                  <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><Lightbulb size={13}/></span>
+                  <span>{insight}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="Insights are warming up" text="Add more earnings to generate useful observations."/>
+          )}
+        </Panel>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.18fr_.82fr]">
