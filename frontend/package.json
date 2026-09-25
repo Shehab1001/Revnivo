@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@heroui/react": "^2.8.10",
+    "@heroui/react": "^3.2.6",
     "axios": "^1.11.0",
     "flag-icons": "^7.5.0",
     "framer-motion": "^11.5.6",
