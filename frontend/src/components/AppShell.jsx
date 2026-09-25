@@ -156,9 +156,8 @@ export default function AppShell() {
 
   const Sidebar = () => (
     <aside className={`${collapsed ? 'w-19' : 'w-64'} flex h-full flex-col border-r border-default-200 bg-content1/90 p-3 shadow-[8px_0_30px_rgb(15_23_42_/_.03)] backdrop-blur-xl transition-all dark:border-white/8 dark:bg-[#101114]/95 dark:shadow-none`}>
-      <div className={`mb-8 flex rounded-2xl border border-slate-200/80 bg-slate-50/80 ${collapsed ? 'items-center justify-center p-2' : 'flex-col items-start gap-2 p-3'} dark:border-white/8 dark:bg-white/4`}>
-        <img src={collapsed ? '/logo-mark.svg' : '/logo.svg'} alt="Revnivo" className={`${collapsed ? 'h-10 w-10' : 'h-10 w-32'} brand-logo shrink-0 object-contain`} />
-        {!collapsed && <div className="truncate text-[11px] text-slate-500 dark:text-[#777a84]">Income workspace</div>}
+      <div className={`mb-7 flex items-center justify-center rounded-2xl border border-slate-200/80 bg-slate-50/80 ${collapsed ? 'p-2' : 'px-3 py-2.5'} dark:border-white/8 dark:bg-white/4`}>
+        <img src={collapsed ? '/logo-mark.svg' : '/logo.svg'} alt="Revnivo" className={`${collapsed ? 'h-10 w-10' : 'h-9 w-32'} brand-logo shrink-0 object-contain`} />
       </div>
       <nav className="space-y-1">
         {!collapsed && <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-[#62656e]">Workspace</p>}
