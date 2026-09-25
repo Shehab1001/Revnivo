@@ -1,5 +1,5 @@
 import { Button, Card, CardBody, Chip, Input, Textarea } from '@heroui/react'
-import { Mic, MessageCircle, Paperclip, Pause, Play, Search, Smile, Trash2, Volume2 } from 'lucide-react'
+import { ChevronLeft, Mic, MessageCircle, Paperclip, Pause, Play, Search, Smile, Trash2, Volume2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
@@ -98,7 +98,7 @@ function VoiceMessage({ src, own }) {
   return (
     <div
       className={`
-        mt-1 flex min-w-[250px] max-w-[320px] items-center gap-3 rounded-2xl bg-transparent px-2.5 py-2
+        mt-1 flex w-[min(72vw,300px)] min-w-0 max-w-full items-center gap-2.5 rounded-2xl bg-transparent px-1.5 py-2 sm:w-[280px] sm:gap-3 sm:px-2.5
         ${own ? 'text-white' : 'text-foreground'}
       `}
     >
@@ -192,7 +192,7 @@ function AttachmentPreview({ url, file, own }) {
       <img
         src={imageUrl}
         alt="Attachment"
-        className="mt-2 max-h-64 max-w-full rounded-xl object-contain"
+        className="mt-2 max-h-56 w-auto max-w-full rounded-xl object-contain sm:max-h-64"
       />
     )
   }
@@ -835,12 +835,20 @@ export default function SupportChat() {
     }
   }
 
-  const active = selectedUser
-    ? contacts.find(
-        (contact) =>
-          contact.id === selectedUser
-      )
-    : null
+  const active =
+    user?.role === 'admin'
+      ? selectedUser
+        ? contacts.find(
+            (contact) =>
+              contact.id === selectedUser
+          )
+        : null
+      : contacts[0] || {
+          id: 'support',
+          name: 'Revnivo Support',
+          email: 'Technical support',
+          online: false,
+        }
 
   const visibleContacts =
     contacts.filter((contact) =>
@@ -867,7 +875,7 @@ export default function SupportChat() {
 
   return (
     <div
-      className="-mx-4 -my-4 flex h-[calc(100vh-4rem)] min-h-0 w-[calc(100%+2rem)] flex-col md:-mx-6 md:-my-6 md:w-[calc(100%+3rem)] lg:-mx-8 lg:-my-8 lg:w-[calc(100%+4rem)]"
+      className="-mx-4 -my-4 flex h-[calc(100dvh-4rem)] min-h-0 w-[calc(100%+2rem)] flex-col overflow-hidden md:-mx-6 md:-my-6 md:w-[calc(100%+3rem)] lg:-mx-8 lg:-my-8 lg:w-[calc(100%+4rem)]"
       onClick={() =>
         contextMenu &&
         setContextMenu(null)
@@ -876,7 +884,7 @@ export default function SupportChat() {
       {/* Message context menu */}
       {contextMenu && (
         <div
-          className="fixed z-70 w-44 rounded-xl border border-divider bg-content1 p-1 text-foreground shadow-2xl"
+          className="fixed z-70 w-44 max-w-[calc(100vw-1rem)] rounded-xl border border-divider bg-content1 p-1 text-foreground shadow-2xl"
           style={{
             left: contextMenu.x,
             top: contextMenu.y,
@@ -909,11 +917,16 @@ export default function SupportChat() {
 
       <Card
         radius="none"
-        className="grid h-full min-h-0 w-full flex-1 overflow-hidden rounded-none border-divider bg-content1 text-foreground shadow-none md:grid-cols-[280px_1fr]"
+        className="grid h-full min-h-0 w-full flex-1 grid-cols-1 overflow-hidden rounded-none border-divider bg-content1 text-foreground shadow-none md:grid-cols-[280px_minmax(0,1fr)] lg:grid-cols-[300px_minmax(0,1fr)]"
       >
         {/* Contacts sidebar */}
-        <aside className="min-h-0 overflow-y-auto border-b border-divider bg-content1 md:border-b-0 md:border-r">
-          <div className="border-b border-divider p-4">
+        <aside
+          className={`
+            h-full min-h-0 overflow-y-auto bg-content1 md:block md:border-r
+            ${user?.role === 'admin' && selectedUser ? 'hidden' : 'block'}
+          `}
+        >
+          <div className="sticky top-0 z-10 border-b border-divider bg-content1 p-3 sm:p-4">
             <Input
               aria-label="Search people"
               placeholder="Search people..."
@@ -949,7 +962,7 @@ export default function SupportChat() {
                     w-full
                     items-center
                     gap-3
-                    p-3
+                    p-3 sm:p-3.5
                     text-left
                     transition-colors
                     ${
@@ -1069,11 +1082,34 @@ export default function SupportChat() {
         </aside>
 
         {/* Active chat */}
-        <section className="flex min-h-0 flex-col bg-background">
+        <section
+          className={`
+            h-full min-h-0 flex-col bg-background md:flex
+            ${user?.role === 'admin' && !selectedUser ? 'hidden' : 'flex'}
+          `}
+        >
           {active ? (
             <>
               {/* Chat header */}
-              <div className="flex shrink-0 items-center gap-3 border-b border-divider bg-content1 p-4">
+              <div className="flex min-h-16 shrink-0 items-center gap-2 border-b border-divider bg-content1 px-3 py-2.5 sm:gap-3 sm:p-4">
+                {user?.role === 'admin' && (
+                  <Button
+                    isIconOnly
+                    size="sm"
+                    variant="light"
+                    className="-ml-1 h-9 w-9 min-w-9 md:hidden"
+                    onPress={() => {
+                      setSelectedUser('')
+                      setMessages([])
+                      lastMessageIdRef.current = null
+                    }}
+                    aria-label="Back to chats"
+                    title="Back to chats"
+                  >
+                    <ChevronLeft size={20} />
+                  </Button>
+                )}
+
                 <div className="relative">
                   <Avatar
                     user={active}
@@ -1101,7 +1137,7 @@ export default function SupportChat() {
                   />
                 </div>
 
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-semibold text-foreground">
                     {active.name}
                   </div>
@@ -1123,7 +1159,7 @@ export default function SupportChat() {
                     size="sm"
                     variant="light"
                     color="danger"
-                    className="ml-auto"
+                    className="ml-1 shrink-0"
                     onPress={() => setClearChatOpen(true)}
                     aria-label="Delete chat"
                     title="Delete chat"
@@ -1136,7 +1172,7 @@ export default function SupportChat() {
               {/* Messages */}
               <div
                 ref={messageListRef}
-                className="min-h-0 flex-1 overflow-y-auto p-5"
+                className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-4 sm:p-5"
               >
                 {messages.length ? (
                   <div className="flex min-h-full flex-col justify-end">
@@ -1196,7 +1232,7 @@ export default function SupportChat() {
                         return (
                           <div key={message.id}>
                             {showDateLabel && (
-                              <div className="my-5 flex items-center justify-center">
+                              <div className="my-4 flex items-center justify-center sm:my-5">
                                 <span className="rounded-full bg-default-100 px-3 py-1 text-[11px] font-medium text-default-500 ring-1 ring-inset ring-divider">
                                   {getMessageDateLabel(
                                     message.created_at
@@ -1259,7 +1295,8 @@ export default function SupportChat() {
                             <div
                               className={`
                                 flex
-                                max-w-[80%]
+                                max-w-[88%]
+                                sm:max-w-[80%]
                                 flex-col
                                 ${
                                   own
@@ -1271,8 +1308,10 @@ export default function SupportChat() {
                               <div
                                 className={`
                                   rounded-2xl
-                                  px-4
-                                  py-3
+                                  px-3
+                                  py-2.5
+                                  sm:px-4
+                                  sm:py-3
                                   text-sm
                                   shadow-sm
                                   ${
@@ -1394,9 +1433,9 @@ export default function SupportChat() {
               {/* Composer */}
               <form
                 onSubmit={send}
-                className="shrink-0 border-t border-divider bg-content1 p-3"
+                className="shrink-0 border-t border-divider bg-content1 px-2.5 pb-[max(.625rem,env(safe-area-inset-bottom))] pt-2.5 sm:p-3"
               >
-                <div className="relative flex items-end">
+                <div className="relative flex min-w-0 items-end">
                   <div className="absolute bottom-2 left-2 z-10 flex items-center gap-1">
                     <label className="grid h-8 w-8 cursor-pointer place-items-center rounded-full text-default-500 transition-colors hover:bg-default-100 hover:text-foreground">
                       <Paperclip
@@ -1465,7 +1504,7 @@ export default function SupportChat() {
                     className="w-full"
                     classNames={{
                       inputWrapper:
-                        'bg-default-100 border border-divider min-h-12',
+                        'bg-default-100 border border-divider min-h-12 pr-11 pl-20 sm:pl-20',
                       input:
                         'text-foreground placeholder:text-default-400',
                     }}
