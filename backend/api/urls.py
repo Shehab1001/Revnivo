@@ -8,6 +8,7 @@ urlpatterns = [
     path("auth/forgot-password/", views.forgot_password),
     path("auth/reset-password/", views.reset_password),
     path("auth/google/", views.google_login),
+    path("auth/logout/", views.logout),
     path("auth/me/", views.me),
     path("auth/profile/", views.profile),
     path("admin/users/", views.admin_users),
