@@ -13,6 +13,7 @@ import Settings from './pages/Settings'
 import AdminUsers from './pages/AdminUsers'
 import Subscriptions from './pages/Subscriptions'
 import SupportChat from './pages/SupportChat'
+import Landing from './pages/Landing'
 
 function Protected({ children }) {
   const { isAuthenticated, sessionChecked } = useAuth()
@@ -34,18 +35,19 @@ function PublicOnly({ children }) {
   }
 
   return isAuthenticated
-    ? <Navigate to="/" replace />
+    ? <Navigate to="/dashboard" replace />
     : children
 }
 
 export default function App() {
   return (
     <Routes>
+      <Route path="/" element={<Landing/>} />
       <Route path="/login" element={<PublicOnly><Login/></PublicOnly>} />
       <Route path="/register" element={<PublicOnly><Register/></PublicOnly>} />
       <Route path="/forgot-password" element={<PublicOnly><ForgotPassword/></PublicOnly>} />
       <Route element={<Protected><AppShell/></Protected>}>
-        <Route path="/" element={<Dashboard/>}/>
+        <Route path="/dashboard" element={<Dashboard/>}/>
         <Route path="/platforms" element={<Platforms/>}/>
         <Route path="/earnings" element={<Earnings/>}/>
         <Route path="/payments" element={<Payments/>}/>
