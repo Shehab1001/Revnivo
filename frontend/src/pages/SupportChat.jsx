@@ -1008,7 +1008,7 @@ export default function SupportChat() {
                           contact.last_message ||
                           'No messages yet'
                         )}
-                      </div>                      </div>
+                      </div>
 
                       {contact.unread_count >
                         0 && (
