@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard'
 import Earnings from './pages/Earnings'
 import Login from './pages/Login'
 import Platforms from './pages/Platforms'
+import Payments from './pages/Payments'
 import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
 import Notes from './pages/Notes'
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/" element={<Dashboard/>}/>
         <Route path="/platforms" element={<Platforms/>}/>
         <Route path="/earnings" element={<Earnings/>}/>
+        <Route path="/payments" element={<Payments/>}/>
         <Route path="/notes" element={<Notes/>}/>
         <Route path="/settings" element={<Settings/>}/>
         <Route path="/admin/users" element={<AdminUsers/>}/>
