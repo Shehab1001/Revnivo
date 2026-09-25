@@ -146,7 +146,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const localCurrency = useMemo(() => detectLocalCurrency(), [])
   const [currency, setCurrency] = useState(localCurrency)
-  const [currencySearch, setCurrencySearch] = useState(localCurrency)
+  const [currencySearch, setCurrencySearch] = useState('')
+  const [currencyOpen, setCurrencyOpen] = useState(false)
   const [period, setPeriod] = useState('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -246,7 +247,7 @@ export default function Dashboard() {
             size="sm"
             classNames={{ label: 'text-sm font-medium text-default-600' }}
           >
-            Hide data
+            {dataVisible ? 'Hide data' : 'Unhide data'}
           </Switch>
 
           <div className="flex w-full flex-wrap justify-end gap-2">
@@ -255,13 +256,13 @@ export default function Dashboard() {
               className="w-full sm:w-44"
               size="md"
               variant="flat"
-              radius="full"
+              radius="lg"
               startContent={<Layers3 size={16} className="shrink-0 text-default-600 dark:text-zinc-100" />}
               selectedKeys={new Set([String(platformId)])}
               onSelectionChange={(keys) => setPlatformId(Array.from(keys)[0] || 'all')}
               classNames={{
                 trigger:
-                  'h-11 min-h-11 border-0 bg-[#eceef2] px-3.5 shadow-none transition-colors data-[hover=true]:bg-[#e4e7ec] dark:bg-[#242426] dark:data-[hover=true]:bg-[#303033]',
+                  'h-11 min-h-11 rounded-xl border-0 bg-[#eceef2] px-3.5 shadow-none transition-colors data-[hover=true]:bg-[#e4e7ec] dark:bg-content1 dark:data-[hover=true]:bg-default-100',
                 value:
                   'text-sm font-semibold text-foreground dark:text-white',
                 selectorIcon:
@@ -276,18 +277,47 @@ export default function Dashboard() {
               ))}
             </Select>
 
+            <Select
+              aria-label="Date range"
+              className="w-full sm:w-44" 
+              size="md"
+              variant="flat"
+              radius="lg"
+              startContent={<CalendarDays size={16} className="shrink-0 text-default-600 dark:text-zinc-100" />}
+              selectedKeys={new Set([period])}
+              onSelectionChange={(keys) => setPeriod(Array.from(keys)[0] || 'all')}
+              classNames={{
+                trigger:
+                  'h-11 min-h-11 rounded-xl border-0 bg-[#eceef2] px-3.5 shadow-none transition-colors data-[hover=true]:bg-[#e4e7ec] dark:bg-content1 dark:data-[hover=true]:bg-default-100',
+                value:
+                  'text-sm font-semibold text-foreground dark:text-white',
+                selectorIcon:
+                  'right-3 text-default-500 dark:text-zinc-200',
+                popoverContent:
+                  'rounded-2xl border border-default-200 bg-content1 p-1 shadow-xl dark:border-white/10 dark:bg-[#202023]',
+              }}
+            >
+              <SelectItem key="all">All time</SelectItem>
+              <SelectItem key="last_week">Last week</SelectItem>
+              <SelectItem key="last_month">Last month</SelectItem>
+              <SelectItem key="last_3_months">Last 3 months</SelectItem>
+              <SelectItem key="last_year">Last year</SelectItem>
+              <SelectItem key="custom">Custom</SelectItem>
+            </Select>
+
             <Autocomplete
               aria-label="Currency"
-              placeholder="Currency"
               className="w-full sm:w-44"
               size="md"
               variant="flat"
-              radius="full"
+              radius="lg"
               isClearable={false}
               allowsCustomValue={false}
               selectedKey={currency || null}
-              inputValue={currencySearch}
-              onInputChange={setCurrencySearch}
+              inputValue={currencyOpen ? currencySearch : currency}
+              onInputChange={(value) => {
+                if (currencyOpen) setCurrencySearch(value)
+              }}
               onSelectionChange={(key) => {
                 if (!key) return
                 const selected = String(key)
@@ -295,13 +325,8 @@ export default function Dashboard() {
                 setCurrencySearch(selected)
               }}
               onOpenChange={(isOpen) => {
-                if (isOpen) {
-                  // Open with an empty query so every currency is visible.
-                  setCurrencySearch('')
-                } else if (currency) {
-                  // The closed pill shows only the selected currency code.
-                  setCurrencySearch(currency)
-                }
+                setCurrencyOpen(isOpen)
+                if (isOpen) setCurrencySearch('')
               }}
               defaultFilter={(textValue, inputValue) =>
                 textValue.toLowerCase().includes(inputValue.trim().toLowerCase())
@@ -315,7 +340,7 @@ export default function Dashboard() {
                 ),
                 classNames: {
                   inputWrapper:
-                    'h-11 min-h-11 border-0 bg-[#eceef2] px-3.5 shadow-none transition-colors data-[hover=true]:bg-[#e4e7ec] group-data-[focus=true]:bg-[#eceef2] dark:bg-[#242426] dark:data-[hover=true]:bg-[#303033] dark:group-data-[focus=true]:bg-[#242426]',
+                    'h-11 min-h-11 rounded-xl border-0 bg-[#eceef2] px-3.5 shadow-none transition-colors data-[hover=true]:bg-[#e4e7ec] group-data-[focus=true]:bg-[#eceef2] dark:bg-content1 dark:data-[hover=true]:bg-default-100 dark:group-data-[focus=true]:bg-content1',
                   input:
                     'text-sm font-semibold text-foreground placeholder:text-default-500 dark:text-white',
                   innerWrapper: 'gap-2',
@@ -343,34 +368,6 @@ export default function Dashboard() {
                 </AutocompleteItem>
               ))}
             </Autocomplete>
-
-            <Select
-              aria-label="Date range"
-              className="w-full sm:w-44" 
-              size="md"
-              variant="flat"
-              radius="full"
-              startContent={<CalendarDays size={16} className="shrink-0 text-default-600 dark:text-zinc-100" />}
-              selectedKeys={new Set([period])}
-              onSelectionChange={(keys) => setPeriod(Array.from(keys)[0] || 'all')}
-              classNames={{
-                trigger:
-                  'h-11 min-h-11 border-0 bg-[#eceef2] px-3.5 shadow-none transition-colors data-[hover=true]:bg-[#e4e7ec] dark:bg-[#242426] dark:data-[hover=true]:bg-[#303033]',
-                value:
-                  'text-sm font-semibold text-foreground dark:text-white',
-                selectorIcon:
-                  'right-3 text-default-500 dark:text-zinc-200',
-                popoverContent:
-                  'rounded-2xl border border-default-200 bg-content1 p-1 shadow-xl dark:border-white/10 dark:bg-[#202023]',
-              }}
-            >
-              <SelectItem key="all">All time</SelectItem>
-              <SelectItem key="last_week">Last week</SelectItem>
-              <SelectItem key="last_month">Last month</SelectItem>
-              <SelectItem key="last_3_months">Last 3 months</SelectItem>
-              <SelectItem key="last_year">Last year</SelectItem>
-              <SelectItem key="custom">Custom</SelectItem>
-            </Select>
             {period === 'custom' && (
               <div className="ml-auto grid w-full grid-cols-2 gap-2 sm:w-[320px]">
                 <Input
