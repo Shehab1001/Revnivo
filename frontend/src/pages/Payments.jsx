@@ -3,6 +3,7 @@ import {
   Card,
   CardBody,
   Chip,
+  Input,
   Radio,
   RadioGroup,
 } from '@heroui/react'
@@ -46,6 +47,8 @@ export default function Payments() {
   const [selectedPlan, setSelectedPlan] = useState('')
   const [selectedGateway, setSelectedGateway] = useState('')
   const [loading, setLoading] = useState(true)
+  const [checkoutLoading, setCheckoutLoading] = useState(false)
+  const [phone, setPhone] = useState('')
   const [message, setMessage] = useState('')
 
   useEffect(() => {
@@ -85,6 +88,46 @@ export default function Payments() {
       ),
     [data?.gateways, selectedGateway]
   )
+
+  const startCheckout = async () => {
+    if (!plan || !gateway) return
+
+    if (gateway.id !== 'paymob') {
+      setMessage('This payment gateway is not connected yet.')
+      return
+    }
+
+    if (!phone.trim()) {
+      setMessage('Enter your phone number before continuing to Paymob.')
+      return
+    }
+
+    setCheckoutLoading(true)
+    setMessage('')
+
+    try {
+      const { data: checkout } = await api.post(
+        '/payments/paymob/checkout/',
+        {
+          plan_id: plan.id,
+          phone: phone.trim(),
+        }
+      )
+
+      if (!checkout.checkout_url) {
+        throw new Error('Missing Paymob checkout URL.')
+      }
+
+      window.location.assign(checkout.checkout_url)
+    } catch (error) {
+      setMessage(
+        error.response?.data?.detail ||
+          error.message ||
+          'Could not start Paymob checkout.'
+      )
+      setCheckoutLoading(false)
+    }
+  }
 
   if (loading) {
     return <Loading label="Loading payment center..." />
@@ -301,26 +344,45 @@ export default function Payments() {
             })}
           </RadioGroup>
 
-          <div className="mt-5 flex flex-col gap-3 border-t border-divider pt-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-xs text-default-500">
-              {gateway?.configured
-                ? 'You will be redirected to the secure payment gateway.'
-                : 'This gateway needs merchant API credentials before live payments can be accepted.'}
-            </div>
+          <div className="mt-5 border-t border-divider pt-5">
+            {gateway?.id === 'paymob' && (
+              <div className="mb-4 max-w-sm">
+                <Input
+                  label="Phone number"
+                  placeholder="+2010xxxxxxxx"
+                  value={phone}
+                  onValueChange={setPhone}
+                  variant="flat"
+                  radius="lg"
+                  description="Paymob requires a customer phone number for checkout."
+                  classNames={{
+                    inputWrapper:
+                      'h-14 rounded-xl border border-default-200 bg-default-100 dark:border-white/10 dark:bg-[#24262b]',
+                  }}
+                />
+              </div>
+            )}
 
-            <Button
-              color="primary"
-              size="lg"
-              isDisabled={!gateway?.configured || !plan}
-              startContent={<CreditCard size={18} />}
-              onPress={() =>
-                setMessage(
-                  'The payment gateway UI is ready. Add the provider API credentials and webhook to enable live checkout.'
-                )
-              }
-            >
-              Pay {plan ? formatPrice(plan.price, plan.currency) : ''}
-            </Button>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-xs text-default-500">
+                {gateway?.configured
+                  ? 'You will be redirected to Paymob secure Unified Checkout. Revnivo confirms payment only after the signed webhook is verified.'
+                  : 'This gateway needs merchant API credentials before live payments can be accepted.'}
+              </div>
+
+              <Button
+                color="primary"
+                size="lg"
+                isLoading={checkoutLoading}
+                isDisabled={!gateway?.configured || !plan || (gateway?.id === 'paymob' && !phone.trim())}
+                startContent={!checkoutLoading ? <CreditCard size={18} /> : null}
+                onPress={startCheckout}
+              >
+                {checkoutLoading
+                  ? 'Opening checkout...'
+                  : `Pay ${plan ? formatPrice(plan.price, plan.currency) : ''}`}
+              </Button>
+            </div>
           </div>
         </CardBody>
       </Card>
