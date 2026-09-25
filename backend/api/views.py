@@ -1544,6 +1544,16 @@ def support_chat(request):
             db.notifications.update_many({"kind": "chat", "chat_user_id": str(chat_user_id), "read": False, "$or": [{"owner_id": None}, {"owner_id": owner}]}, {"$set": {"read": True}})
         return Response({"status": "read"})
     if request.method == "DELETE":
+        if request.data.get("mode") == "chat":
+            if not is_admin_doc(user_doc):
+                return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
+            chat_user_id = oid(request.data.get("user_id"))
+            if not chat_user_id:
+                return Response({"detail": "Invalid user id."}, status=status.HTTP_400_BAD_REQUEST)
+            result = db.chat_messages.delete_many({"user_id": chat_user_id})
+            db.notifications.delete_many({"kind": "chat", "chat_user_id": str(chat_user_id)})
+            return Response({"status": "cleared", "deleted_messages": result.deleted_count})
+
         message_id = oid(request.data.get("id"))
         if not message_id:
             return Response({"detail": "Invalid message id."}, status=status.HTTP_400_BAD_REQUEST)
