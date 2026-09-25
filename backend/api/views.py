@@ -1561,9 +1561,23 @@ def support_chat(request):
         if not message:
             return Response({"detail": "Message not found."}, status=status.HTTP_404_NOT_FOUND)
         if request.data.get("mode") == "everyone":
-            db.chat_messages.update_one({"_id": message_id}, {"$set": {"deleted": True, "content": "", "attachment": ""}})
+            allowed = is_admin_doc(user_doc) or message.get("sender") == "user"
+            if not allowed:
+                return Response(
+                    {"detail": "You can only delete admin messages from your own view."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if message.get("attachment"):
+                delete_logo(message["attachment"])
+            db.chat_messages.update_one(
+                {"_id": message_id},
+                {"$set": {"deleted": True, "content": "", "attachment": ""}},
+            )
         else:
-            db.chat_messages.update_one({"_id": message_id}, {"$addToSet": {"deleted_for": owner}})
+            db.chat_messages.update_one(
+                {"_id": message_id},
+                {"$addToSet": {"deleted_for": owner}},
+            )
         return Response({"status": "deleted"})
     if request.method == "GET" and is_admin_doc(user_doc) and request.query_params.get("summary"):
         users = [doc for doc in db.users.find({"role": {"$ne": "admin"}}).sort("created_at", DESCENDING)]
