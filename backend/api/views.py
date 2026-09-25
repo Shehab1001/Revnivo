@@ -204,6 +204,7 @@ def health(request):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([RegistrationThrottle])
 def register(request):
     serializer = RegisterSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
@@ -211,32 +212,56 @@ def register(request):
     db = get_db()
     ensure_indexes()
     email = data["email"].strip().lower()
-    try:
-        result = db.users.insert_one(create_user_doc(data["name"].strip(), email, make_password(data["password"])))
-    except DuplicateKeyError:
-        return Response({"detail": "An account with this email already exists."}, status=status.HTTP_409_CONFLICT)
-    doc = {"_id": result.inserted_id, "name": data["name"].strip(), "email": email}
-    admin_doc = db.users.find_one({"email": ADMIN_EMAIL}, {"_id": 1})
-    create_notification("user", "New user registered", f"{email} created a Revnivo account.", admin_doc["_id"] if admin_doc else None)
-    token = create_access_token(str(result.inserted_id), email)
-    return Response({
-        "token": token,
-        "user": serialize_user(doc, request),
-    }, status=status.HTTP_201_CREATED)
 
+    user_doc = create_user_doc(
+        data["name"].strip(),
+        email,
+        make_password(data["password"]),
+    )
+
+    try:
+        result = db.users.insert_one(user_doc)
+    except DuplicateKeyError:
+        return Response(
+            {"detail": "An account with this email already exists."},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    user_doc["_id"] = result.inserted_id
+
+    for admin_doc in db.users.find({"role": "admin"}, {"_id": 1}):
+        create_notification(
+            "user",
+            "New user registered",
+            f"{email} created a Revnivo account.",
+            admin_doc["_id"],
+        )
+
+    return auth_success_response(
+        user_doc,
+        request,
+        status.HTTP_201_CREATED,
+    )
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([AuthBurstThrottle])
 def login(request):
     serializer = LoginSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     email = serializer.validated_data["email"].strip().lower()
     doc = get_db().users.find_one({"email": email})
-    if not doc or not check_password(serializer.validated_data["password"], doc.get("password_hash", "")):
-        return Response({"detail": "Invalid email or password."}, status=status.HTTP_401_UNAUTHORIZED)
-    token = create_access_token(str(doc["_id"]), email)
-    return Response({"token": token, "user": serialize_user(doc, request)})
 
+    if not doc or not check_password(
+        serializer.validated_data["password"],
+        doc.get("password_hash", ""),
+    ):
+        return Response(
+            {"detail": "Invalid email or password."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    return auth_success_response(doc, request)
 
 def send_password_reset_email(email, code):
     """
