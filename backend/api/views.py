@@ -2017,7 +2017,8 @@ NOTE_ALLOWED_TAGS = {
     "h1", "h2", "h3", "ul", "ol", "li", "blockquote",
     "pre", "code", "span",
 }
-NOTE_ATTACHMENT_WIDTHS = {"25", "33", "50", "66", "75", "100"}
+NOTE_ATTACHMENT_MIN_WIDTH = 15
+NOTE_ATTACHMENT_MAX_WIDTH = 100
 
 
 class _NoteHTMLSanitizer(HTMLParser):
@@ -2032,11 +2033,19 @@ class _NoteHTMLSanitizer(HTMLParser):
         if tag == "span":
             attrs = dict(attrs or [])
             attachment_id = str(attrs.get("data-note-attachment") or "")
-            width = str(attrs.get("data-width") or "100")
+            width_value = str(attrs.get("data-width") or "100")
 
             if re.fullmatch(r"[0-9a-f]{24}", attachment_id):
-                if width not in NOTE_ATTACHMENT_WIDTHS:
-                    width = "100"
+                try:
+                    width = int(round(float(width_value)))
+                except (TypeError, ValueError):
+                    width = 100
+
+                width = max(
+                    NOTE_ATTACHMENT_MIN_WIDTH,
+                    min(width, NOTE_ATTACHMENT_MAX_WIDTH),
+                )
+
                 self.parts.append(
                     f'<span data-note-attachment="{attachment_id}" data-width="{width}"></span>'
                 )
