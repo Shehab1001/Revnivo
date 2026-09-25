@@ -2533,7 +2533,10 @@ def dashboard_preferences(request):
             )
         )
 
-    preferences = _normalize_dashboard_preferences(request.data)
+    preferences = _normalize_dashboard_preferences({
+        **request.data,
+        "version": DASHBOARD_PREFERENCES_VERSION,
+    })
     db.users.update_one(
         {"_id": owner},
         {
