@@ -1664,6 +1664,31 @@ def notifications(request):
     return Response([{**{key: doc.get(key) for key in ("kind", "title", "message", "read", "chat_user_id")}, "id": str(doc["_id"]), "created_at": serialize_datetime(doc.get("created_at"))} for doc in docs])
 
 
+def chat_message_preview(message, viewer_id):
+    if not message:
+        return ""
+
+    if message.get("deleted"):
+        deleted_by = message.get("deleted_by")
+        if deleted_by and str(deleted_by) == str(viewer_id):
+            return "You deleted this message"
+        return "This message was deleted"
+
+    content = str(message.get("content") or "").strip()
+    message_type = str(message.get("message_type") or "text").lower()
+
+    if message_type == "image":
+        return "Photo"
+    if message_type == "audio":
+        return "Voice message"
+    if message_type == "video":
+        return "Video"
+    if message_type == "file":
+        return "Document"
+
+    return content
+
+
 @api_view(["GET", "POST", "PATCH", "DELETE"])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def support_chat(request):
@@ -1718,7 +1743,14 @@ def support_chat(request):
                 delete_logo(message["attachment"])
             db.chat_messages.update_one(
                 {"_id": message_id},
-                {"$set": {"deleted": True, "content": "", "attachment": ""}},
+                {
+                    "$set": {
+                        "deleted": True,
+                        "deleted_by": owner,
+                        "content": "",
+                        "attachment": "",
+                    }
+                },
             )
         else:
             db.chat_messages.update_one(
@@ -1731,7 +1763,13 @@ def support_chat(request):
         summaries = []
         for contact in users:
             contact_id = contact["_id"]
-            latest = db.chat_messages.find_one({"user_id": contact_id}, sort=[("created_at", DESCENDING)])
+            latest = db.chat_messages.find_one(
+                {
+                    "user_id": contact_id,
+                    "deleted_for": {"$ne": owner},
+                },
+                sort=[("created_at", DESCENDING)],
+            )
             unread_count = db.notifications.count_documents({"kind": "chat", "chat_user_id": str(contact_id), "$or": [{"owner_id": None}, {"owner_id": owner}], "read": False})
             last_seen = contact.get("last_seen")
             typing_until = contact.get("typing_until")
@@ -1742,9 +1780,7 @@ def support_chat(request):
                 typing_until = typing_until.replace(tzinfo=timezone.utc)
             if recording_until and recording_until.tzinfo is None:
                 recording_until = recording_until.replace(tzinfo=timezone.utc)
-            latest_message = ""
-            if latest:
-                latest_message = "Voice message" if latest.get("message_type") == "audio" else latest.get("content", "")
+            latest_message = chat_message_preview(latest, owner)
             summaries.append({
                 **serialize_user(contact, request),
                 "online": bool(last_seen and utcnow() - last_seen <= timedelta(minutes=2)),
@@ -1770,7 +1806,7 @@ def support_chat(request):
                 return Response({"detail": "Chat user not found."}, status=status.HTTP_404_NOT_FOUND)
 
         requested_type = str(request.data.get("message_type", "text")).lower()
-        message_type = requested_type if requested_type in {"text", "image", "audio", "file"} else "file"
+        message_type = requested_type if requested_type in {"text", "image", "audio", "video", "file"} else "file"
 
         if attachment:
             mime_type = str(getattr(attachment, "content_type", "") or "").lower()
@@ -1778,6 +1814,8 @@ def support_chat(request):
                 message_type = "image"
             elif mime_type.startswith("audio/"):
                 message_type = "audio"
+            elif mime_type.startswith("video/"):
+                message_type = "video"
             elif message_type == "text":
                 message_type = "file"
 
@@ -1805,7 +1843,19 @@ def support_chat(request):
         if owner in doc.get("deleted_for", []):
             continue
         attachment = doc.get("attachment", "")
-        result.append({**{key: doc.get(key) for key in ("content", "sender", "message_type")}, "deleted": bool(doc.get("deleted")), "id": str(doc["_id"]), "user_id": str(doc["user_id"]), "created_at": serialize_datetime(doc.get("created_at")), "attachment_url": f"/api/support-chat/{doc['_id']}/attachment/" if attachment else ""})
+        result.append({
+            **{key: doc.get(key) for key in ("content", "sender", "message_type")},
+            "deleted": bool(doc.get("deleted")),
+            "deleted_by_me": bool(
+                doc.get("deleted_by")
+                and str(doc.get("deleted_by")) == str(owner)
+            ),
+            "preview_text": chat_message_preview(doc, owner),
+            "id": str(doc["_id"]),
+            "user_id": str(doc["user_id"]),
+            "created_at": serialize_datetime(doc.get("created_at")),
+            "attachment_url": f"/api/support-chat/{doc['_id']}/attachment/" if attachment else "",
+        })
     return Response(result)
 
 
