@@ -768,6 +768,85 @@ def admin_users(request):
     })
 
 
+@api_view(["GET"])
+def payments(request):
+    db = get_db()
+    owner = owner_oid(request)
+    user_doc = db.users.find_one({"_id": owner})
+
+    if not user_doc:
+        return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    plans = []
+    for plan in db.subscription_plans.find({"active": {"$ne": False}}).sort("created_at", ASCENDING):
+        plans.append({
+            "id": str(plan["_id"]),
+            "name": plan.get("name", "Revnivo"),
+            "price": float(plan.get("price", 0)),
+            "currency": plan.get("currency", "USD"),
+            "trial_days": plan.get("trial_days", 0),
+        })
+
+    if not plans:
+        fallback = db.settings.find_one({"key": "subscription_plan"}) or {"price": 3.0}
+        plans.append({
+            "id": "default",
+            "name": "Revnivo",
+            "price": float(fallback.get("price", 3.0)),
+            "currency": "USD",
+            "trial_days": 30,
+        })
+
+    gateways = [
+        {
+            "id": "paymob",
+            "name": "Paymob",
+            "description": "Cards and local digital payment methods.",
+            "configured": False,
+        },
+        {
+            "id": "fawry",
+            "name": "Fawry",
+            "description": "Pay through Fawry channels and supported local methods.",
+            "configured": False,
+        },
+        {
+            "id": "paypal",
+            "name": "PayPal",
+            "description": "Pay with a PayPal account or supported PayPal checkout.",
+            "configured": False,
+        },
+        {
+            "id": "kashier",
+            "name": "Kashier",
+            "description": "Online card and digital checkout.",
+            "configured": False,
+        },
+    ]
+
+    payment_rows = []
+    for payment in db.payment_transactions.find({"owner_id": owner}).sort("created_at", DESCENDING).limit(50):
+        payment_rows.append({
+            "id": str(payment["_id"]),
+            "gateway": payment.get("gateway", ""),
+            "amount": float(payment.get("amount", 0)),
+            "currency": payment.get("currency", "USD"),
+            "status": payment.get("status", "pending"),
+            "created_at": serialize_datetime(payment.get("created_at")),
+        })
+
+    return Response({
+        "subscription": {
+            "status": user_doc.get("subscription_status", "trial"),
+            "payment_method": user_doc.get("payment_method"),
+            "trial_ends_at": serialize_datetime(user_doc.get("trial_ends_at")),
+        },
+        "plans": plans,
+        "gateways": gateways,
+        "payments": payment_rows,
+    })
+
+
 @api_view(["GET", "PATCH"])
 def subscriptions(request):
     if not require_admin(request):
