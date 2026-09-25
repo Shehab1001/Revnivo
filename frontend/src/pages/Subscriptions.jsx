@@ -40,7 +40,6 @@ const emptyMethod = {
   code: '',
   provider: 'custom',
   description: '',
-  sort_order: '100',
   active: true,
 }
 
@@ -236,7 +235,6 @@ export default function Subscriptions() {
       code: method.code || '',
       provider: method.provider || 'custom',
       description: method.description || '',
-      sort_order: String(method.sort_order ?? 100),
       active: method.active !== false,
     })
     setMethodModal(true)
@@ -254,7 +252,6 @@ export default function Subscriptions() {
         code: methodForm.code,
         provider: methodForm.provider,
         description: methodForm.description,
-        sort_order: Number(methodForm.sort_order || 100),
         active: methodForm.active,
       }
 
@@ -302,18 +299,12 @@ export default function Subscriptions() {
 
     setDeleting(true)
     try {
-      if (deleteTarget.type === 'plan') {
-        await api.delete('/admin/plans/', {
+      await api.delete(
+        '/admin/payment-methods/',
+        {
           data: { id: deleteTarget.item.id },
-        })
-      } else {
-        await api.delete(
-          '/admin/payment-methods/',
-          {
-            data: { id: deleteTarget.item.id },
-          }
-        )
-      }
+        }
+      )
 
       setDeleteTarget(null)
       await load()
@@ -377,18 +368,29 @@ export default function Subscriptions() {
                 </p>
               </div>
 
-              <Button
-                color="primary"
-                size="sm"
-                startContent={<Plus size={16} />}
-                onPress={openNewPlan}
-              >
-                Add plan
-              </Button>
+              {plans.length ? (
+                <Button
+                  color="primary"
+                  size="sm"
+                  startContent={<Pencil size={16} />}
+                  onPress={() => openEditPlan(plans[0])}
+                >
+                  Edit plan
+                </Button>
+              ) : (
+                <Button
+                  color="primary"
+                  size="sm"
+                  startContent={<Plus size={16} />}
+                  onPress={openNewPlan}
+                >
+                  Add plan
+                </Button>
+              )}
             </div>
 
             <div className="divide-y divide-divider">
-              {plans.map((plan) => (
+              {plans.slice(0, 1).map((plan) => (
                 <div
                   key={plan.id}
                   className="flex items-center gap-3 p-4"
@@ -429,33 +431,7 @@ export default function Subscriptions() {
                     aria-label={`Toggle ${plan.name}`}
                   />
 
-                  <Button
-                    isIconOnly
-                    size="sm"
-                    variant="light"
-                    onPress={() =>
-                      openEditPlan(plan)
-                    }
-                    aria-label="Edit plan"
-                  >
-                    <Pencil size={15} />
-                  </Button>
 
-                  <Button
-                    isIconOnly
-                    size="sm"
-                    variant="light"
-                    color="danger"
-                    onPress={() =>
-                      setDeleteTarget({
-                        type: 'plan',
-                        item: plan,
-                      })
-                    }
-                    aria-label="Delete plan"
-                  >
-                    <Trash2 size={15} />
-                  </Button>
                 </div>
               ))}
 
@@ -946,19 +922,6 @@ export default function Subscriptions() {
             classNames={fieldClassNames}
           />
 
-          <Input
-            label="Sort order"
-            type="number"
-            value={methodForm.sort_order}
-            onValueChange={(value) =>
-              setMethodForm({
-                ...methodForm,
-                sort_order: value,
-              })
-            }
-            classNames={fieldClassNames}
-          />
-
           <Switch
             isSelected={methodForm.active}
             onValueChange={(active) =>
@@ -998,16 +961,8 @@ export default function Subscriptions() {
         }
         onConfirm={confirmDelete}
         loading={deleting}
-        title={
-          deleteTarget?.type === 'plan'
-            ? 'Delete plan?'
-            : 'Delete payment method?'
-        }
-        message={
-          deleteTarget?.type === 'plan'
-            ? `Delete ${deleteTarget?.item?.name || 'this plan'}? It will disappear from the user Payments page.`
-            : `Delete ${deleteTarget?.item?.name || 'this payment method'}? It will disappear from the user Payments page.`
-        }
+        title="Delete payment method?"
+        message={`Delete ${deleteTarget?.item?.name || 'this payment method'}? It will disappear from the user Payments page.`}
       />
     </div>
   )

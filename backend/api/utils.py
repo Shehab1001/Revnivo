@@ -23,11 +23,20 @@ CHAT_FILE_TYPES = {
     "audio/ogg": ".ogg",
     "audio/mpeg": ".mp3",
     "audio/mp4": ".m4a",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
     "text/plain": ".txt",
     "text/csv": ".csv",
 }
+NOTE_FILE_TYPES = {
+    **CHAT_FILE_TYPES,
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+}
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_CHAT_BYTES = 10 * 1024 * 1024
+MAX_NOTE_BYTES = 20 * 1024 * 1024
 
 
 def oid(value):
@@ -91,36 +100,78 @@ def serialize_platform(doc, request=None):
 def serialize_earning(doc, platform=None, usd_rate=None):
     if not doc:
         return None
+
     earned_at = doc.get("earned_at")
+    expected_at = doc.get("expected_at")
     if isinstance(earned_at, datetime):
         earned_at = earned_at.date()
+    if isinstance(expected_at, datetime):
+        expected_at = expected_at.date()
+
     amount = decimal_to_float(doc.get("amount"))
+    platform_fee = decimal_to_float(doc.get("platform_fee"))
+    payment_fee = decimal_to_float(doc.get("payment_fee"))
+    net_amount = max(amount - platform_fee - payment_fee, 0)
     currency = doc.get("currency", "USD")
+    status_value = doc.get("status", "paid")
+
+    if status_value == "pending" and expected_at:
+        expected_date = expected_at if isinstance(expected_at, date) else None
+        if expected_date and expected_date < date.today():
+            status_value = "overdue"
+
     if isinstance(usd_rate, dict):
         source_rate = usd_rate.get(currency)
         amount_usd = amount / float(source_rate) if source_rate else amount
+        net_amount_usd = net_amount / float(source_rate) if source_rate else net_amount
     else:
         amount_usd = amount if currency == "USD" else (amount / usd_rate if usd_rate else amount)
+        net_amount_usd = net_amount if currency == "USD" else (net_amount / usd_rate if usd_rate else net_amount)
+
     return {
         "id": str(doc["_id"]),
         "platform_id": str(doc.get("platform_id")) if doc.get("platform_id") else None,
         "platform_name": (platform or {}).get("name", "Deleted platform"),
         "amount": amount,
+        "gross_amount": amount,
+        "platform_fee": platform_fee,
+        "payment_fee": payment_fee,
+        "net_amount": round(net_amount, 2),
         "currency": currency,
         "amount_usd": round(amount_usd, 2),
+        "net_amount_usd": round(net_amount_usd, 2),
+        "status": status_value,
         "earned_at": earned_at.isoformat() if isinstance(earned_at, date) else str(earned_at or ""),
+        "expected_at": expected_at.isoformat() if isinstance(expected_at, date) else str(expected_at or ""),
         "note": doc.get("note", ""),
         "description": doc.get("note", ""),
         "category": doc.get("category", ""),
         "created_at": serialize_datetime(doc.get("created_at")),
     }
 
-
 def serialize_note(doc):
+    note_id = str(doc["_id"])
+    attachments = []
+    for attachment in doc.get("attachments", []) or []:
+        attachment_id = str(attachment.get("id") or "")
+        attachments.append({
+            "id": attachment_id,
+            "name": attachment.get("name", "Attachment"),
+            "mime": attachment.get("mime", "application/octet-stream"),
+            "size": int(attachment.get("size", 0) or 0),
+            "kind": attachment.get("kind", "file"),
+            "url": f"/api/notes/{note_id}/attachments/{attachment_id}/",
+            "created_at": serialize_datetime(attachment.get("created_at")),
+        })
+
     return {
-        "id": str(doc["_id"]),
+        "id": note_id,
         "title": doc.get("title", ""),
+        # content stays as a plain-text compatibility/search field for notes
+        # created before the workspace editor was introduced.
         "content": doc.get("content", ""),
+        "content_html": doc.get("content_html", ""),
+        "attachments": attachments,
         "created_at": serialize_datetime(doc.get("created_at")),
         "updated_at": serialize_datetime(doc.get("updated_at")),
     }
@@ -148,7 +199,7 @@ def _read_upload(uploaded_file, max_bytes):
 def _upload_root(folder):
     return Path(
         settings.PRIVATE_MEDIA_ROOT
-        if str(folder).strip().strip("/") == "chat"
+        if str(folder).strip().strip("/") in {"chat", "notes"}
         else settings.MEDIA_ROOT
     ).resolve()
 
@@ -212,8 +263,11 @@ def _validate_chat_file(data, mime):
             len(data) >= 2 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0
         )
 
-    if mime == "audio/mp4":
+    if mime in {"audio/mp4", "video/mp4"}:
         return len(data) >= 12 and b"ftyp" in data[4:12]
+
+    if mime == "video/webm":
+        return data.startswith(b"\x1a\x45\xdf\xa3")
 
     if mime in {"text/plain", "text/csv"}:
         if b"\x00" in data:
@@ -227,6 +281,20 @@ def _validate_chat_file(data, mime):
     return False
 
 
+def _validate_note_file(data, mime):
+    if mime in CHAT_FILE_TYPES:
+        return _validate_chat_file(data, mime)
+
+    if mime in {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }:
+        return data.startswith(b"PK\x03\x04")
+
+    return False
+
+
 def save_logo(uploaded_file, folder="platforms"):
     return _save_image(uploaded_file, folder)
 
@@ -235,16 +303,25 @@ def save_upload(uploaded_file, folder="uploads"):
     if folder in {"profiles", "platforms"}:
         return _save_image(uploaded_file, folder)
 
-    data = _read_upload(uploaded_file, MAX_CHAT_BYTES)
+    is_note = str(folder).strip().strip("/") == "notes"
+    max_bytes = MAX_NOTE_BYTES if is_note else MAX_CHAT_BYTES
+    data = _read_upload(uploaded_file, max_bytes)
     mime = str(getattr(uploaded_file, "content_type", "") or "").split(";", 1)[0].lower()
 
     if mime in IMAGE_MIME_TYPES:
         return _save_image(uploaded_file, folder)
 
-    extension = CHAT_FILE_TYPES.get(mime)
-    if not extension or not _validate_chat_file(data, mime):
+    file_types = NOTE_FILE_TYPES if is_note else CHAT_FILE_TYPES
+    validator = _validate_note_file if is_note else _validate_chat_file
+    extension = file_types.get(mime)
+
+    if not extension or not validator(data, mime):
+        if is_note:
+            raise ValidationError(
+                "Unsupported note attachment. Allowed: images, PDF, Word, Excel, PowerPoint, MP4/WebM video, audio, TXT, and CSV."
+            )
         raise ValidationError(
-            "Unsupported file. Allowed: JPEG, PNG, WebP, PDF, WebM/OGG/MP3/M4A audio, TXT, and CSV."
+            "Unsupported file. Allowed: JPEG, PNG, WebP, MP4/WebM video, PDF, WebM/OGG/MP3/M4A audio, TXT, and CSV."
         )
 
     return _save_bytes(data, folder, extension)
@@ -257,7 +334,7 @@ def resolve_upload_path(relative_path):
     relative = str(relative_path).replace("\\", "/").lstrip("/")
     roots = []
 
-    if relative.startswith("chat/"):
+    if relative.startswith(("chat/", "notes/")):
         roots.append(Path(settings.PRIVATE_MEDIA_ROOT).resolve())
         # Legacy fallback for chat files created before private-media hardening.
         roots.append(Path(settings.MEDIA_ROOT).resolve())
