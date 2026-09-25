@@ -73,6 +73,7 @@ export default function Notes() {
   const [deleting, setDeleting] = useState(false)
   const [draggingFiles, setDraggingFiles] = useState(false)
   const [selectedAttachmentId, setSelectedAttachmentId] = useState('')
+  const [resizingAttachment, setResizingAttachment] = useState(false)
 
   const [draftTitle, setDraftTitle] = useState('')
   const [draftHtml, setDraftHtml] = useState('')
@@ -84,6 +85,7 @@ export default function Notes() {
   const draftTitleRef = useRef('')
   const draftHtmlRef = useRef('')
   const lastRangeRef = useRef(null)
+  const resizeRef = useRef(null)
 
   const activeNote = useMemo(
     () => items.find((item) => item.id === activeId) || null,
@@ -99,6 +101,37 @@ export default function Notes() {
       ),
     [activeNote?.attachments]
   )
+
+  const hasArabic = (text = '') =>
+    /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(text)
+
+  const applyDirectionToElement = (element) => {
+    if (!element) return
+    const text = element.textContent || ''
+    const direction = hasArabic(text) ? 'rtl' : 'ltr'
+    element.setAttribute('dir', direction)
+    element.style.textAlign = direction === 'rtl' ? 'right' : 'left'
+  }
+
+  const applyEditorDirections = () => {
+    const editor = editorRef.current
+    if (!editor) return
+
+    const blocks = editor.querySelectorAll(
+      'p,div,h1,h2,h3,li,blockquote,pre'
+    )
+
+    if (!blocks.length) {
+      applyDirectionToElement(editor)
+      return
+    }
+
+    blocks.forEach((block) => {
+      if (!block.closest('[data-note-attachment]')) {
+        applyDirectionToElement(block)
+      }
+    })
+  }
 
   const rememberSelection = () => {
     const selection = window.getSelection()
@@ -147,6 +180,7 @@ export default function Notes() {
           block.innerHTML = `
             <span class="note-inline-image-frame">
               <img src="${attachment.url}" alt="" draggable="false" />
+              <span class="note-image-resize-handle" data-resize-handle="true" title="Drag to resize"></span>
               <span class="note-inline-attachment-caption">
                 ${escapeHtml(attachment.name)}
               </span>
@@ -169,6 +203,38 @@ export default function Notes() {
           event.preventDefault()
           event.stopPropagation()
           setSelectedAttachmentId(id)
+        }
+
+        const resizeHandle = block.querySelector(
+          '[data-resize-handle="true"]'
+        )
+
+        if (resizeHandle) {
+          resizeHandle.onpointerdown = (event) => {
+            event.preventDefault()
+            event.stopPropagation()
+
+            const editorWidth =
+              editorRef.current?.getBoundingClientRect()
+                .width || 1
+            const startWidth =
+              block.getBoundingClientRect().width
+            const startX = event.clientX
+
+            resizeRef.current = {
+              block,
+              editorWidth,
+              startWidth,
+              startX,
+              pointerId: event.pointerId,
+            }
+
+            setSelectedAttachmentId(id)
+            setResizingAttachment(true)
+            resizeHandle.setPointerCapture?.(
+              event.pointerId
+            )
+          }
         }
       })
   }
@@ -368,7 +434,10 @@ export default function Notes() {
         scheduleSave(title, recoveredHtml)
       }
 
-      queueMicrotask(hydrateAttachmentBlocks)
+      queueMicrotask(() => {
+        hydrateAttachmentBlocks()
+        applyEditorDirections()
+      })
     }
   }, [activeId])
 
@@ -380,6 +449,58 @@ export default function Notes() {
     },
     []
   )
+
+  useEffect(() => {
+    const handlePointerMove = (event) => {
+      const state = resizeRef.current
+      if (!state) return
+
+      const deltaX = event.clientX - state.startX
+      const nextPixels = Math.max(
+        state.editorWidth * 0.15,
+        Math.min(
+          state.startWidth + deltaX,
+          state.editorWidth
+        )
+      )
+      const nextPercent = Math.round(
+        (nextPixels / state.editorWidth) * 100
+      )
+
+      state.block.setAttribute(
+        'data-width',
+        String(nextPercent)
+      )
+      state.block.style.width = `${nextPercent}%`
+    }
+
+    const handlePointerUp = () => {
+      if (!resizeRef.current) return
+      resizeRef.current = null
+      setResizingAttachment(false)
+      handleEditorInput()
+    }
+
+    window.addEventListener(
+      'pointermove',
+      handlePointerMove
+    )
+    window.addEventListener(
+      'pointerup',
+      handlePointerUp
+    )
+
+    return () => {
+      window.removeEventListener(
+        'pointermove',
+        handlePointerMove
+      )
+      window.removeEventListener(
+        'pointerup',
+        handlePointerUp
+      )
+    }
+  }, [])
 
   const updateLocalNote = (id, updates) => {
     setItems((current) =>
@@ -480,6 +601,7 @@ export default function Notes() {
   }
 
   const handleEditorInput = () => {
+    applyEditorDirections()
     const html = editorRef.current?.innerHTML || ''
     setDraftHtml(html)
     draftHtmlRef.current = html
@@ -986,6 +1108,8 @@ export default function Notes() {
                     )
                   }
                   placeholder="Untitled"
+                  dir={hasArabic(draftTitle) ? 'rtl' : 'ltr'}
+                  style={{ textAlign: hasArabic(draftTitle) ? 'right' : 'left' }}
                   className="w-full border-0 bg-transparent text-3xl font-bold tracking-tight text-foreground outline-none placeholder:text-default-300 sm:text-4xl"
                 />
 
@@ -1033,7 +1157,7 @@ export default function Notes() {
                     }
                   }}
                   data-placeholder="Start writing…"
-                  className="note-editor mt-7 min-h-[300px] w-full text-[15px] leading-7 text-foreground outline-none"
+                  className={`note-editor mt-7 min-h-[300px] w-full text-[15px] leading-7 text-foreground outline-none ${resizingAttachment ? 'select-none' : ''}`}
                 />
 
 
