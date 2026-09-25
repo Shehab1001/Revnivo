@@ -1,5 +1,5 @@
 import { Button, Card, CardBody, Chip, Input, Textarea } from '@heroui/react'
-import { Mic, MessageCircle, Paperclip, Pause, Play, Search, Smile, Volume2 } from 'lucide-react'
+import { Mic, MessageCircle, Paperclip, Pause, Play, Search, Smile, Trash2, Volume2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
@@ -238,6 +238,7 @@ export default function SupportChat() {
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [contextMenu, setContextMenu] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [clearChatOpen, setClearChatOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
   const typingTimer = useRef(null)
@@ -776,6 +777,42 @@ export default function SupportChat() {
     }
   }
 
+  const clearConversation = async () => {
+    if (!selectedUser || user?.role !== 'admin') return
+
+    setDeleting(true)
+
+    try {
+      await api.delete('/support-chat/', {
+        data: {
+          mode: 'chat',
+          user_id: selectedUser,
+        },
+      })
+
+      setMessages([])
+      lastMessageIdRef.current = null
+      setClearChatOpen(false)
+
+      setContacts((items) =>
+        items.map((item) =>
+          item.id === selectedUser
+            ? {
+                ...item,
+                last_message: '',
+                last_message_at: null,
+                unread_count: 0,
+              }
+            : item
+        )
+      )
+
+      await loadContacts().catch(() => {})
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const deleteMessage = async (
     messageId,
     mode
@@ -1079,6 +1116,21 @@ export default function SupportChat() {
                           : 'Offline'}
                   </div>
                 </div>
+
+                {user?.role === 'admin' && (
+                  <Button
+                    isIconOnly
+                    size="sm"
+                    variant="light"
+                    color="danger"
+                    className="ml-auto"
+                    onPress={() => setClearChatOpen(true)}
+                    aria-label="Delete chat"
+                    title="Delete chat"
+                  >
+                    <Trash2 size={17} />
+                  </Button>
+                )}
               </div>
 
               {/* Messages */}
@@ -1515,6 +1567,15 @@ export default function SupportChat() {
           )}
         </section>
       </Card>
+      <ConfirmDeleteModal
+        open={clearChatOpen}
+        onClose={() => setClearChatOpen(false)}
+        onConfirm={clearConversation}
+        loading={deleting}
+        title="Delete this chat?"
+        message={`Delete the entire conversation with ${active?.name || 'this user'}? All messages and chat attachments will be removed from the database.`}
+      />
+
       <ConfirmDeleteModal
         open={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
