@@ -28,9 +28,9 @@ urlpatterns = [
     path("platforms/", views.platforms),
     path("platforms/<str:platform_id>/", views.platform_detail),
     path("earnings/", views.earnings),
-    path("earnings/<str:earning_id>/", views.earning_detail),
     path("earnings/export/", views.export_earnings_csv),
     path("earnings/import/", views.import_earnings_csv),
+    path("earnings/<str:earning_id>/", views.earning_detail),
     path("goals/", views.income_goals),
     path("dashboard/", views.dashboard),
 ]
