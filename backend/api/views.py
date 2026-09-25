@@ -2461,6 +2461,71 @@ def import_earnings_csv(request):
     })
 
 
+DASHBOARD_WIDGET_IDS = [
+    "pending",
+    "goals",
+    "insights",
+    "charts",
+    "platform_mix",
+]
+
+
+def _normalize_dashboard_preferences(value):
+    value = value if isinstance(value, dict) else {}
+    raw_order = value.get("order") if isinstance(value.get("order"), list) else []
+    raw_hidden = value.get("hidden") if isinstance(value.get("hidden"), list) else []
+
+    order = []
+    for item in raw_order:
+        item = str(item)
+        if item in DASHBOARD_WIDGET_IDS and item not in order:
+            order.append(item)
+
+    for item in DASHBOARD_WIDGET_IDS:
+        if item not in order:
+            order.append(item)
+
+    hidden = []
+    for item in raw_hidden:
+        item = str(item)
+        if item in DASHBOARD_WIDGET_IDS and item not in hidden:
+            hidden.append(item)
+
+    return {
+        "order": order,
+        "hidden": hidden,
+    }
+
+
+@api_view(["GET", "PUT"])
+def dashboard_preferences(request):
+    db = get_db()
+    owner = owner_oid(request)
+
+    if request.method == "GET":
+        user_doc = db.users.find_one(
+            {"_id": owner},
+            {"dashboard_preferences": 1},
+        ) or {}
+        return Response(
+            _normalize_dashboard_preferences(
+                user_doc.get("dashboard_preferences")
+            )
+        )
+
+    preferences = _normalize_dashboard_preferences(request.data)
+    db.users.update_one(
+        {"_id": owner},
+        {
+            "$set": {
+                "dashboard_preferences": preferences,
+                "updated_at": utcnow(),
+            }
+        },
+    )
+    return Response(preferences)
+
+
 @api_view(["GET"])
 def dashboard(request):
     db = get_db()
