@@ -617,6 +617,7 @@ def send_password_reset_email(email, code):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([PasswordResetThrottle])
 def forgot_password(request):
     email = str(request.data.get("email", "")).strip().lower()
     if not email:
@@ -653,6 +654,7 @@ def forgot_password(request):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([PasswordResetThrottle])
 def reset_password(request):
     email = str(request.data.get("email", "")).strip().lower()
     code = str(request.data.get("code", "")).strip()
@@ -661,8 +663,14 @@ def reset_password(request):
         return Response({"detail": "Email, verification code, and new password are required."}, status=status.HTTP_400_BAD_REQUEST)
     if len(code) != 6 or not code.isdigit():
         return Response({"detail": "Enter the 6-digit verification code."}, status=status.HTTP_400_BAD_REQUEST)
-    if len(password) < 8:
-        return Response({"detail": "Password must contain at least 8 characters."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        validate_password(password)
+    except Exception as exc:
+        messages = getattr(exc, "messages", None) or [str(exc)]
+        return Response(
+            {"detail": " ".join(messages)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     db = get_db()
     reset = db.password_reset_otps.find_one({"email": email})
@@ -676,7 +684,17 @@ def reset_password(request):
         db.password_reset_otps.update_one({"_id": reset["_id"]}, {"$inc": {"attempts": 1}})
         return Response({"detail": "Incorrect verification code."}, status=status.HTTP_400_BAD_REQUEST)
 
-    result = db.users.update_one({"email": email}, {"$set": {"password_hash": make_password(password), "auth_provider": "password", "updated_at": utcnow()}})
+    result = db.users.update_one(
+        {"email": email},
+        {
+            "$set": {
+                "password_hash": make_password(password),
+                "auth_provider": "password",
+                "updated_at": utcnow(),
+            },
+            "$inc": {"token_version": 1},
+        },
+    )
     db.password_reset_otps.delete_one({"_id": reset["_id"]})
     if not result.matched_count:
         return Response({"detail": "Unable to reset this password."}, status=status.HTTP_400_BAD_REQUEST)
@@ -685,6 +703,7 @@ def reset_password(request):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([AuthBurstThrottle])
 def google_login(request):
     credential = request.data.get("credential")
     if not settings.GOOGLE_CLIENT_ID:
@@ -732,15 +751,37 @@ def google_login(request):
             doc = {"_id": result.inserted_id, **new_doc}
         except DuplicateKeyError:
             doc = db.users.find_one({"email": email})
-        admin_doc = db.users.find_one({"email": ADMIN_EMAIL}, {"_id": 1})
-        create_notification("user", "New user registered", f"{email} created a Revnivo account.", admin_doc["_id"] if admin_doc else None)
+        for admin_doc in db.users.find({"role": "admin"}, {"_id": 1}):
+            create_notification(
+                "user",
+                "New user registered",
+                f"{email} created a Revnivo account.",
+                admin_doc["_id"],
+            )
 
     if google_user.get("picture") and doc.get("google_picture") != google_user["picture"]:
         db.users.update_one({"_id": doc["_id"]}, {"$set": {"google_picture": google_user["picture"]}})
         doc["google_picture"] = google_user["picture"]
 
-    token = create_access_token(str(doc["_id"]), email)
-    return Response({"token": token, "user": serialize_user(doc, request)})
+    return auth_success_response(doc, request)
+
+
+@api_view(["POST"])
+def logout(request):
+    db = get_db()
+    owner = owner_oid(request)
+
+    # Revoke every token minted before logout. This also protects against a
+    # stolen bearer/cookie token continuing to work after the user signs out.
+    db.users.update_one(
+        {"_id": owner},
+        {"$inc": {"token_version": 1}, "$set": {"last_seen": None}},
+    )
+
+    response = Response({"status": "logged_out"})
+    clear_auth_cookies(response)
+    response["Cache-Control"] = "no-store, private"
+    return response
 
 
 @api_view(["GET"])
