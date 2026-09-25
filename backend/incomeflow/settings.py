@@ -81,6 +81,7 @@ JWT_ISSUER = os.getenv("JWT_ISSUER", "revnivo-api").strip()
 JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "revnivo-web").strip()
 AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "revnivo_session").strip()
 AUTH_CSRF_COOKIE_NAME = os.getenv("AUTH_CSRF_COOKIE_NAME", "revnivo_csrf").strip()
+AUTH_COOKIE_DOMAIN = os.getenv("AUTH_COOKIE_DOMAIN", "").strip()
 AUTH_COOKIE_SECURE = env_bool("AUTH_COOKIE_SECURE", not DEBUG)
 AUTH_COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE", "Lax").strip().capitalize()
 if AUTH_COOKIE_SAMESITE not in {"Lax", "Strict", "None"}:
@@ -120,6 +121,7 @@ PAYMOB_REDIRECT_URL = os.getenv("PAYMOB_REDIRECT_URL", "").strip()
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173").rstrip("/")
 CORS_ALLOWED_ORIGINS = [FRONTEND_ORIGIN]
 CORS_ALLOW_CREDENTIALS = True
+CORS_EXPOSE_HEADERS = ["X-CSRF-Token"]
 CORS_ALLOW_HEADERS = [
     "accept",
     "authorization",
