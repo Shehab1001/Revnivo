@@ -1772,6 +1772,15 @@ def support_chat(request):
         requested_type = str(request.data.get("message_type", "text")).lower()
         message_type = requested_type if requested_type in {"text", "image", "audio", "file"} else "file"
 
+        if attachment:
+            mime_type = str(getattr(attachment, "content_type", "") or "").lower()
+            if mime_type.startswith("image/"):
+                message_type = "image"
+            elif mime_type.startswith("audio/"):
+                message_type = "audio"
+            elif message_type == "text":
+                message_type = "file"
+
         message = {
             "user_id": target_user,
             "content": content[:2000],
