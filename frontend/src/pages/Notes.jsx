@@ -295,6 +295,7 @@ export default function Notes() {
 
   useEffect(() => {
     activeIdRef.current = activeId
+    setSelectedAttachmentId('')
 
     if (!activeNote) {
       setDraftTitle('')
@@ -318,9 +319,58 @@ export default function Notes() {
 
     if (editorRef.current) {
       editorRef.current.innerHTML = html
+
+      // Recover attachments uploaded while autosave was failing: if an
+      // attachment exists in MongoDB but has no inline placeholder yet,
+      // append a safe placeholder once so it becomes visible/editable.
+      const existingIds = new Set(
+        Array.from(
+          editorRef.current.querySelectorAll(
+            '[data-note-attachment]'
+          )
+        ).map((node) =>
+          node.getAttribute('data-note-attachment')
+        )
+      )
+
+      for (const attachment of activeNote.attachments || []) {
+        if (existingIds.has(attachment.id)) continue
+
+        const spacer = document.createElement('p')
+        spacer.innerHTML = '<br>'
+
+        const placeholder =
+          document.createElement('span')
+        placeholder.setAttribute(
+          'data-note-attachment',
+          attachment.id
+        )
+        placeholder.setAttribute(
+          'data-width',
+          '100'
+        )
+        placeholder.setAttribute(
+          'contenteditable',
+          'false'
+        )
+        placeholder.innerHTML = '&nbsp;'
+
+        editorRef.current.appendChild(spacer)
+        editorRef.current.appendChild(placeholder)
+      }
+
+      const recoveredHtml =
+        editorRef.current.innerHTML
+
+      if (recoveredHtml !== html) {
+        setDraftHtml(recoveredHtml)
+        draftHtmlRef.current = recoveredHtml
+        scheduleSave(title, recoveredHtml)
+      }
+
       queueMicrotask(hydrateAttachmentBlocks)
     }
-  }, [activeId, activeNote?.attachments])
+  }, [activeId])
 
   useEffect(
     () => () => {
@@ -359,8 +409,15 @@ export default function Notes() {
         }
       )
 
-      updateLocalNote(noteId, data)
+      updateLocalNote(noteId, {
+        ...data,
+        content_html:
+          noteId === activeIdRef.current
+            ? html
+            : data.content_html,
+      })
       setSaveState('saved')
+      setError('')
     } catch (err) {
       setSaveState('error')
       setError(
@@ -476,6 +533,10 @@ export default function Notes() {
         )
 
         insertAttachmentPlaceholder(data)
+        window.setTimeout(
+          () => hydrateAttachmentBlocks(),
+          0
+        )
       }
     } catch (err) {
       setError(
