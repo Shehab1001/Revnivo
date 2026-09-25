@@ -28,7 +28,7 @@ jobs:
       MONGODB_URI: "mongodb://127.0.0.1:27017"
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
