@@ -1,6 +1,8 @@
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 import base64
+import csv
+from io import StringIO
 import binascii
 import hashlib
 import hmac
@@ -20,8 +22,9 @@ from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.mail import EmailMultiAlternatives
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse
 from html import escape
+from html.parser import HTMLParser
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from pymongo import ASCENDING, DESCENDING
@@ -34,7 +37,7 @@ from rest_framework.response import Response
 
 from .authentication import clear_auth_cookies, create_access_token, set_auth_cookies
 from .mongo import ensure_indexes, get_db
-from .serializers import EarningSerializer, LoginSerializer, PlatformSerializer, RegisterSerializer
+from .serializers import EarningSerializer, GoalSerializer, LoginSerializer, PlatformSerializer, RegisterSerializer
 from .throttles import AuthBurstThrottle, PasswordResetThrottle, RegistrationThrottle
 from .utils import (
     decimal128,
@@ -192,6 +195,40 @@ def dashboard_amount_expression(currency, rates):
         for source_currency, source_rate in rates.items()
     ]
     return {"$switch": {"branches": branches, "default": "$amount"}}
+
+def dashboard_net_expression(currency, rates):
+    target_rate = rates.get(currency)
+    base_net = {
+        "$subtract": [
+            "$amount",
+            {
+                "$add": [
+                    {"$ifNull": ["$platform_fee", Decimal128("0")]},
+                    {"$ifNull": ["$payment_fee", Decimal128("0")]},
+                ]
+            },
+        ]
+    }
+
+    if not target_rate:
+        return base_net
+
+    branches = [
+        {
+            "case": {"$eq": ["$currency", source_currency]},
+            "then": {
+                "$multiply": [
+                    base_net,
+                    Decimal128(str(target_rate / source_rate)),
+                ]
+            },
+        }
+        for source_currency, source_rate in rates.items()
+    ]
+
+    return {"$switch": {"branches": branches, "default": base_net}}
+
+
 
 
 @api_view(["GET"])
@@ -916,7 +953,6 @@ def _ensure_default_payment_methods(db):
                 "provider": "paymob",
                 "description": "Cards and supported Paymob payment methods through secure Unified Checkout.",
                 "active": True,
-                "sort_order": 10,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -926,7 +962,6 @@ def _ensure_default_payment_methods(db):
                 "provider": "fawry",
                 "description": "Pay through Fawry channels and supported local methods.",
                 "active": True,
-                "sort_order": 20,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -936,7 +971,6 @@ def _ensure_default_payment_methods(db):
                 "provider": "paypal",
                 "description": "Pay with a PayPal account or supported PayPal checkout.",
                 "active": True,
-                "sort_order": 30,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -946,7 +980,6 @@ def _ensure_default_payment_methods(db):
                 "provider": "kashier",
                 "description": "Online card and digital checkout.",
                 "active": True,
-                "sort_order": 40,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -975,7 +1008,6 @@ def _serialize_payment_method(method):
         "provider": method.get("provider", method.get("code", "")),
         "description": method.get("description", ""),
         "active": method.get("active", True),
-        "sort_order": int(method.get("sort_order", 0) or 0),
         "configured": _payment_method_configured(method),
     }
 
@@ -1069,7 +1101,7 @@ def payments(request):
         return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
     plans = []
-    for plan in db.subscription_plans.find({"active": {"$ne": False}}).sort("created_at", ASCENDING):
+    for plan in db.subscription_plans.find({"active": {"$ne": False}}).sort("created_at", ASCENDING).limit(1):
         plans.append({
             "id": str(plan["_id"]),
             "name": plan.get("name", "Revnivo"),
@@ -1091,7 +1123,7 @@ def payments(request):
     _ensure_default_payment_methods(db)
     gateways = []
     for method in db.payment_methods.find({"active": {"$ne": False}}).sort(
-        [("sort_order", ASCENDING), ("created_at", ASCENDING)]
+        "created_at", ASCENDING
     ):
         item = _serialize_payment_method(method)
         gateways.append({
@@ -1415,6 +1447,12 @@ def admin_plans(request):
     db = get_db()
 
     if request.method == "POST":
+        if db.subscription_plans.count_documents({}) > 0:
+            return Response(
+                {"detail": "Revnivo supports one subscription plan. Edit the existing plan instead."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
         name = str(request.data.get("name", "")).strip()
         currency = str(request.data.get("currency", "USD")).strip().upper()[:3]
         try:
@@ -1455,10 +1493,10 @@ def admin_plans(request):
             return Response({"detail": "Invalid plan id."}, status=status.HTTP_400_BAD_REQUEST)
 
         if request.method == "DELETE":
-            result = db.subscription_plans.delete_one({"_id": plan_id})
-            if not result.deleted_count:
-                return Response({"detail": "Plan not found."}, status=status.HTTP_404_NOT_FOUND)
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            return Response(
+                {"detail": "The subscription plan cannot be deleted. Hide it from users instead."},
+                status=status.HTTP_405_METHOD_NOT_ALLOWED,
+            )
 
         updates = {}
         if "name" in request.data:
@@ -1491,7 +1529,7 @@ def admin_plans(request):
         db.subscription_plans.update_one({"_id": plan_id}, {"$set": updates})
 
     plans = []
-    for plan in db.subscription_plans.find({}).sort("created_at", DESCENDING):
+    for plan in db.subscription_plans.find({}).sort("created_at", ASCENDING).limit(1):
         plans.append({
             "id": str(plan["_id"]),
             "name": plan.get("name", ""),
@@ -1540,11 +1578,6 @@ def admin_payment_methods(request):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        try:
-            sort_order = int(request.data.get("sort_order", 100))
-        except (TypeError, ValueError):
-            sort_order = 100
-
         now = utcnow()
         result = db.payment_methods.insert_one({
             "code": code,
@@ -1552,7 +1585,6 @@ def admin_payment_methods(request):
             "provider": provider or code,
             "description": description[:300],
             "active": bool(request.data.get("active", True)),
-            "sort_order": sort_order,
             "created_at": now,
             "updated_at": now,
         })
@@ -1592,11 +1624,6 @@ def admin_payment_methods(request):
             updates["description"] = str(request.data.get("description", "")).strip()[:300]
         if "active" in request.data:
             updates["active"] = bool(request.data.get("active"))
-        if "sort_order" in request.data:
-            try:
-                updates["sort_order"] = int(request.data.get("sort_order", 100))
-            except (TypeError, ValueError):
-                return Response({"detail": "Sort order must be a number."}, status=status.HTTP_400_BAD_REQUEST)
 
         updates["updated_at"] = utcnow()
         db.payment_methods.update_one({"_id": method_id}, {"$set": updates})
@@ -1604,7 +1631,7 @@ def admin_payment_methods(request):
     methods = [
         _serialize_payment_method(method)
         for method in db.payment_methods.find({}).sort(
-            [("sort_order", ASCENDING), ("created_at", ASCENDING)]
+            "created_at", ASCENDING
         )
     ]
     return Response({"payment_methods": methods})
@@ -1664,6 +1691,31 @@ def notifications(request):
     return Response([{**{key: doc.get(key) for key in ("kind", "title", "message", "read", "chat_user_id")}, "id": str(doc["_id"]), "created_at": serialize_datetime(doc.get("created_at"))} for doc in docs])
 
 
+def chat_message_preview(message, viewer_id):
+    if not message:
+        return ""
+
+    if message.get("deleted"):
+        deleted_by = message.get("deleted_by")
+        if deleted_by and str(deleted_by) == str(viewer_id):
+            return "You deleted this message"
+        return "This message was deleted"
+
+    content = str(message.get("content") or "").strip()
+    message_type = str(message.get("message_type") or "text").lower()
+
+    if message_type == "image":
+        return "Photo"
+    if message_type == "audio":
+        return "Voice message"
+    if message_type == "video":
+        return "Video"
+    if message_type == "file":
+        return "Document"
+
+    return content
+
+
 @api_view(["GET", "POST", "PATCH", "DELETE"])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def support_chat(request):
@@ -1718,7 +1770,14 @@ def support_chat(request):
                 delete_logo(message["attachment"])
             db.chat_messages.update_one(
                 {"_id": message_id},
-                {"$set": {"deleted": True, "content": "", "attachment": ""}},
+                {
+                    "$set": {
+                        "deleted": True,
+                        "deleted_by": owner,
+                        "content": "",
+                        "attachment": "",
+                    }
+                },
             )
         else:
             db.chat_messages.update_one(
@@ -1731,7 +1790,13 @@ def support_chat(request):
         summaries = []
         for contact in users:
             contact_id = contact["_id"]
-            latest = db.chat_messages.find_one({"user_id": contact_id}, sort=[("created_at", DESCENDING)])
+            latest = db.chat_messages.find_one(
+                {
+                    "user_id": contact_id,
+                    "deleted_for": {"$ne": owner},
+                },
+                sort=[("created_at", DESCENDING)],
+            )
             unread_count = db.notifications.count_documents({"kind": "chat", "chat_user_id": str(contact_id), "$or": [{"owner_id": None}, {"owner_id": owner}], "read": False})
             last_seen = contact.get("last_seen")
             typing_until = contact.get("typing_until")
@@ -1742,9 +1807,7 @@ def support_chat(request):
                 typing_until = typing_until.replace(tzinfo=timezone.utc)
             if recording_until and recording_until.tzinfo is None:
                 recording_until = recording_until.replace(tzinfo=timezone.utc)
-            latest_message = ""
-            if latest:
-                latest_message = "Voice message" if latest.get("message_type") == "audio" else latest.get("content", "")
+            latest_message = chat_message_preview(latest, owner)
             summaries.append({
                 **serialize_user(contact, request),
                 "online": bool(last_seen and utcnow() - last_seen <= timedelta(minutes=2)),
@@ -1770,7 +1833,18 @@ def support_chat(request):
                 return Response({"detail": "Chat user not found."}, status=status.HTTP_404_NOT_FOUND)
 
         requested_type = str(request.data.get("message_type", "text")).lower()
-        message_type = requested_type if requested_type in {"text", "image", "audio", "file"} else "file"
+        message_type = requested_type if requested_type in {"text", "image", "audio", "video", "file"} else "file"
+
+        if attachment:
+            mime_type = str(getattr(attachment, "content_type", "") or "").lower()
+            if mime_type.startswith("image/"):
+                message_type = "image"
+            elif mime_type.startswith("audio/"):
+                message_type = "audio"
+            elif mime_type.startswith("video/"):
+                message_type = "video"
+            elif message_type == "text":
+                message_type = "file"
 
         message = {
             "user_id": target_user,
@@ -1796,7 +1870,19 @@ def support_chat(request):
         if owner in doc.get("deleted_for", []):
             continue
         attachment = doc.get("attachment", "")
-        result.append({**{key: doc.get(key) for key in ("content", "sender", "message_type")}, "deleted": bool(doc.get("deleted")), "id": str(doc["_id"]), "user_id": str(doc["user_id"]), "created_at": serialize_datetime(doc.get("created_at")), "attachment_url": f"/api/support-chat/{doc['_id']}/attachment/" if attachment else ""})
+        result.append({
+            **{key: doc.get(key) for key in ("content", "sender", "message_type")},
+            "deleted": bool(doc.get("deleted")),
+            "deleted_by_me": bool(
+                doc.get("deleted_by")
+                and str(doc.get("deleted_by")) == str(owner)
+            ),
+            "preview_text": chat_message_preview(doc, owner),
+            "id": str(doc["_id"]),
+            "user_id": str(doc["user_id"]),
+            "created_at": serialize_datetime(doc.get("created_at")),
+            "attachment_url": f"/api/support-chat/{doc['_id']}/attachment/" if attachment else "",
+        })
     return Response(result)
 
 
@@ -1926,14 +2012,114 @@ def chat_presence(request):
 
     return Response(people)
 
+NOTE_ALLOWED_TAGS = {
+    "p", "div", "br", "b", "strong", "i", "em", "u",
+    "h1", "h2", "h3", "ul", "ol", "li", "blockquote",
+    "pre", "code", "span",
+}
+NOTE_ATTACHMENT_WIDTHS = {"25", "33", "50", "66", "75", "100"}
+
+
+class _NoteHTMLSanitizer(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self.attachment_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+
+        if tag == "span":
+            attrs = dict(attrs or [])
+            attachment_id = str(attrs.get("data-note-attachment") or "")
+            width = str(attrs.get("data-width") or "100")
+
+            if re.fullmatch(r"[0-9a-f]{24}", attachment_id):
+                if width not in NOTE_ATTACHMENT_WIDTHS:
+                    width = "100"
+                self.parts.append(
+                    f'<span data-note-attachment="{attachment_id}" data-width="{width}"></span>'
+                )
+                self.attachment_depth += 1
+            return
+
+        if self.attachment_depth:
+            return
+
+        if tag in NOTE_ALLOWED_TAGS:
+            self.parts.append(f"<{tag}>")
+
+    def handle_startendtag(self, tag, attrs):
+        if self.attachment_depth:
+            return
+
+        tag = tag.lower()
+        if tag == "br":
+            self.parts.append("<br>")
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+
+        if tag == "span" and self.attachment_depth:
+            self.attachment_depth = max(self.attachment_depth - 1, 0)
+            return
+
+        if self.attachment_depth:
+            return
+
+        if tag in NOTE_ALLOWED_TAGS and tag not in {"br", "span"}:
+            self.parts.append(f"</{tag}>")
+
+    def handle_data(self, data):
+        if not self.attachment_depth:
+            self.parts.append(escape(data))
+
+    def get_html(self):
+        return "".join(self.parts)
+
+
+class _NoteTextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() in {"br", "p", "div", "li", "h1", "h2", "h3", "blockquote", "pre"}:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag.lower() in {"p", "div", "li", "h1", "h2", "h3", "blockquote", "pre"}:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+    def get_text(self):
+        text = "".join(self.parts)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+
+def sanitize_note_html(value):
+    parser = _NoteHTMLSanitizer()
+    parser.feed(str(value or "")[:100000])
+    return parser.get_html()
+
+def note_plain_text(value):
+    parser = _NoteTextExtractor()
+    parser.feed(str(value or ""))
+    return parser.get_text()[:20000]
+
+
 @api_view(["GET", "POST"])
 @parser_classes([JSONParser])
 def notes(request):
     db = get_db()
     owner = owner_oid(request)
+
     if request.method == "GET":
         page = max(int(request.query_params.get("page", 1)), 1)
-        page_size = 8
+        page_size = 50
         query = {"owner_id": owner}
         search = request.query_params.get("search", "").strip()[:100]
         if search:
@@ -1941,21 +2127,51 @@ def notes(request):
             query["$or"] = [
                 {"title": {"$regex": safe_search, "$options": "i"}},
                 {"content": {"$regex": safe_search, "$options": "i"}},
+                {"content_html": {"$regex": safe_search, "$options": "i"}},
+                {"attachments.name": {"$regex": safe_search, "$options": "i"}},
             ]
+
         total = db.notes.count_documents(query)
-        docs = db.notes.find(query).sort("updated_at", DESCENDING).skip((page - 1) * page_size).limit(page_size)
+        docs = (
+            db.notes.find(query)
+            .sort("updated_at", DESCENDING)
+            .skip((page - 1) * page_size)
+            .limit(page_size)
+        )
         return Response({
             "results": [serialize_note(doc) for doc in docs],
-            "pagination": {"page": page, "page_size": page_size, "total": total, "pages": max((total + page_size - 1) // page_size, 1)},
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "pages": max((total + page_size - 1) // page_size, 1),
+            },
         })
 
-    title = str(request.data.get("title", "")).strip()
-    content = str(request.data.get("content", "")).strip()
-    if not content:
-        return Response({"detail": "Note content is required."}, status=status.HTTP_400_BAD_REQUEST)
+    title = str(request.data.get("title", "")).strip()[:160]
+    raw_html = request.data.get("content_html")
+    legacy_content = str(request.data.get("content", ""))
+
+    if raw_html is None:
+        safe_text = escape(legacy_content[:20000]).replace("\n", "<br>")
+        content_html = f"<p>{safe_text}</p>" if safe_text else ""
+    else:
+        content_html = sanitize_note_html(raw_html)
+
+    content = note_plain_text(content_html) or legacy_content.strip()[:20000]
     now = utcnow()
-    result = db.notes.insert_one({"owner_id": owner, "title": title[:160], "content": content[:5000], "created_at": now, "updated_at": now})
-    return Response(serialize_note({"_id": result.inserted_id, "title": title[:160], "content": content[:5000], "created_at": now, "updated_at": now}), status=status.HTTP_201_CREATED)
+    doc = {
+        "owner_id": owner,
+        "title": title,
+        "content": content,
+        "content_html": content_html,
+        "attachments": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+    result = db.notes.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return Response(serialize_note(doc), status=status.HTTP_201_CREATED)
 
 
 @api_view(["PATCH", "DELETE"])
@@ -1964,20 +2180,158 @@ def note_detail(request, note_id):
     note_oid = oid(note_id)
     if not note_oid:
         return Response({"detail": "Invalid note id."}, status=status.HTTP_400_BAD_REQUEST)
+
     db = get_db()
+    owner = owner_oid(request)
+    note = db.notes.find_one({"_id": note_oid, "owner_id": owner})
+    if not note:
+        return Response({"detail": "Note not found."}, status=status.HTTP_404_NOT_FOUND)
+
     if request.method == "PATCH":
-        updates = {key: str(request.data[key]).strip() for key in ("title", "content") if key in request.data}
-        if not updates.get("content"):
-            return Response({"detail": "Note content is required."}, status=status.HTTP_400_BAD_REQUEST)
+        updates = {}
+
+        if "title" in request.data:
+            updates["title"] = str(request.data.get("title", "")).strip()[:160]
+
+        if "content_html" in request.data:
+            content_html = sanitize_note_html(request.data.get("content_html", ""))
+            updates["content_html"] = content_html
+            updates["content"] = note_plain_text(content_html)
+        elif "content" in request.data:
+            legacy_content = str(request.data.get("content", ""))[:20000]
+            updates["content"] = legacy_content
+            updates["content_html"] = (
+                f"<p>{escape(legacy_content).replace(chr(10), '<br>')}</p>"
+                if legacy_content
+                else ""
+            )
+
         updates["updated_at"] = utcnow()
-        db.notes.update_one({"_id": note_oid, "owner_id": owner_oid(request)}, {"$set": updates})
-        doc = db.notes.find_one({"_id": note_oid, "owner_id": owner_oid(request)})
+        db.notes.update_one(
+            {"_id": note_oid, "owner_id": owner},
+            {"$set": updates},
+        )
+        doc = db.notes.find_one({"_id": note_oid, "owner_id": owner})
         return Response(serialize_note(doc))
-    result = db.notes.delete_one({"_id": note_oid, "owner_id": owner_oid(request)})
+
+    for attachment in note.get("attachments", []) or []:
+        delete_logo(attachment.get("path"))
+
+    result = db.notes.delete_one({"_id": note_oid, "owner_id": owner})
     if not result.deleted_count:
         return Response({"detail": "Note not found."}, status=status.HTTP_404_NOT_FOUND)
+
     return Response(status=status.HTTP_204_NO_CONTENT)
 
+
+@api_view(["POST"])
+@parser_classes([MultiPartParser, FormParser])
+def note_attachments(request, note_id):
+    note_oid = oid(note_id)
+    if not note_oid:
+        return Response({"detail": "Invalid note id."}, status=status.HTTP_400_BAD_REQUEST)
+
+    db = get_db()
+    owner = owner_oid(request)
+    note = db.notes.find_one({"_id": note_oid, "owner_id": owner})
+    if not note:
+        return Response({"detail": "Note not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    uploaded = request.FILES.get("file")
+    if not uploaded:
+        return Response({"detail": "Choose a file to upload."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if len(note.get("attachments", []) or []) >= 30:
+        return Response(
+            {"detail": "A note can contain up to 30 attachments."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    path = save_upload(uploaded, "notes")
+    attachment_id = secrets.token_hex(12)
+    mime = str(getattr(uploaded, "content_type", "") or "").split(";", 1)[0].lower()
+    attachment = {
+        "id": attachment_id,
+        "path": path,
+        "name": str(getattr(uploaded, "name", "Attachment"))[:180],
+        "mime": mime,
+        "size": int(getattr(uploaded, "size", 0) or 0),
+        "kind": "image" if mime.startswith("image/") else "video" if mime.startswith("video/") else "audio" if mime.startswith("audio/") else "file",
+        "created_at": utcnow(),
+    }
+
+    db.notes.update_one(
+        {"_id": note_oid, "owner_id": owner},
+        {
+            "$push": {"attachments": attachment},
+            "$set": {"updated_at": utcnow()},
+        },
+    )
+    updated = db.notes.find_one({"_id": note_oid, "owner_id": owner})
+    serialized = serialize_note(updated)
+    return Response(serialized["attachments"][-1], status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "DELETE"])
+def note_attachment(request, note_id, attachment_id):
+    note_oid = oid(note_id)
+    if not note_oid:
+        return Response({"detail": "Invalid note id."}, status=status.HTTP_400_BAD_REQUEST)
+
+    db = get_db()
+    owner = owner_oid(request)
+    note = db.notes.find_one({"_id": note_oid, "owner_id": owner})
+    if not note:
+        return Response({"detail": "Note not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    attachment = next(
+        (
+            item
+            for item in note.get("attachments", []) or []
+            if str(item.get("id")) == str(attachment_id)
+        ),
+        None,
+    )
+    if not attachment:
+        return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "DELETE":
+        delete_logo(attachment.get("path"))
+
+        content_html = str(note.get("content_html") or "")
+        placeholder_pattern = re.compile(
+            rf'<span[^>]*data-note-attachment=["\']{re.escape(str(attachment.get("id")))}["\'][^>]*></span>',
+            re.IGNORECASE,
+        )
+        content_html = placeholder_pattern.sub("", content_html)
+
+        db.notes.update_one(
+            {"_id": note_oid, "owner_id": owner},
+            {
+                "$pull": {"attachments": {"id": attachment.get("id")}},
+                "$set": {
+                    "content_html": content_html,
+                    "content": note_plain_text(content_html),
+                    "updated_at": utcnow(),
+                },
+            },
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    target = resolve_upload_path(attachment.get("path"))
+    if not target:
+        return Response({"detail": "Attachment file not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    response = FileResponse(
+        open(target, "rb"),
+        content_type=attachment.get("mime") or "application/octet-stream",
+    )
+    response["Content-Disposition"] = (
+        f'inline; filename="{attachment.get("name", "attachment").replace(chr(34), "")}"'
+    )
+    response["Cache-Control"] = "private, max-age=3600"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 @api_view(["GET", "POST"])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
@@ -2054,6 +2408,7 @@ def earnings(request):
         query = {"owner_id": owner}
         currency = request.query_params.get("currency")
         platform_id = request.query_params.get("platform_id")
+        earning_status = request.query_params.get("status")
         year = request.query_params.get("year")
         page = max(int(request.query_params.get("page", 1)), 1)
         page_size = 8
@@ -2063,6 +2418,8 @@ def earnings(request):
             p_oid = oid(platform_id)
             if p_oid:
                 query["platform_id"] = p_oid
+        if earning_status in {"paid", "pending"}:
+            query["status"] = earning_status
         if year and year.isdigit():
             y = int(year)
             start = datetime(y, 1, 1, tzinfo=timezone.utc)
@@ -2103,12 +2460,22 @@ def earnings(request):
     if not platform:
         return Response({"detail": "Platform not found."}, status=status.HTTP_400_BAD_REQUEST)
     earned_dt = datetime.combine(data["earned_at"], time.min, tzinfo=timezone.utc)
+    expected_at = data.get("expected_at")
+    expected_dt = (
+        datetime.combine(expected_at, time.min, tzinfo=timezone.utc)
+        if expected_at
+        else None
+    )
     doc = {
         "owner_id": owner,
         "platform_id": platform_oid,
         "amount": decimal128(data["amount"]),
+        "platform_fee": decimal128(data.get("platform_fee", 0)),
+        "payment_fee": decimal128(data.get("payment_fee", 0)),
         "currency": data["currency"].upper(),
+        "status": data.get("status", "paid"),
         "earned_at": earned_dt,
+        "expected_at": expected_dt,
         "note": data.get("note", "").strip(),
         "category": data.get("category", "").strip(),
         "created_at": utcnow(),
@@ -2151,10 +2518,22 @@ def earning_detail(request, earning_id):
         updates["platform_id"] = p_oid
     if "amount" in data:
         updates["amount"] = decimal128(data["amount"])
+    if "platform_fee" in data:
+        updates["platform_fee"] = decimal128(data["platform_fee"])
+    if "payment_fee" in data:
+        updates["payment_fee"] = decimal128(data["payment_fee"])
     if "currency" in data:
         updates["currency"] = data["currency"].upper()
+    if "status" in data:
+        updates["status"] = data["status"]
     if "earned_at" in data:
         updates["earned_at"] = datetime.combine(data["earned_at"], time.min, tzinfo=timezone.utc)
+    if "expected_at" in data:
+        updates["expected_at"] = (
+            datetime.combine(data["expected_at"], time.min, tzinfo=timezone.utc)
+            if data["expected_at"]
+            else None
+        )
     for key in ("note", "category"):
         if key in data:
             updates[key] = data[key].strip()
@@ -2164,6 +2543,269 @@ def earning_detail(request, earning_id):
     if platform is None:
         platform = db.platforms.find_one({"_id": doc.get("platform_id"), "owner_id": owner})
     return Response(serialize_earning(doc, platform, current_currency_rates()))
+
+
+@api_view(["GET", "PUT"])
+def income_goals(request):
+    db = get_db()
+    owner = owner_oid(request)
+
+    if request.method == "GET":
+        doc = db.income_goals.find_one({"owner_id": owner}) or {}
+        return Response({
+            "monthly_goal": decimal_to_float(doc.get("monthly_goal")),
+            "yearly_goal": decimal_to_float(doc.get("yearly_goal")),
+            "currency": doc.get("currency", "USD"),
+        })
+
+    serializer = GoalSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+
+    updates = {
+        "monthly_goal": decimal128(data["monthly_goal"]),
+        "yearly_goal": decimal128(data["yearly_goal"]),
+        "currency": data["currency"],
+        "updated_at": utcnow(),
+    }
+
+    db.income_goals.update_one(
+        {"owner_id": owner},
+        {"$set": updates, "$setOnInsert": {"created_at": utcnow()}},
+        upsert=True,
+    )
+
+    return Response({
+        "monthly_goal": float(data["monthly_goal"]),
+        "yearly_goal": float(data["yearly_goal"]),
+        "currency": data["currency"],
+    })
+
+
+@api_view(["GET"])
+def export_earnings_csv(request):
+    db = get_db()
+    owner = owner_oid(request)
+    rates = current_currency_rates()
+    docs = list(db.earnings.find({"owner_id": owner}).sort("earned_at", DESCENDING))
+    platform_ids = list({doc.get("platform_id") for doc in docs if doc.get("platform_id")})
+    pmap = {
+        platform["_id"]: platform
+        for platform in db.platforms.find(
+            {"owner_id": owner, "_id": {"$in": platform_ids}}
+        )
+    }
+
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="revnivo-earnings.csv"'
+    writer = csv.writer(response)
+    writer.writerow([
+        "Platform",
+        "Gross amount",
+        "Platform fee",
+        "Payment fee",
+        "Net amount",
+        "Currency",
+        "Status",
+        "Date earned",
+        "Expected date",
+        "Category",
+        "Description",
+    ])
+
+    for doc in docs:
+        item = serialize_earning(doc, pmap.get(doc.get("platform_id")), rates)
+        writer.writerow([
+            item["platform_name"],
+            item["gross_amount"],
+            item["platform_fee"],
+            item["payment_fee"],
+            item["net_amount"],
+            item["currency"],
+            item["status"],
+            item["earned_at"],
+            item["expected_at"],
+            item["category"],
+            item["note"],
+        ])
+
+    return response
+
+
+@api_view(["POST"])
+@parser_classes([MultiPartParser, FormParser])
+def import_earnings_csv(request):
+    db = get_db()
+    owner = owner_oid(request)
+    uploaded = request.FILES.get("file")
+
+    if not uploaded:
+        return Response({"detail": "Choose a CSV file."}, status=status.HTTP_400_BAD_REQUEST)
+    if uploaded.size > 2 * 1024 * 1024:
+        return Response({"detail": "CSV file must be 2 MB or smaller."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        raw = uploaded.read().decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return Response({"detail": "CSV must use UTF-8 encoding."}, status=status.HTTP_400_BAD_REQUEST)
+
+    reader = csv.DictReader(StringIO(raw))
+    required = {"Platform", "Gross amount", "Currency", "Date earned", "Category"}
+    if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
+        return Response(
+            {"detail": "CSV columns must include Platform, Gross amount, Currency, Date earned, and Category."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    platforms = {
+        platform.get("name", "").strip().lower(): platform
+        for platform in db.platforms.find({"owner_id": owner, "is_archived": {"$ne": True}})
+    }
+
+    inserted = 0
+    skipped = 0
+    errors = []
+
+    for row_number, row in enumerate(reader, start=2):
+        platform_name = str(row.get("Platform", "")).strip()
+        platform = platforms.get(platform_name.lower())
+
+        if not platform:
+            skipped += 1
+            errors.append(f"Row {row_number}: platform '{platform_name}' was not found.")
+            continue
+
+        payload = {
+            "platform_id": str(platform["_id"]),
+            "amount": row.get("Gross amount", ""),
+            "platform_fee": row.get("Platform fee") or 0,
+            "payment_fee": row.get("Payment fee") or 0,
+            "currency": row.get("Currency", ""),
+            "status": "pending" if str(row.get("Status", "")).strip().lower() in {"pending", "overdue"} else "paid",
+            "earned_at": row.get("Date earned", ""),
+            "expected_at": row.get("Expected date") or None,
+            "category": row.get("Category", ""),
+            "note": row.get("Description", ""),
+        }
+
+        serializer = EarningSerializer(data=payload)
+        if not serializer.is_valid():
+            skipped += 1
+            errors.append(f"Row {row_number}: invalid data.")
+            continue
+
+        data = serializer.validated_data
+        expected_at = data.get("expected_at")
+        db.earnings.insert_one({
+            "owner_id": owner,
+            "platform_id": platform["_id"],
+            "amount": decimal128(data["amount"]),
+            "platform_fee": decimal128(data.get("platform_fee", 0)),
+            "payment_fee": decimal128(data.get("payment_fee", 0)),
+            "currency": data["currency"],
+            "status": data.get("status", "paid"),
+            "earned_at": datetime.combine(data["earned_at"], time.min, tzinfo=timezone.utc),
+            "expected_at": datetime.combine(expected_at, time.min, tzinfo=timezone.utc) if expected_at else None,
+            "category": data["category"].strip(),
+            "note": data.get("note", "").strip(),
+            "created_at": utcnow(),
+            "updated_at": utcnow(),
+        })
+        inserted += 1
+
+    return Response({
+        "inserted": inserted,
+        "skipped": skipped,
+        "errors": errors[:20],
+    })
+
+
+DASHBOARD_PREFERENCES_VERSION = 2
+
+DASHBOARD_WIDGET_IDS = [
+    "gross_revenue",
+    "net_income",
+    "pending",
+    "this_month",
+    "transactions",
+    "platforms",
+    "goals",
+    "sales_performance",
+    "income_by_platform",
+    "platform_mix",
+    "recent_earnings",
+]
+
+
+def _normalize_dashboard_preferences(value):
+    value = value if isinstance(value, dict) else {}
+
+    # Preferences created before the per-card dashboard layout used different
+    # widget ids/order. Reset those once so every user starts from the real
+    # default dashboard positions, then persist future customizations normally.
+    if value.get("version") != DASHBOARD_PREFERENCES_VERSION:
+        return {
+            "version": DASHBOARD_PREFERENCES_VERSION,
+            "order": list(DASHBOARD_WIDGET_IDS),
+            "hidden": [],
+        }
+
+    raw_order = value.get("order") if isinstance(value.get("order"), list) else []
+    raw_hidden = value.get("hidden") if isinstance(value.get("hidden"), list) else []
+
+    order = []
+    for item in raw_order:
+        item = str(item)
+        if item in DASHBOARD_WIDGET_IDS and item not in order:
+            order.append(item)
+
+    for item in DASHBOARD_WIDGET_IDS:
+        if item not in order:
+            order.append(item)
+
+    hidden = []
+    for item in raw_hidden:
+        item = str(item)
+        if item in DASHBOARD_WIDGET_IDS and item not in hidden:
+            hidden.append(item)
+
+    return {
+        "version": DASHBOARD_PREFERENCES_VERSION,
+        "order": order,
+        "hidden": hidden,
+    }
+
+
+@api_view(["GET", "PUT"])
+def dashboard_preferences(request):
+    db = get_db()
+    owner = owner_oid(request)
+
+    if request.method == "GET":
+        user_doc = db.users.find_one(
+            {"_id": owner},
+            {"dashboard_preferences": 1},
+        ) or {}
+        return Response(
+            _normalize_dashboard_preferences(
+                user_doc.get("dashboard_preferences")
+            )
+        )
+
+    preferences = _normalize_dashboard_preferences({
+        **request.data,
+        "version": DASHBOARD_PREFERENCES_VERSION,
+    })
+    db.users.update_one(
+        {"_id": owner},
+        {
+            "$set": {
+                "dashboard_preferences": preferences,
+                "updated_at": utcnow(),
+            }
+        },
+    )
+    return Response(preferences)
 
 
 @api_view(["GET"])
@@ -2178,7 +2820,14 @@ def dashboard(request):
     platform_id = request.query_params.get("platform_id", "all")
     rates = current_currency_rates()
 
-    match = {"owner_id": owner, **dashboard_currency_query(currency)}
+    match = {
+        "owner_id": owner,
+        "$or": [
+            {"status": "paid"},
+            {"status": {"$exists": False}},
+        ],
+        **dashboard_currency_query(currency),
+    }
     if platform_id != "all":
         platform_oid = oid(platform_id)
         if platform_oid and db.platforms.find_one({"_id": platform_oid, "owner_id": owner, "is_archived": {"$ne": True}}):
@@ -2187,26 +2836,39 @@ def dashboard(request):
             platform_id = "all"
     if period in {"last_week", "last_month", "last_3_months", "last_year"}:
         now = datetime.now(timezone.utc)
-        current_week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-        current_month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
-        previous_month_start = datetime(now.year if now.month > 1 else now.year - 1, now.month - 1 if now.month > 1 else 12, 1, tzinfo=timezone.utc)
-        previous_three_months_start = datetime(now.year if now.month > 3 else now.year - 1, now.month - 3 if now.month > 3 else now.month + 9, 1, tzinfo=timezone.utc)
 
-        try:
-            one_year_ago = now.replace(year=now.year - 1)
-        except ValueError:
-            # Feb 29 -> Feb 28 in a non-leap previous year.
-            one_year_ago = now.replace(year=now.year - 1, day=28)
+        def subtract_months(dt, months):
+            total_months = dt.year * 12 + (dt.month - 1) - months
+            year = total_months // 12
+            month = total_months % 12 + 1
+
+            # Clamp the day to the last valid day in the target month.
+            next_month = (
+                datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+                if month == 12
+                else datetime(year, month + 1, 1, tzinfo=timezone.utc)
+            )
+            last_day = (next_month - timedelta(days=1)).day
+            return dt.replace(
+                year=year,
+                month=month,
+                day=min(dt.day, last_day),
+            )
 
         if period == "last_week":
-            match["earned_at"] = {"$gte": current_week_start - timedelta(days=7), "$lt": current_week_start}
+            start = now - timedelta(days=7)
         elif period == "last_month":
-            match["earned_at"] = {"$gte": previous_month_start, "$lt": current_month_start}
+            start = subtract_months(now, 1)
         elif period == "last_3_months":
-            match["earned_at"] = {"$gte": previous_three_months_start, "$lt": current_month_start}
+            start = subtract_months(now, 3)
         else:
-            # Rolling year: same date/time last year through right now.
-            match["earned_at"] = {"$gte": one_year_ago, "$lte": now}
+            try:
+                start = now.replace(year=now.year - 1)
+            except ValueError:
+                # Feb 29 -> Feb 28 in a non-leap previous year.
+                start = now.replace(year=now.year - 1, day=28)
+
+        match["earned_at"] = {"$gte": start, "$lte": now}
     elif period == "custom" and date_from and date_to:
         try:
             start = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
@@ -2226,8 +2888,24 @@ def dashboard(request):
     current_month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
     next_month_start = datetime(now.year + (1 if now.month == 12 else 0), 1 if now.month == 12 else now.month + 1, 1, tzinfo=timezone.utc)
     previous_month_start = datetime(now.year if now.month > 1 else now.year - 1, now.month - 1 if now.month > 1 else 12, 1, tzinfo=timezone.utc)
-    current_month_match = {"owner_id": owner, **dashboard_currency_query(currency), "earned_at": {"$gte": current_month_start, "$lt": next_month_start}}
-    previous_month_match = {"owner_id": owner, **dashboard_currency_query(currency), "earned_at": {"$gte": previous_month_start, "$lt": current_month_start}}
+    paid_status_match = {
+        "$or": [
+            {"status": "paid"},
+            {"status": {"$exists": False}},
+        ]
+    }
+    current_month_match = {
+        "owner_id": owner,
+        **paid_status_match,
+        **dashboard_currency_query(currency),
+        "earned_at": {"$gte": current_month_start, "$lt": next_month_start},
+    }
+    previous_month_match = {
+        "owner_id": owner,
+        **paid_status_match,
+        **dashboard_currency_query(currency),
+        "earned_at": {"$gte": previous_month_start, "$lt": current_month_start},
+    }
     if "platform_id" in match:
         current_month_match["platform_id"] = match["platform_id"]
         previous_month_match["platform_id"] = match["platform_id"]
@@ -2244,9 +2922,17 @@ def dashboard(request):
 
     total_doc = next(db.earnings.aggregate([
         {"$match": match},
-        {"$group": {"_id": None, "total": {"$sum": dashboard_amount_expression(currency, rates)}, "count": {"$sum": 1}}},
+        {
+            "$group": {
+                "_id": None,
+                "total": {"$sum": dashboard_amount_expression(currency, rates)},
+                "net_total": {"$sum": dashboard_net_expression(currency, rates)},
+                "count": {"$sum": 1},
+            }
+        },
     ]), None)
     total = decimal_to_float(total_doc.get("total")) if total_doc else 0.0
+    net_total = decimal_to_float(total_doc.get("net_total")) if total_doc else 0.0
     count = total_doc.get("count", 0) if total_doc else 0
 
     monthly = list(db.earnings.aggregate([
@@ -2307,6 +2993,71 @@ def dashboard(request):
     recent_pids = list({d.get("platform_id") for d in recent_docs if d.get("platform_id")})
     recent_pmap = {p["_id"]: p for p in db.platforms.find({"_id": {"$in": recent_pids}, "owner_id": owner})}
 
+    pending_match = {
+        "owner_id": owner,
+        "status": "pending",
+        **dashboard_currency_query(currency),
+    }
+    if "platform_id" in match:
+        pending_match["platform_id"] = match["platform_id"]
+
+    pending_doc = next(db.earnings.aggregate([
+        {"$match": pending_match},
+        {
+            "$group": {
+                "_id": None,
+                "total": {"$sum": dashboard_amount_expression(currency, rates)},
+                "net_total": {"$sum": dashboard_net_expression(currency, rates)},
+                "count": {"$sum": 1},
+            }
+        },
+    ]), None)
+    pending_total = decimal_to_float(pending_doc.get("total")) if pending_doc else 0.0
+    pending_net_total = decimal_to_float(pending_doc.get("net_total")) if pending_doc else 0.0
+    pending_count = pending_doc.get("count", 0) if pending_doc else 0
+
+    overdue_count = db.earnings.count_documents({
+        "owner_id": owner,
+        "status": "pending",
+        "expected_at": {"$lt": now},
+    })
+
+    goal_doc = db.income_goals.find_one({"owner_id": owner}) or {}
+    goal_currency = goal_doc.get("currency", currency)
+    source_rate = rates.get(goal_currency)
+    target_rate = rates.get(currency)
+
+    def convert_goal(value):
+        raw = decimal_to_float(value)
+        if not raw or not source_rate or not target_rate:
+            return raw
+        return raw * float(target_rate / source_rate)
+
+    monthly_goal = convert_goal(goal_doc.get("monthly_goal"))
+    yearly_goal = convert_goal(goal_doc.get("yearly_goal"))
+
+    year_start = datetime(now.year, 1, 1, tzinfo=timezone.utc)
+    year_paid_match = {
+        "owner_id": owner,
+        **paid_status_match,
+        **dashboard_currency_query(currency),
+        "earned_at": {"$gte": year_start, "$lt": datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)},
+    }
+    if "platform_id" in match:
+        year_paid_match["platform_id"] = match["platform_id"]
+
+    year_total_doc = next(db.earnings.aggregate([
+        {"$match": year_paid_match},
+        {"$group": {"_id": None, "total": {"$sum": dashboard_net_expression(currency, rates)}}},
+    ]), None)
+    current_year_net = decimal_to_float(year_total_doc.get("total")) if year_total_doc else 0.0
+
+    current_month_net_doc = next(db.earnings.aggregate([
+        {"$match": current_month_match},
+        {"$group": {"_id": None, "total": {"$sum": dashboard_net_expression(currency, rates)}}},
+    ]), None)
+    current_month_net = decimal_to_float(current_month_net_doc.get("total")) if current_month_net_doc else 0.0
+
     currencies = sorted(set(db.earnings.distinct("currency", {"owner_id": owner})) | {"EGP"})
     year_rows = list(db.earnings.aggregate([
         {"$match": {"owner_id": owner}},
@@ -2330,6 +3081,11 @@ def dashboard(request):
         "exchange_rate": float(rates[currency]) if currency in rates else None,
         "summary": {
             "total_income": total,
+            "net_income": net_total,
+            "pending_income": pending_total,
+            "pending_net_income": pending_net_total,
+            "pending_count": pending_count,
+            "overdue_count": overdue_count,
             "transactions": count,
             "platforms": db.platforms.count_documents({"owner_id": owner, "is_archived": {"$ne": True}}),
             "best_platform": platform_breakdown[0]["name"] if platform_breakdown else None,
@@ -2348,5 +3104,12 @@ def dashboard(request):
         ],
         "platform_breakdown": platform_breakdown,
         "recent": [serialize_earning(d, recent_pmap.get(d.get("platform_id")), rates) for d in recent_docs],
+        "goals": {
+            "monthly_goal": monthly_goal,
+            "yearly_goal": yearly_goal,
+            "current_month_net": current_month_net,
+            "current_year_net": current_year_net,
+            "currency": currency,
+        },
         "filters": {"currencies": currencies, "years": years, "platforms": platforms},
     })
