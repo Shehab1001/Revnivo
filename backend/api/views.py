@@ -2,10 +2,15 @@ from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 import base64
 import binascii
+import hashlib
+import hmac
 import json
 import secrets
 from time import monotonic
+from urllib.parse import urlencode
 from urllib.request import urlopen
+
+import requests as http_requests
 
 from bson import ObjectId
 from bson.decimal128 import Decimal128
@@ -768,6 +773,94 @@ def admin_users(request):
     })
 
 
+def _paymob_configured():
+    return all([
+        settings.PAYMOB_SECRET_KEY,
+        settings.PAYMOB_PUBLIC_KEY,
+        settings.PAYMOB_HMAC_SECRET,
+        settings.PAYMOB_INTEGRATION_ID_CARD,
+    ])
+
+
+def _paymob_amount_cents(plan):
+    amount = Decimal(str(plan.get("price", 0)))
+    source_currency = str(plan.get("currency", "USD")).upper()
+    target_currency = settings.PAYMOB_CURRENCY
+
+    if source_currency == target_currency:
+        target_amount = amount
+    elif source_currency == "USD" and target_currency == "EGP":
+        target_amount = amount * settings.EGP_PER_USD
+    else:
+        raise ValueError(
+            f"Paymob checkout cannot convert {source_currency} to {target_currency}. "
+            "Configure the plan currency to match PAYMOB_CURRENCY."
+        )
+
+    cents = int((target_amount * Decimal("100")).quantize(Decimal("1")))
+    if cents <= 0:
+        raise ValueError("Payment amount must be greater than zero.")
+    return cents, target_currency, float(target_amount.quantize(Decimal("0.01")))
+
+
+def _paymob_bool(value):
+    return "true" if bool(value) else "false"
+
+
+def _verify_paymob_transaction_hmac(obj, received_hmac):
+    try:
+        order = obj.get("order") or {}
+        source = obj.get("source_data") or {}
+        fields = [
+            obj["amount_cents"],
+            obj["created_at"],
+            obj["currency"],
+            obj["error_occured"],
+            obj["has_parent_transaction"],
+            obj["id"],
+            obj["integration_id"],
+            obj["is_3d_secure"],
+            obj["is_auth"],
+            obj["is_capture"],
+            obj["is_refunded"],
+            obj["is_standalone_payment"],
+            obj["is_voided"],
+            order["id"],
+            obj["owner"],
+            obj["pending"],
+            source.get("pan", ""),
+            source.get("sub_type", ""),
+            source.get("type", ""),
+            obj["success"],
+        ]
+    except (KeyError, TypeError):
+        return False
+
+    concat = "".join(
+        _paymob_bool(value) if isinstance(value, bool) else str(value)
+        for value in fields
+    )
+    computed = hmac.new(
+        settings.PAYMOB_HMAC_SECRET.encode(),
+        concat.encode(),
+        hashlib.sha512,
+    ).hexdigest()
+    return hmac.compare_digest(computed, str(received_hmac or ""))
+
+
+def _serialize_payment(payment):
+    return {
+        "id": str(payment["_id"]),
+        "gateway": payment.get("gateway", ""),
+        "amount": float(payment.get("amount", 0)),
+        "currency": payment.get("currency", "USD"),
+        "status": payment.get("status", "pending"),
+        "provider_transaction_id": str(payment.get("provider_transaction_id") or ""),
+        "created_at": serialize_datetime(payment.get("created_at")),
+        "updated_at": serialize_datetime(payment.get("updated_at")),
+    }
+
+
 @api_view(["GET"])
 def payments(request):
     db = get_db()
@@ -801,8 +894,8 @@ def payments(request):
         {
             "id": "paymob",
             "name": "Paymob",
-            "description": "Cards and local digital payment methods.",
-            "configured": False,
+            "description": "Cards and supported Paymob payment methods through secure Unified Checkout.",
+            "configured": _paymob_configured(),
         },
         {
             "id": "fawry",
@@ -824,16 +917,12 @@ def payments(request):
         },
     ]
 
-    payment_rows = []
-    for payment in db.payment_transactions.find({"owner_id": owner}).sort("created_at", DESCENDING).limit(50):
-        payment_rows.append({
-            "id": str(payment["_id"]),
-            "gateway": payment.get("gateway", ""),
-            "amount": float(payment.get("amount", 0)),
-            "currency": payment.get("currency", "USD"),
-            "status": payment.get("status", "pending"),
-            "created_at": serialize_datetime(payment.get("created_at")),
-        })
+    payment_rows = [
+        _serialize_payment(payment)
+        for payment in db.payment_transactions.find({"owner_id": owner})
+        .sort("created_at", DESCENDING)
+        .limit(50)
+    ]
 
     return Response({
         "subscription": {
@@ -845,6 +934,236 @@ def payments(request):
         "gateways": gateways,
         "payments": payment_rows,
     })
+
+
+@api_view(["POST"])
+def paymob_checkout(request):
+    if not _paymob_configured():
+        return Response(
+            {"detail": "Paymob is not configured yet. Add the Paymob keys to backend/.env and restart Django."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    db = get_db()
+    owner = owner_oid(request)
+    user_doc = db.users.find_one({"_id": owner})
+    if not user_doc:
+        return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    phone = str(request.data.get("phone", "")).strip()
+    if not phone:
+        return Response(
+            {"detail": "Phone number is required for Paymob checkout."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    plan_id = str(request.data.get("plan_id", "")).strip()
+    if plan_id and plan_id != "default":
+        plan_oid = oid(plan_id)
+        plan = db.subscription_plans.find_one({"_id": plan_oid, "active": {"$ne": False}}) if plan_oid else None
+    else:
+        plan = None
+
+    if not plan:
+        fallback = db.settings.find_one({"key": "subscription_plan"}) or {"price": 3.0}
+        plan = {
+            "_id": None,
+            "name": "Revnivo",
+            "price": float(fallback.get("price", 3.0)),
+            "currency": "USD",
+            "trial_days": 30,
+        }
+
+    try:
+        amount_cents, paymob_currency, paymob_amount = _paymob_amount_cents(plan)
+        integration_id = int(settings.PAYMOB_INTEGRATION_ID_CARD)
+    except (TypeError, ValueError) as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    name_parts = (user_doc.get("name") or "Revnivo User").strip().split()
+    first_name = name_parts[0] if name_parts else "Revnivo"
+    last_name = " ".join(name_parts[1:]) or "User"
+    reference = f"revnivo-{owner}-{secrets.token_hex(6)}"
+    now = utcnow()
+
+    payment_doc = {
+        "owner_id": owner,
+        "plan_id": plan.get("_id"),
+        "plan_name": plan.get("name", "Revnivo"),
+        "gateway": "paymob",
+        "amount": paymob_amount,
+        "currency": paymob_currency,
+        "original_amount": float(plan.get("price", 0)),
+        "original_currency": str(plan.get("currency", "USD")).upper(),
+        "status": "creating",
+        "special_reference": reference,
+        "created_at": now,
+        "updated_at": now,
+    }
+    payment_result = db.payment_transactions.insert_one(payment_doc)
+
+    payload = {
+        "amount": amount_cents,
+        "currency": paymob_currency,
+        "payment_methods": [integration_id],
+        "items": [{
+            "name": plan.get("name", "Revnivo Subscription")[:120],
+            "amount": amount_cents,
+            "description": "Revnivo subscription",
+            "quantity": 1,
+        }],
+        "billing_data": {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": user_doc.get("email", ""),
+            "phone_number": phone,
+            "apartment": "NA",
+            "floor": "NA",
+            "street": "NA",
+            "building": "NA",
+            "shipping_method": "NA",
+            "postal_code": "NA",
+            "city": "NA",
+            "state": "NA",
+            "country": "EGY",
+        },
+        "customer": {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": user_doc.get("email", ""),
+        },
+        "special_reference": reference,
+        "expiration": 3600,
+    }
+
+    if settings.PAYMOB_WEBHOOK_URL:
+        payload["notification_url"] = settings.PAYMOB_WEBHOOK_URL
+    if settings.PAYMOB_REDIRECT_URL:
+        payload["redirection_url"] = settings.PAYMOB_REDIRECT_URL
+
+    try:
+        response = http_requests.post(
+            f"{settings.PAYMOB_BASE_URL}/v1/intention/",
+            headers={
+                "Authorization": f"Token {settings.PAYMOB_SECRET_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=25,
+        )
+        response.raise_for_status()
+        intention = response.json()
+    except http_requests.RequestException as exc:
+        detail = "Paymob could not create the checkout session."
+        if getattr(exc, "response", None) is not None:
+            try:
+                paymob_error = exc.response.json()
+                detail = paymob_error.get("detail") or paymob_error.get("message") or detail
+            except Exception:
+                pass
+        db.payment_transactions.update_one(
+            {"_id": payment_result.inserted_id},
+            {"$set": {"status": "failed", "failure_reason": detail, "updated_at": utcnow()}},
+        )
+        return Response({"detail": detail}, status=status.HTTP_502_BAD_GATEWAY)
+
+    client_secret = intention.get("client_secret")
+    paymob_order_id = intention.get("intention_order_id")
+    intention_id = intention.get("id")
+
+    if not client_secret:
+        db.payment_transactions.update_one(
+            {"_id": payment_result.inserted_id},
+            {"$set": {"status": "failed", "failure_reason": "Missing client secret.", "updated_at": utcnow()}},
+        )
+        return Response(
+            {"detail": "Paymob returned an incomplete checkout response."},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    checkout_url = (
+        f"{settings.PAYMOB_BASE_URL}/unifiedcheckout/?"
+        + urlencode({
+            "publicKey": settings.PAYMOB_PUBLIC_KEY,
+            "clientSecret": client_secret,
+        })
+    )
+
+    db.payment_transactions.update_one(
+        {"_id": payment_result.inserted_id},
+        {"$set": {
+            "status": "pending",
+            "paymob_intention_id": intention_id,
+            "paymob_order_id": paymob_order_id,
+            "checkout_url": checkout_url,
+            "updated_at": utcnow(),
+        }},
+    )
+
+    return Response({
+        "payment_id": str(payment_result.inserted_id),
+        "checkout_url": checkout_url,
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+@parser_classes([JSONParser])
+def paymob_webhook(request):
+    if not settings.PAYMOB_HMAC_SECRET:
+        return Response(
+            {"detail": "Paymob HMAC secret is not configured."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    body = request.data or {}
+    if body.get("type") != "TRANSACTION":
+        return Response({"received": True})
+
+    obj = body.get("obj") or {}
+    received_hmac = request.query_params.get("hmac", "")
+
+    if not _verify_paymob_transaction_hmac(obj, received_hmac):
+        return Response({"detail": "Invalid Paymob HMAC."}, status=status.HTTP_401_UNAUTHORIZED)
+
+    order = obj.get("order") or {}
+    paymob_order_id = order.get("id")
+    db = get_db()
+
+    payment = db.payment_transactions.find_one({"paymob_order_id": paymob_order_id})
+    if not payment:
+        merchant_reference = str(order.get("merchant_order_id") or "")
+        if merchant_reference:
+            payment = db.payment_transactions.find_one({"special_reference": merchant_reference})
+
+    if not payment:
+        return Response({"received": True})
+
+    success = bool(obj.get("success")) and not bool(obj.get("pending"))
+    failed = not bool(obj.get("success")) and not bool(obj.get("pending"))
+    payment_status = "paid" if success else "failed" if failed else "pending"
+
+    update = {
+        "status": payment_status,
+        "provider_transaction_id": str(obj.get("id") or ""),
+        "provider_response": str((obj.get("data") or {}).get("message") or "")[:500],
+        "updated_at": utcnow(),
+    }
+
+    db.payment_transactions.update_one({"_id": payment["_id"]}, {"$set": update})
+
+    if success:
+        db.users.update_one(
+            {"_id": payment["owner_id"]},
+            {"$set": {
+                "subscription_status": "active",
+                "payment_method": "Paymob",
+                "subscription_activated_at": utcnow(),
+                "updated_at": utcnow(),
+            }},
+        )
+
+    return Response({"received": True})
 
 
 @api_view(["GET", "PATCH"])
