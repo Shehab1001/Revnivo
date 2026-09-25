@@ -104,6 +104,24 @@ html.dark .chat-grid-bg {
   30% { opacity: 1; transform: translateY(-2px); }
 }
 
+@keyframes live-income-pulse {
+  0%, 100% {
+    transform: scale(0.82);
+    opacity: 0.8;
+    box-shadow: 0 0 8px hsl(var(--heroui-success) / 0.55);
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 1;
+    box-shadow: 0 0 16px hsl(var(--heroui-success) / 0.95);
+  }
+}
+
+.live-income-dot {
+  animation: live-income-pulse 1.6s ease-in-out infinite;
+  transform-origin: center;
+}
+
 @keyframes dashboard-rise {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -123,6 +141,7 @@ html:not(.dark) .recharts-cartesian-grid-horizontal line { stroke: #e4e7eb !impo
 .platform-drag-card.is-dragging { opacity: 1; transform: scale(1.04) rotate(1deg); box-shadow: 0 18px 34px rgb(15 23 42 / 0.24); z-index: 10; }
 
 @media (prefers-reduced-motion: reduce) {
+  .live-income-dot { animation: none; }
   .dashboard-reveal { animation: none; }
   .dashboard-panel { transition: none; }
   .dashboard-panel:hover { transform: none; }
