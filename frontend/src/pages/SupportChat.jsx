@@ -1,5 +1,5 @@
 import { Button, Card, CardBody, Chip, Input, Textarea } from '@heroui/react'
-import { Mic, MessageCircle, Paperclip, Search, Smile } from 'lucide-react'
+import { Mic, MessageCircle, Paperclip, Pause, Play, Search, Smile, Volume2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
@@ -58,6 +58,118 @@ function Avatar({ user, isAdmin = false }) {
   )
 }
 
+
+function formatVoiceDuration(value) {
+  const seconds = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+function VoiceMessage({ src, own }) {
+  const audioRef = useRef(null)
+  const [playing, setPlaying] = useState(false)
+  const [duration, setDuration] = useState(0)
+  const [currentTime, setCurrentTime] = useState(0)
+
+  const progress = duration > 0 ? Math.min(currentTime / duration, 1) : 0
+  const bars = [6, 10, 15, 8, 18, 12, 21, 9, 16, 23, 12, 19, 14, 24, 9, 17, 21, 12, 19, 8, 15, 23, 12, 18, 10, 20, 13, 18]
+
+  const togglePlayback = async () => {
+    const audio = audioRef.current
+    if (!audio) return
+
+    if (audio.paused) {
+      await audio.play().catch(() => {})
+    } else {
+      audio.pause()
+    }
+  }
+
+  const seek = (event) => {
+    const audio = audioRef.current
+    if (!audio || !duration) return
+
+    const rect = event.currentTarget.getBoundingClientRect()
+    const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1)
+    audio.currentTime = ratio * duration
+    setCurrentTime(audio.currentTime)
+  }
+
+  return (
+    <div
+      className={`
+        mt-1 flex min-w-[250px] max-w-[320px] items-center gap-3 rounded-2xl px-2.5 py-2
+        ${own ? 'bg-black/10 text-white' : 'bg-black/[0.045] text-foreground dark:bg-white/[0.06]'}
+      `}
+    >
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
+        onDurationChange={(event) => setDuration(event.currentTarget.duration || 0)}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime || 0)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => {
+          setPlaying(false)
+          setCurrentTime(0)
+        }}
+      />
+
+      <button
+        type="button"
+        onClick={togglePlayback}
+        className={`
+          grid h-10 w-10 shrink-0 place-items-center rounded-full transition
+          ${own ? 'bg-white/18 text-white hover:bg-white/25' : 'bg-primary/12 text-primary hover:bg-primary/18'}
+        `}
+        aria-label={playing ? 'Pause voice message' : 'Play voice message'}
+      >
+        {playing ? (
+          <Pause size={18} fill="currentColor" />
+        ) : (
+          <Play size={18} fill="currentColor" className="translate-x-px" />
+        )}
+      </button>
+
+      <div className="min-w-0 flex-1">
+        <button
+          type="button"
+          onClick={seek}
+          className="flex h-8 w-full items-center gap-[2px]"
+          aria-label="Seek voice message"
+        >
+          {bars.map((height, index) => {
+            const filled = (index + 1) / bars.length <= progress
+
+            return (
+              <span
+                key={`${height}-${index}`}
+                className={`w-[3px] shrink-0 rounded-full transition-colors ${
+                  own
+                    ? filled
+                      ? 'bg-white'
+                      : 'bg-white/40'
+                    : filled
+                      ? 'bg-primary'
+                      : 'bg-default-400/65'
+                }`}
+                style={{ height: `${height}px` }}
+              />
+            )
+          })}
+        </button>
+
+        <div className={`mt-0.5 flex items-center justify-between text-[10px] ${own ? 'text-white/75' : 'text-default-500'}`}>
+          <span>{formatVoiceDuration(currentTime > 0 ? currentTime : duration)}</span>
+          <Volume2 size={13} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AttachmentPreview({ url, file, own }) {
   const imageUrl = file ? URL.createObjectURL(file) : url
 
@@ -72,13 +184,7 @@ function AttachmentPreview({ url, file, own }) {
     Boolean(url?.match(/\.(webm|mp3|ogg|wav|m4a)(\?|$)/i))
 
   if (isAudio) {
-    return (
-      <audio
-        className="mt-2 max-w-full"
-        controls
-        src={imageUrl}
-      />
-    )
+    return <VoiceMessage src={imageUrl} own={own} />
   }
 
   if (isImage) {
@@ -135,6 +241,7 @@ export default function SupportChat() {
   const [deleting, setDeleting] = useState(false)
 
   const typingTimer = useRef(null)
+  const recordingPresenceTimer = useRef(null)
   const recorderRef = useRef(null)
   const audioChunksRef = useRef([])
 
@@ -208,6 +315,7 @@ export default function SupportChat() {
           }),
           online: admin?.online,
           typing: admin?.typing,
+          recording: admin?.recording,
         },
       ])
     }
@@ -368,6 +476,18 @@ export default function SupportChat() {
   }, [selectedUser])
 
   useEffect(() => {
+    return () => {
+      if (typingTimer.current) {
+        window.clearTimeout(typingTimer.current)
+      }
+
+      if (recordingPresenceTimer.current) {
+        window.clearInterval(recordingPresenceTimer.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
     const timer = window.setInterval(() => {
       if (
         user?.role !== 'admin' ||
@@ -498,11 +618,34 @@ export default function SupportChat() {
     await loadContacts().catch(() => {})
   }
 
+  const clearRecordingPresence = () => {
+    if (recordingPresenceTimer.current) {
+      window.clearInterval(recordingPresenceTimer.current)
+      recordingPresenceTimer.current = null
+    }
+
+    api
+      .post('/chat-presence/', {
+        recording: false,
+        user_id:
+          user?.role === 'admin'
+            ? selectedUser
+            : undefined,
+      })
+      .catch(() => {})
+  }
+
   const startRecording = async () => {
     if (recording) {
       recorderRef.current?.stop()
       return
     }
+
+    if (user?.role === 'admin' && !selectedUser) {
+      return
+    }
+
+    clearTyping()
 
     const stream =
       await navigator.mediaDevices.getUserMedia(
@@ -516,10 +659,13 @@ export default function SupportChat() {
 
     recorder.ondataavailable = (
       event
-    ) =>
-      audioChunksRef.current.push(
-        event.data
-      )
+    ) => {
+      if (event.data?.size) {
+        audioChunksRef.current.push(
+          event.data
+        )
+      }
+    }
 
     recorder.onstop = async () => {
       stream
@@ -527,6 +673,13 @@ export default function SupportChat() {
         .forEach((track) =>
           track.stop()
         )
+
+      clearRecordingPresence()
+      setRecording(false)
+
+      if (!audioChunksRef.current.length) {
+        return
+      }
 
       const audio = new File(
         [
@@ -547,8 +700,6 @@ export default function SupportChat() {
         }
       )
 
-      setRecording(false)
-
       await send(
         null,
         '',
@@ -559,8 +710,25 @@ export default function SupportChat() {
 
     recorderRef.current = recorder
     recorder.start()
-
     setRecording(true)
+
+    const sendRecordingPresence = () =>
+      api
+        .post('/chat-presence/', {
+          recording: true,
+          user_id:
+            user?.role === 'admin'
+              ? selectedUser
+              : undefined,
+        })
+        .catch(() => {})
+
+    sendRecordingPresence()
+    recordingPresenceTimer.current =
+      window.setInterval(
+        sendRecordingPresence,
+        3000
+      )
   }
 
   const selectContact = async (
@@ -813,13 +981,18 @@ export default function SupportChat() {
                           truncate
                           text-xs
                           ${
-                            contact.typing
+                            contact.recording || contact.typing
                               ? 'text-primary'
                               : 'text-default-500'
                           }
                         `}
                       >
-                        {contact.typing ? (
+                        {contact.recording ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <Mic size={13} />
+                            Recording voice...
+                          </span>
+                        ) : contact.typing ? (
                           <>
                             <span>
                               typing
@@ -835,7 +1008,7 @@ export default function SupportChat() {
                           contact.last_message ||
                           'No messages yet'
                         )}
-                      </div>
+                      </div>                      </div>
 
                       {contact.unread_count >
                         0 && (
@@ -896,10 +1069,14 @@ export default function SupportChat() {
                     {active.name}
                   </div>
 
-                  <div className="text-xs text-default-500">
-                    {active.online
-                      ? 'Online now'
-                      : 'Offline'}
+                  <div className={`text-xs ${active.recording || active.typing ? 'text-primary' : 'text-default-500'}`}>
+                    {active.recording
+                      ? 'Recording voice...'
+                      : active.typing
+                        ? 'Typing...'
+                        : active.online
+                          ? 'Online now'
+                          : 'Offline'}
                   </div>
                 </div>
               </div>
@@ -1133,7 +1310,12 @@ export default function SupportChat() {
                       }
                     )}
 
-                    {active.typing && (
+                    {active.recording ? (
+                      <div className="mt-3 flex items-center gap-2 text-xs font-medium text-primary">
+                        <Mic size={14} />
+                        Recording voice...
+                      </div>
+                    ) : active.typing ? (
                       <div className="mt-3 flex items-center gap-2 text-xs text-primary">
                         typing
 
@@ -1143,7 +1325,7 @@ export default function SupportChat() {
                           <i />
                         </span>
                       </div>
-                    )}
+                    ) : null}
 
                     <div
                       ref={messagesEndRef}
