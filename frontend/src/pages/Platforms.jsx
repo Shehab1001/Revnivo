@@ -52,6 +52,23 @@ const statusColors = {
 
 const currencyOptions = getCurrencyOptions()
 
+const dropdownClassNames = {
+  trigger:
+    'h-11 min-h-11 rounded-xl border-0 bg-[#eceef2] px-3.5 shadow-none transition-colors data-[hover=true]:bg-[#e4e7ec] dark:bg-content1 dark:data-[hover=true]:bg-default-100',
+  value: 'text-sm font-semibold text-foreground dark:text-white',
+  selectorIcon: 'right-3 text-default-500 dark:text-zinc-200',
+  popoverContent:
+    'rounded-2xl border border-default-200 bg-content1 p-1 shadow-xl dark:border-white/10 dark:bg-[#202023]',
+}
+
+const autocompleteInputClassNames = {
+  inputWrapper:
+    'h-11 min-h-11 rounded-xl border-0 bg-[#eceef2] px-3.5 shadow-none transition-colors data-[hover=true]:bg-[#e4e7ec] group-data-[focus=true]:bg-[#eceef2] dark:bg-content1 dark:data-[hover=true]:bg-default-100 dark:group-data-[focus=true]:bg-content1',
+  input:
+    'text-sm font-semibold text-foreground placeholder:text-default-500 dark:text-white',
+  innerWrapper: 'gap-2',
+}
+
 export default function Platforms() {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -547,7 +564,14 @@ export default function Platforms() {
           }
           allowsCustomValue={false}
           placeholder="Currency"
-          variant="bordered"
+          size="md"
+          variant="flat"
+          radius="lg"
+          inputProps={{ classNames: autocompleteInputClassNames }}
+          classNames={{
+            selectorButton: dropdownClassNames.selectorIcon,
+            popoverContent: dropdownClassNames.popoverContent,
+          }}
         >
           {currencyOptions.map((item) => (
             <AutocompleteItem
@@ -576,7 +600,10 @@ export default function Platforms() {
               status: Array.from(keys)[0] || 'not active',
             })
           }
-          variant="bordered"
+          size="md"
+          variant="flat"
+          radius="lg"
+          classNames={dropdownClassNames}
         >
           <SelectItem key="working">Working</SelectItem>
           <SelectItem key="applied">Applied</SelectItem>
@@ -725,7 +752,10 @@ export default function Platforms() {
               Array.from(keys)[0] || 'all'
             )
           }
-          variant="bordered"
+          size="md"
+          variant="flat"
+          radius="lg"
+          classNames={dropdownClassNames}
         >
           <SelectItem key="all">All statuses</SelectItem>
           <SelectItem key="working">Working</SelectItem>
