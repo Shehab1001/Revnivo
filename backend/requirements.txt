@@ -1,5 +1,5 @@
 Django>=5.2,<6.0
-djangorestframework>=3.16,<4.0
+djangorestframework>=3.18.1,<4.0
 django-cors-headers>=4.7,<5.0
 pymongo[srv]>=4.13,<5.0
 PyJWT>=2.10,<3.0
