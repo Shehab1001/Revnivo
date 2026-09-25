@@ -214,7 +214,7 @@ export default function AdminUsers() {
         </h1>
 
         <p className="mt-1 text-sm text-default-500">
-          Manage users, permissions and free trials.
+          Manage users, permissions and account access.
         </p>
       </div>
 
@@ -335,7 +335,7 @@ export default function AdminUsers() {
                   </th>
 
                   <th className="px-5 py-4 font-semibold">
-                    Trial
+                    Account created
                   </th>
 
                   <th className="px-5 py-4 text-right font-semibold">
@@ -390,10 +390,10 @@ export default function AdminUsers() {
                       </Chip>
                     </td>
 
-                    {/* Trial */}
+                    {/* Account created */}
                     <td className="px-5 py-4 text-default-500">
-                      {user.trial_ends_at
-                        ? formatDate(user.trial_ends_at)
+                      {user.created_at
+                        ? formatDate(user.created_at)
                         : '—'}
                     </td>
 
