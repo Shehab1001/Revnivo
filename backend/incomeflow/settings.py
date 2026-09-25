@@ -159,8 +159,11 @@ REST_FRAMEWORK = {
         "api.throttles.ApiSustainedThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
+        # Revnivo uses authenticated polling for notifications, presence,
+        # and chat updates. Keep a strict short-window burst limit while
+        # allowing enough legitimate daily requests for an active session.
         "api_burst": os.getenv("API_BURST_RATE", "120/min"),
-        "api_sustained": os.getenv("API_SUSTAINED_RATE", "2000/day"),
+        "api_sustained": os.getenv("API_SUSTAINED_RATE", "150000/day"),
     },
 }
 
