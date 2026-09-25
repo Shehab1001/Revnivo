@@ -18,6 +18,13 @@ class MongoUser:
     name: str
 
     @property
+    def pk(self):
+        # DRF's UserRateThrottle expects authenticated users to expose .pk,
+        # like Django's built-in User model. Mongo users use the ObjectId
+        # string as their stable primary key.
+        return self.id
+
+    @property
     def is_authenticated(self):
         return True
 
