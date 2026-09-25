@@ -44,7 +44,7 @@ function formatMessageTime(value) {
 
 function Avatar({ user, isAdmin = false }) {
   return (
-    <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full bg-primary/10 font-bold text-primary">
+    <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border border-default-300/80 bg-primary/10 font-bold text-primary dark:border-white/15">
       {isAdmin ? (
         <img
           src="/profile.png"
