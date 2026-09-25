@@ -401,3 +401,53 @@ html.dark .note-inline-file-card {
     width: 100% !important;
   }
 }
+
+
+.note-inline-image-frame {
+  position: relative;
+}
+
+.note-image-resize-handle {
+  position: absolute;
+  right: 8px;
+  bottom: 30px;
+  width: 14px;
+  height: 14px;
+  border: 2px solid hsl(var(--heroui-primary));
+  border-radius: 4px;
+  background: hsl(var(--heroui-background));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity 140ms ease;
+  z-index: 3;
+  touch-action: none;
+}
+
+.note-inline-attachment:hover .note-image-resize-handle,
+.note-inline-attachment:focus-within .note-image-resize-handle {
+  opacity: 1;
+}
+
+.note-editor [dir="rtl"] {
+  direction: rtl;
+  text-align: right;
+}
+
+.note-editor [dir="ltr"] {
+  direction: ltr;
+  text-align: left;
+}
+
+.note-editor [dir="rtl"] ul,
+.note-editor [dir="rtl"] ol {
+  padding-right: 1.6rem;
+  padding-left: 0;
+}
+
+.note-editor [dir="rtl"] blockquote {
+  border-right: 3px solid hsl(var(--heroui-primary));
+  border-left: 0;
+  padding-right: 1rem;
+  padding-left: 0;
+}
