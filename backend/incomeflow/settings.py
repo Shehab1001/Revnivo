@@ -57,6 +57,17 @@ EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "true").lower() == "true"
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "noreply@revnivo.local")
 PASSWORD_RESET_OTP_MINUTES = int(os.getenv("PASSWORD_RESET_OTP_MINUTES", "10"))
 
+# Paymob Unified Checkout (Egypt by default).
+# Keep secret and HMAC keys server-side only.
+PAYMOB_BASE_URL = os.getenv("PAYMOB_BASE_URL", "https://accept.paymob.com").rstrip("/")
+PAYMOB_SECRET_KEY = os.getenv("PAYMOB_SECRET_KEY", "").strip()
+PAYMOB_PUBLIC_KEY = os.getenv("PAYMOB_PUBLIC_KEY", "").strip()
+PAYMOB_HMAC_SECRET = os.getenv("PAYMOB_HMAC_SECRET", "").strip()
+PAYMOB_INTEGRATION_ID_CARD = os.getenv("PAYMOB_INTEGRATION_ID_CARD", "").strip()
+PAYMOB_CURRENCY = os.getenv("PAYMOB_CURRENCY", "EGP").strip().upper()
+PAYMOB_WEBHOOK_URL = os.getenv("PAYMOB_WEBHOOK_URL", "").strip()
+PAYMOB_REDIRECT_URL = os.getenv("PAYMOB_REDIRECT_URL", "").strip()
+
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
 CORS_ALLOWED_ORIGINS = [FRONTEND_ORIGIN]
 CORS_ALLOW_CREDENTIALS = False
