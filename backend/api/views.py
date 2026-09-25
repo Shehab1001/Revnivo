@@ -1120,9 +1120,9 @@ def paymob_checkout(request):
         return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
     phone = str(request.data.get("phone", "")).strip()
-    if not phone:
+    if not re.fullmatch(r"\+?[0-9]{8,15}", phone):
         return Response(
-            {"detail": "Phone number is required for Paymob checkout."},
+            {"detail": "Enter a valid phone number using 8 to 15 digits."},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -1308,16 +1308,40 @@ def paymob_webhook(request):
     if not payment:
         return Response({"received": True})
 
-    success = bool(obj.get("success")) and not bool(obj.get("pending"))
-    failed = not bool(obj.get("success")) and not bool(obj.get("pending"))
+    expected_amount_cents = int(
+        (Decimal(str(payment.get("amount", 0))) * Decimal("100")).quantize(Decimal("1"))
+    )
+    received_amount_cents = int(obj.get("amount_cents") or 0)
+    received_currency = str(obj.get("currency") or "").upper()
+    expected_currency = str(payment.get("currency") or "").upper()
+    received_integration = str(obj.get("integration_id") or "")
+    expected_integration = str(settings.PAYMOB_INTEGRATION_ID_CARD)
+
+    payment_matches = (
+        received_amount_cents == expected_amount_cents
+        and received_currency == expected_currency
+        and received_integration == expected_integration
+    )
+
+    success = (
+        payment_matches
+        and bool(obj.get("success"))
+        and not bool(obj.get("pending"))
+    )
+    failed = not bool(obj.get("pending")) and not success
     payment_status = "paid" if success else "failed" if failed else "pending"
 
     update = {
         "status": payment_status,
         "provider_transaction_id": str(obj.get("id") or ""),
         "provider_response": str((obj.get("data") or {}).get("message") or "")[:500],
+        "provider_amount_cents": received_amount_cents,
+        "provider_currency": received_currency,
         "updated_at": utcnow(),
     }
+
+    if not payment_matches:
+        update["failure_reason"] = "Payment verification mismatch."
 
     db.payment_transactions.update_one({"_id": payment["_id"]}, {"$set": update})
 
