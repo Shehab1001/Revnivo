@@ -53,16 +53,22 @@ def owner_oid(request):
     return ObjectId(request.user.id)
 
 
-ADMIN_EMAIL = "dev.shehabsaid@gmail.com"
-SUPERADMIN_EMAIL = ADMIN_EMAIL
+SUPERADMIN_EMAIL = settings.SUPERADMIN_EMAIL
 
 
 def is_admin_doc(doc):
-    return bool(doc and (doc.get("role") == "admin" or doc.get("email", "").lower() == ADMIN_EMAIL))
+    # Never infer administrator privileges from a self-registered email address.
+    # Admin access is an explicit database role.
+    return bool(doc and doc.get("role") == "admin")
 
 
 def is_superadmin_doc(doc):
-    return bool(doc and doc.get("email", "").lower() == SUPERADMIN_EMAIL)
+    return bool(
+        doc
+        and doc.get("role") == "admin"
+        and SUPERADMIN_EMAIL
+        and doc.get("email", "").lower() == SUPERADMIN_EMAIL
+    )
 
 
 def serialize_user(doc, request):
@@ -97,12 +103,29 @@ def create_user_doc(name, email, password_hash="", google_picture=""):
         "password_hash": password_hash,
         "google_picture": google_picture,
         "auth_provider": "google" if google_picture else "password",
-        "role": "admin" if email.lower() == ADMIN_EMAIL else "user",
+        "role": "user",
+        "token_version": 0,
         "created_at": now,
+        "updated_at": now,
         "trial_ends_at": now + timedelta(days=30),
         "subscription_status": "trial",
         "payment_method": None,
     }
+
+
+def auth_success_response(doc, request, status_code=status.HTTP_200_OK):
+    token, csrf_token = create_access_token(
+        str(doc["_id"]),
+        doc.get("email", ""),
+        doc.get("token_version", 0),
+    )
+    response = Response(
+        {"user": serialize_user(doc, request)},
+        status=status_code,
+    )
+    set_auth_cookies(response, token, csrf_token)
+    response["Cache-Control"] = "no-store, private"
+    return response
 
 
 def is_active_trial(value):
