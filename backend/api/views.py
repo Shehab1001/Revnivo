@@ -921,16 +921,23 @@ def support_chat(request):
             unread_count = db.notifications.count_documents({"kind": "chat", "chat_user_id": str(contact_id), "$or": [{"owner_id": None}, {"owner_id": owner}], "read": False})
             last_seen = contact.get("last_seen")
             typing_until = contact.get("typing_until")
+            recording_until = contact.get("recording_until")
             if last_seen and last_seen.tzinfo is None:
                 last_seen = last_seen.replace(tzinfo=timezone.utc)
             if typing_until and typing_until.tzinfo is None:
                 typing_until = typing_until.replace(tzinfo=timezone.utc)
+            if recording_until and recording_until.tzinfo is None:
+                recording_until = recording_until.replace(tzinfo=timezone.utc)
+            latest_message = ""
+            if latest:
+                latest_message = "Voice message" if latest.get("message_type") == "audio" else latest.get("content", "")
             summaries.append({
                 **serialize_user(contact, request),
                 "online": bool(last_seen and utcnow() - last_seen <= timedelta(minutes=2)),
                 "typing": bool(typing_until and utcnow() < typing_until),
+                "recording": bool(recording_until and utcnow() < recording_until),
                 "unread_count": unread_count,
-                "last_message": latest.get("content", "") if latest else "",
+                "last_message": latest_message,
                 "last_message_at": serialize_datetime(latest.get("created_at")) if latest else None,
             })
         return Response(summaries)
@@ -969,35 +976,85 @@ def support_chat(request):
 def chat_presence(request):
     db = get_db()
     owner = owner_oid(request)
+
     if request.method == "POST":
         if request.data.get("offline"):
-            db.users.update_one({"_id": owner}, {"$set": {"last_seen": None, "typing_until": None, "typing_for": None}})
+            db.users.update_one(
+                {"_id": owner},
+                {"$set": {
+                    "last_seen": None,
+                    "typing_until": None,
+                    "typing_for": None,
+                    "recording_until": None,
+                    "recording_for": None,
+                }},
+            )
             return Response({"status": "offline"})
-        typing_for = request.data.get("user_id") if request.data.get("user_id") else "admin"
-        updates = {"typing_until": utcnow() + timedelta(seconds=4), "typing_for": str(typing_for)} if request.data.get("typing") else {"typing_until": None, "typing_for": None}
+
+        activity_for = request.data.get("user_id") if request.data.get("user_id") else "admin"
+
+        if "recording" in request.data:
+            is_recording = bool(request.data.get("recording"))
+            updates = {
+                "recording_until": utcnow() + timedelta(seconds=5) if is_recording else None,
+                "recording_for": str(activity_for) if is_recording else None,
+            }
+            if is_recording:
+                updates.update({"typing_until": None, "typing_for": None})
+            db.users.update_one({"_id": owner}, {"$set": updates})
+            return Response({"status": "recording" if is_recording else "idle"})
+
+        is_typing = bool(request.data.get("typing"))
+        updates = {
+            "typing_until": utcnow() + timedelta(seconds=4) if is_typing else None,
+            "typing_for": str(activity_for) if is_typing else None,
+        }
+        if is_typing:
+            updates.update({"recording_until": None, "recording_for": None})
         db.users.update_one({"_id": owner}, {"$set": updates})
-        return Response({"status": "typing" if request.data.get("typing") else "idle"})
+        return Response({"status": "typing" if is_typing else "idle"})
+
     db.users.update_one({"_id": owner}, {"$set": {"last_seen": utcnow()}})
     viewer = db.users.find_one({"_id": owner})
     query = {"role": "admin"} if not is_admin_doc(viewer) else {"role": {"$ne": "admin"}}
     people = []
+
     for person in db.users.find(query).sort("created_at", DESCENDING):
         last_seen = person.get("last_seen")
         typing_until = person.get("typing_until")
+        recording_until = person.get("recording_until")
+
         if last_seen and last_seen.tzinfo is None:
             last_seen = last_seen.replace(tzinfo=timezone.utc)
         if typing_until and typing_until.tzinfo is None:
             typing_until = typing_until.replace(tzinfo=timezone.utc)
+        if recording_until and recording_until.tzinfo is None:
+            recording_until = recording_until.replace(tzinfo=timezone.utc)
+
         typing_for = str(person.get("typing_for") or "")
-        is_typing = bool(typing_until and utcnow() < typing_until and (is_admin_doc(viewer) or typing_for in ("admin", str(owner))))
+        recording_for = str(person.get("recording_for") or "")
+        viewer_target = ("admin", str(owner))
+
+        is_typing = bool(
+            typing_until
+            and utcnow() < typing_until
+            and (is_admin_doc(viewer) or typing_for in viewer_target)
+        )
+        is_recording = bool(
+            recording_until
+            and utcnow() < recording_until
+            and (is_admin_doc(viewer) or recording_for in viewer_target)
+        )
+
         people.append({
             "id": str(person["_id"]),
             "name": person.get("name") or person.get("email", ""),
             "online": bool(last_seen and utcnow() - last_seen <= timedelta(minutes=2)),
-            "typing": is_typing,
+            "typing": is_typing and not is_recording,
+            "recording": is_recording,
         })
-    return Response(people)
 
+    return Response(people)
 
 @api_view(["GET", "POST"])
 @parser_classes([JSONParser])
