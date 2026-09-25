@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import ConfirmDeleteModal from '../components/ConfirmDeleteModal'
 import EmptyState from '../components/EmptyState'
 import Loading from '../components/Loading'
 import Modal from '../components/Modal'
@@ -93,6 +94,8 @@ export default function Earnings() {
   const [saving, setSaving] = useState(false)
   const [importing, setImporting] = useState(false)
   const [selectedEarning, setSelectedEarning] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
   const fileInputRef = useRef(null)
 
   const load = async (nextPage = page) => {
@@ -238,19 +241,26 @@ export default function Earnings() {
     }
   }
 
-  const remove = async (earning) => {
-    if (
-      !window.confirm(
-        'Delete this income entry?'
-      )
-    ) {
-      return
-    }
+  const remove = async () => {
+    if (!deleteTarget) return
 
-    await api.delete(
-      `/earnings/${earning.id}/`
-    )
-    await load(page)
+    setDeleting(true)
+    setError('')
+
+    try {
+      await api.delete(
+        `/earnings/${deleteTarget.id}/`
+      )
+      setDeleteTarget(null)
+      await load(page)
+    } catch (err) {
+      setError(
+        err.response?.data?.detail ||
+          'Could not delete this income entry.'
+      )
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const exportCsv = async () => {
@@ -449,7 +459,7 @@ export default function Earnings() {
 
         {items.length ? (
           <div className="overflow-x-auto scrollbar-thin">
-            <table className="min-w-[1180px] text-left text-[12px]">
+            <table className="w-full min-w-[1180px] table-auto text-left text-[12px]">
               <thead className="bg-content2/60 text-[10px] font-bold uppercase tracking-wide text-default-500">
                 <tr>
                   <th className="whitespace-nowrap px-3 py-2.5">
@@ -473,10 +483,10 @@ export default function Earnings() {
                   <th className="whitespace-nowrap px-3 py-2.5">
                     Category
                   </th>
-                  <th className="whitespace-nowrap px-3 py-2.5">
+                  <th className="min-w-[240px] px-3 py-2.5">
                     Description
                   </th>
-                  <th className="px-4 py-3 text-right">
+                  <th className="w-[92px] whitespace-nowrap px-3 py-2.5 text-right">
                     Actions
                   </th>
                 </tr>
@@ -591,7 +601,7 @@ export default function Earnings() {
                           '—'}
                       </td>
 
-                      <td className="whitespace-nowrap px-3 py-2.5">
+                      <td className="w-[92px] whitespace-nowrap px-3 py-2.5">
                         <div className="flex justify-end gap-1">
                           <Button
                             isIconOnly
@@ -612,7 +622,7 @@ export default function Earnings() {
                             variant="light"
                             color="danger"
                             onPress={() =>
-                              remove(earning)
+                              setDeleteTarget(earning)
                             }
                             onClick={(event) => event.stopPropagation()}
                             aria-label="Delete income"
@@ -743,6 +753,15 @@ export default function Earnings() {
           </div>
         )}
       </Modal>
+
+      <ConfirmDeleteModal
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={remove}
+        loading={deleting}
+        title="Delete income entry?"
+        message={`Delete ${deleteTarget?.platform_name || 'this income entry'} for ${deleteTarget ? formatMoney(deleteTarget.gross_amount ?? deleteTarget.amount, deleteTarget.currency) : ''}? This action cannot be undone.`}
+      />
 
       <Modal
         open={modal}
