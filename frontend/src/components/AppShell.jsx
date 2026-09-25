@@ -1,4 +1,4 @@
-import { Bell, BarChart3, ChevronDown, ChevronLeft, ChevronRight, DollarSign, FileText, LogOut, Menu, MessageCircle, Moon, PanelLeft, PanelsTopLeft, Settings as SettingsIcon, Sun, Trash2, Users, WalletCards } from 'lucide-react'
+import { Bell, BarChart3, ChevronDown, ChevronLeft, ChevronRight, CreditCard, DollarSign, FileText, LogOut, Menu, MessageCircle, Moon, PanelLeft, PanelsTopLeft, Settings as SettingsIcon, Sun, Trash2, Users, WalletCards } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
@@ -10,6 +10,7 @@ import ProfileAvatar from './ProfileAvatar'
 const baseNav = [
   { to: '/platforms', label: 'Platforms', icon: PanelsTopLeft },
   { to: '/earnings', label: 'Earnings', icon: WalletCards },
+  { to: '/payments', label: 'Payments', icon: CreditCard },
   { to: '/notes', label: 'Notes', icon: FileText },
   { to: '/support-chat', label: 'Chat', icon: MessageCircle },
 ]
