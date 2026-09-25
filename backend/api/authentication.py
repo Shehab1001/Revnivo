@@ -55,29 +55,23 @@ def set_auth_cookies(response, token: str, csrf_token: str):
         "samesite": settings.AUTH_COOKIE_SAMESITE,
         "path": "/",
     }
+    if settings.AUTH_COOKIE_DOMAIN:
+        common["domain"] = settings.AUTH_COOKIE_DOMAIN
+
     response.set_cookie(
         settings.AUTH_COOKIE_NAME,
         token,
         httponly=True,
         **common,
     )
-    response.set_cookie(
-        settings.AUTH_CSRF_COOKIE_NAME,
-        csrf_token,
-        httponly=False,
-        **common,
-    )
+    response["X-CSRF-Token"] = csrf_token
 
 
 def clear_auth_cookies(response):
     response.delete_cookie(
         settings.AUTH_COOKIE_NAME,
         path="/",
-        samesite=settings.AUTH_COOKIE_SAMESITE,
-    )
-    response.delete_cookie(
-        settings.AUTH_CSRF_COOKIE_NAME,
-        path="/",
+        domain=settings.AUTH_COOKIE_DOMAIN or None,
         samesite=settings.AUTH_COOKIE_SAMESITE,
     )
 
@@ -125,15 +119,14 @@ class MongoJWTAuthentication(authentication.BaseAuthentication):
             if int(payload.get("ver", -1)) != int(doc.get("token_version", 0)):
                 raise exceptions.AuthenticationFailed("Session has been revoked.")
 
+            token_csrf = str(payload.get("csrf") or "")
+            request.revnivo_csrf = token_csrf
+
             if using_cookie and request.method.upper() not in self.safe_methods:
                 header_csrf = request.headers.get("X-CSRF-Token", "")
-                cookie_csrf = request.COOKIES.get(settings.AUTH_CSRF_COOKIE_NAME, "")
-                token_csrf = str(payload.get("csrf") or "")
                 if not (
                     header_csrf
-                    and cookie_csrf
                     and token_csrf
-                    and hmac.compare_digest(header_csrf, cookie_csrf)
                     and hmac.compare_digest(header_csrf, token_csrf)
                 ):
                     raise exceptions.AuthenticationFailed("CSRF validation failed.")
