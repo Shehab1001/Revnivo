@@ -363,8 +363,12 @@ export default function Platforms() {
               <Chip
                 size="sm"
                 radius="full"
-                variant="flat"
+                variant="bordered"
                 color={statusColors[platform.status] || 'default'}
+                classNames={{
+                  base: 'border font-medium',
+                  content: 'text-[12px] font-medium capitalize',
+                }}
               >
                 {platform.status || 'not active'}
               </Chip>
