@@ -2462,11 +2462,16 @@ def import_earnings_csv(request):
 
 
 DASHBOARD_WIDGET_IDS = [
+    "gross_revenue",
+    "net_income",
     "pending",
+    "this_month",
+    "transactions",
+    "platforms",
     "goals",
-    "insights",
     "charts",
     "platform_mix",
+    "recent_earnings",
 ]
 
 
