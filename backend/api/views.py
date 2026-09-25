@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import mimetypes
 import re
 import secrets
 from time import monotonic
@@ -19,6 +20,7 @@ from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.mail import EmailMultiAlternatives
+from django.http import FileResponse
 from html import escape
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
@@ -41,6 +43,7 @@ from .utils import (
     oid,
     save_logo,
     save_upload,
+    resolve_upload_path,
     serialize_datetime,
     serialize_note,
     serialize_earning,
@@ -1777,8 +1780,49 @@ def support_chat(request):
         if owner in doc.get("deleted_for", []):
             continue
         attachment = doc.get("attachment", "")
-        result.append({**{key: doc.get(key) for key in ("content", "sender", "message_type")}, "deleted": bool(doc.get("deleted")), "id": str(doc["_id"]), "user_id": str(doc["user_id"]), "created_at": serialize_datetime(doc.get("created_at")), "attachment_url": request.build_absolute_uri(f"{settings.MEDIA_URL}{attachment}") if attachment else ""})
+        result.append({**{key: doc.get(key) for key in ("content", "sender", "message_type")}, "deleted": bool(doc.get("deleted")), "id": str(doc["_id"]), "user_id": str(doc["user_id"]), "created_at": serialize_datetime(doc.get("created_at")), "attachment_url": request.build_absolute_uri(f"/api/support-chat/{doc['_id']}/attachment/") if attachment else ""})
     return Response(result)
+
+
+@api_view(["GET"])
+def support_chat_attachment(request, message_id):
+    message_oid = oid(message_id)
+    if not message_oid:
+        return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    db = get_db()
+    owner = owner_oid(request)
+    viewer = db.users.find_one({"_id": owner})
+    message = db.chat_messages.find_one({"_id": message_oid})
+
+    if not message or not message.get("attachment") or message.get("deleted"):
+        return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if not is_admin_doc(viewer) and message.get("user_id") != owner:
+        return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if owner in message.get("deleted_for", []):
+        return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    target = resolve_upload_path(message["attachment"])
+    if not target:
+        return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    inline = (
+        content_type.startswith("image/")
+        or content_type.startswith("audio/")
+    )
+
+    response = FileResponse(
+        target.open("rb"),
+        content_type=content_type,
+        as_attachment=not inline,
+        filename=target.name,
+    )
+    response["Cache-Control"] = "private, no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @api_view(["GET", "POST"])
