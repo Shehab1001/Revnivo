@@ -195,6 +195,40 @@ def dashboard_amount_expression(currency, rates):
     ]
     return {"$switch": {"branches": branches, "default": "$amount"}}
 
+def dashboard_net_expression(currency, rates):
+    target_rate = rates.get(currency)
+    base_net = {
+        "$subtract": [
+            "$amount",
+            {
+                "$add": [
+                    {"$ifNull": ["$platform_fee", Decimal128("0")]},
+                    {"$ifNull": ["$payment_fee", Decimal128("0")]},
+                ]
+            },
+        ]
+    }
+
+    if not target_rate:
+        return base_net
+
+    branches = [
+        {
+            "case": {"$eq": ["$currency", source_currency]},
+            "then": {
+                "$multiply": [
+                    base_net,
+                    Decimal128(str(target_rate / source_rate)),
+                ]
+            },
+        }
+        for source_currency, source_rate in rates.items()
+    ]
+
+    return {"$switch": {"branches": branches, "default": base_net}}
+
+
+
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
@@ -2439,7 +2473,14 @@ def dashboard(request):
     platform_id = request.query_params.get("platform_id", "all")
     rates = current_currency_rates()
 
-    match = {"owner_id": owner, **dashboard_currency_query(currency)}
+    match = {
+        "owner_id": owner,
+        "$or": [
+            {"status": "paid"},
+            {"status": {"$exists": False}},
+        ],
+        **dashboard_currency_query(currency),
+    }
     if platform_id != "all":
         platform_oid = oid(platform_id)
         if platform_oid and db.platforms.find_one({"_id": platform_oid, "owner_id": owner, "is_archived": {"$ne": True}}):
@@ -2487,8 +2528,24 @@ def dashboard(request):
     current_month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
     next_month_start = datetime(now.year + (1 if now.month == 12 else 0), 1 if now.month == 12 else now.month + 1, 1, tzinfo=timezone.utc)
     previous_month_start = datetime(now.year if now.month > 1 else now.year - 1, now.month - 1 if now.month > 1 else 12, 1, tzinfo=timezone.utc)
-    current_month_match = {"owner_id": owner, **dashboard_currency_query(currency), "earned_at": {"$gte": current_month_start, "$lt": next_month_start}}
-    previous_month_match = {"owner_id": owner, **dashboard_currency_query(currency), "earned_at": {"$gte": previous_month_start, "$lt": current_month_start}}
+    paid_status_match = {
+        "$or": [
+            {"status": "paid"},
+            {"status": {"$exists": False}},
+        ]
+    }
+    current_month_match = {
+        "owner_id": owner,
+        **paid_status_match,
+        **dashboard_currency_query(currency),
+        "earned_at": {"$gte": current_month_start, "$lt": next_month_start},
+    }
+    previous_month_match = {
+        "owner_id": owner,
+        **paid_status_match,
+        **dashboard_currency_query(currency),
+        "earned_at": {"$gte": previous_month_start, "$lt": current_month_start},
+    }
     if "platform_id" in match:
         current_month_match["platform_id"] = match["platform_id"]
         previous_month_match["platform_id"] = match["platform_id"]
@@ -2505,9 +2562,17 @@ def dashboard(request):
 
     total_doc = next(db.earnings.aggregate([
         {"$match": match},
-        {"$group": {"_id": None, "total": {"$sum": dashboard_amount_expression(currency, rates)}, "count": {"$sum": 1}}},
+        {
+            "$group": {
+                "_id": None,
+                "total": {"$sum": dashboard_amount_expression(currency, rates)},
+                "net_total": {"$sum": dashboard_net_expression(currency, rates)},
+                "count": {"$sum": 1},
+            }
+        },
     ]), None)
     total = decimal_to_float(total_doc.get("total")) if total_doc else 0.0
+    net_total = decimal_to_float(total_doc.get("net_total")) if total_doc else 0.0
     count = total_doc.get("count", 0) if total_doc else 0
 
     monthly = list(db.earnings.aggregate([
@@ -2568,6 +2633,102 @@ def dashboard(request):
     recent_pids = list({d.get("platform_id") for d in recent_docs if d.get("platform_id")})
     recent_pmap = {p["_id"]: p for p in db.platforms.find({"_id": {"$in": recent_pids}, "owner_id": owner})}
 
+    pending_match = {
+        "owner_id": owner,
+        "status": "pending",
+        **dashboard_currency_query(currency),
+    }
+    if "platform_id" in match:
+        pending_match["platform_id"] = match["platform_id"]
+
+    pending_doc = next(db.earnings.aggregate([
+        {"$match": pending_match},
+        {
+            "$group": {
+                "_id": None,
+                "total": {"$sum": dashboard_amount_expression(currency, rates)},
+                "net_total": {"$sum": dashboard_net_expression(currency, rates)},
+                "count": {"$sum": 1},
+            }
+        },
+    ]), None)
+    pending_total = decimal_to_float(pending_doc.get("total")) if pending_doc else 0.0
+    pending_net_total = decimal_to_float(pending_doc.get("net_total")) if pending_doc else 0.0
+    pending_count = pending_doc.get("count", 0) if pending_doc else 0
+
+    overdue_count = db.earnings.count_documents({
+        "owner_id": owner,
+        "status": "pending",
+        "expected_at": {"$lt": now},
+    })
+
+    goal_doc = db.income_goals.find_one({"owner_id": owner}) or {}
+    goal_currency = goal_doc.get("currency", currency)
+    source_rate = rates.get(goal_currency)
+    target_rate = rates.get(currency)
+
+    def convert_goal(value):
+        raw = decimal_to_float(value)
+        if not raw or not source_rate or not target_rate:
+            return raw
+        return raw * float(target_rate / source_rate)
+
+    monthly_goal = convert_goal(goal_doc.get("monthly_goal"))
+    yearly_goal = convert_goal(goal_doc.get("yearly_goal"))
+
+    year_start = datetime(now.year, 1, 1, tzinfo=timezone.utc)
+    year_paid_match = {
+        "owner_id": owner,
+        **paid_status_match,
+        **dashboard_currency_query(currency),
+        "earned_at": {"$gte": year_start, "$lt": datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)},
+    }
+    if "platform_id" in match:
+        year_paid_match["platform_id"] = match["platform_id"]
+
+    year_total_doc = next(db.earnings.aggregate([
+        {"$match": year_paid_match},
+        {"$group": {"_id": None, "total": {"$sum": dashboard_net_expression(currency, rates)}}},
+    ]), None)
+    current_year_net = decimal_to_float(year_total_doc.get("total")) if year_total_doc else 0.0
+
+    current_month_net_doc = next(db.earnings.aggregate([
+        {"$match": current_month_match},
+        {"$group": {"_id": None, "total": {"$sum": dashboard_net_expression(currency, rates)}}},
+    ]), None)
+    current_month_net = decimal_to_float(current_month_net_doc.get("total")) if current_month_net_doc else 0.0
+
+    insights = []
+    if previous_month_income > 0:
+        change = ((current_month_income - previous_month_income) / previous_month_income) * 100
+        direction = "increased" if change >= 0 else "decreased"
+        insights.append(
+            f"Your income {direction} {abs(change):.1f}% compared with last month."
+        )
+    elif current_month_income > 0:
+        insights.append("You recorded income this month after no paid income last month.")
+
+    if platform_breakdown and total > 0:
+        top = platform_breakdown[0]
+        share = (top["total"] / total) * 100 if total else 0
+        insights.append(
+            f"{top['name']} generated {share:.0f}% of the income in your current view."
+        )
+
+    if pending_count:
+        insights.append(
+            f"You have {pending_count} pending payment{'s' if pending_count != 1 else ''} worth {pending_net_total:,.2f} {currency} net."
+        )
+
+    if overdue_count:
+        insights.append(
+            f"{overdue_count} pending payment{'s are' if overdue_count != 1 else ' is'} overdue."
+        )
+
+    if monthly_goal > 0:
+        progress = min((current_month_net / monthly_goal) * 100, 100)
+        insights.append(f"You are {progress:.0f}% toward your monthly income goal.")
+
     currencies = sorted(set(db.earnings.distinct("currency", {"owner_id": owner})) | {"EGP"})
     year_rows = list(db.earnings.aggregate([
         {"$match": {"owner_id": owner}},
@@ -2591,6 +2752,11 @@ def dashboard(request):
         "exchange_rate": float(rates[currency]) if currency in rates else None,
         "summary": {
             "total_income": total,
+            "net_income": net_total,
+            "pending_income": pending_total,
+            "pending_net_income": pending_net_total,
+            "pending_count": pending_count,
+            "overdue_count": overdue_count,
             "transactions": count,
             "platforms": db.platforms.count_documents({"owner_id": owner, "is_archived": {"$ne": True}}),
             "best_platform": platform_breakdown[0]["name"] if platform_breakdown else None,
@@ -2609,5 +2775,13 @@ def dashboard(request):
         ],
         "platform_breakdown": platform_breakdown,
         "recent": [serialize_earning(d, recent_pmap.get(d.get("platform_id")), rates) for d in recent_docs],
+        "goals": {
+            "monthly_goal": monthly_goal,
+            "yearly_goal": yearly_goal,
+            "current_month_net": current_month_net,
+            "current_year_net": current_year_net,
+            "currency": currency,
+        },
+        "insights": insights[:5],
         "filters": {"currencies": currencies, "years": years, "platforms": platforms},
     })
