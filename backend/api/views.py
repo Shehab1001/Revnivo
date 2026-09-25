@@ -2115,6 +2115,7 @@ def earnings(request):
         query = {"owner_id": owner}
         currency = request.query_params.get("currency")
         platform_id = request.query_params.get("platform_id")
+        earning_status = request.query_params.get("status")
         year = request.query_params.get("year")
         page = max(int(request.query_params.get("page", 1)), 1)
         page_size = 8
@@ -2124,6 +2125,8 @@ def earnings(request):
             p_oid = oid(platform_id)
             if p_oid:
                 query["platform_id"] = p_oid
+        if earning_status in {"paid", "pending"}:
+            query["status"] = earning_status
         if year and year.isdigit():
             y = int(year)
             start = datetime(y, 1, 1, tzinfo=timezone.utc)
@@ -2164,12 +2167,22 @@ def earnings(request):
     if not platform:
         return Response({"detail": "Platform not found."}, status=status.HTTP_400_BAD_REQUEST)
     earned_dt = datetime.combine(data["earned_at"], time.min, tzinfo=timezone.utc)
+    expected_at = data.get("expected_at")
+    expected_dt = (
+        datetime.combine(expected_at, time.min, tzinfo=timezone.utc)
+        if expected_at
+        else None
+    )
     doc = {
         "owner_id": owner,
         "platform_id": platform_oid,
         "amount": decimal128(data["amount"]),
+        "platform_fee": decimal128(data.get("platform_fee", 0)),
+        "payment_fee": decimal128(data.get("payment_fee", 0)),
         "currency": data["currency"].upper(),
+        "status": data.get("status", "paid"),
         "earned_at": earned_dt,
+        "expected_at": expected_dt,
         "note": data.get("note", "").strip(),
         "category": data.get("category", "").strip(),
         "created_at": utcnow(),
@@ -2212,10 +2225,22 @@ def earning_detail(request, earning_id):
         updates["platform_id"] = p_oid
     if "amount" in data:
         updates["amount"] = decimal128(data["amount"])
+    if "platform_fee" in data:
+        updates["platform_fee"] = decimal128(data["platform_fee"])
+    if "payment_fee" in data:
+        updates["payment_fee"] = decimal128(data["payment_fee"])
     if "currency" in data:
         updates["currency"] = data["currency"].upper()
+    if "status" in data:
+        updates["status"] = data["status"]
     if "earned_at" in data:
         updates["earned_at"] = datetime.combine(data["earned_at"], time.min, tzinfo=timezone.utc)
+    if "expected_at" in data:
+        updates["expected_at"] = (
+            datetime.combine(data["expected_at"], time.min, tzinfo=timezone.utc)
+            if data["expected_at"]
+            else None
+        )
     for key in ("note", "category"):
         if key in data:
             updates[key] = data[key].strip()
@@ -2225,6 +2250,181 @@ def earning_detail(request, earning_id):
     if platform is None:
         platform = db.platforms.find_one({"_id": doc.get("platform_id"), "owner_id": owner})
     return Response(serialize_earning(doc, platform, current_currency_rates()))
+
+
+@api_view(["GET", "PUT"])
+def income_goals(request):
+    db = get_db()
+    owner = owner_oid(request)
+
+    if request.method == "GET":
+        doc = db.income_goals.find_one({"owner_id": owner}) or {}
+        return Response({
+            "monthly_goal": decimal_to_float(doc.get("monthly_goal")),
+            "yearly_goal": decimal_to_float(doc.get("yearly_goal")),
+            "currency": doc.get("currency", "USD"),
+        })
+
+    serializer = GoalSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+
+    updates = {
+        "monthly_goal": decimal128(data["monthly_goal"]),
+        "yearly_goal": decimal128(data["yearly_goal"]),
+        "currency": data["currency"],
+        "updated_at": utcnow(),
+    }
+
+    db.income_goals.update_one(
+        {"owner_id": owner},
+        {"$set": updates, "$setOnInsert": {"created_at": utcnow()}},
+        upsert=True,
+    )
+
+    return Response({
+        "monthly_goal": float(data["monthly_goal"]),
+        "yearly_goal": float(data["yearly_goal"]),
+        "currency": data["currency"],
+    })
+
+
+@api_view(["GET"])
+def export_earnings_csv(request):
+    db = get_db()
+    owner = owner_oid(request)
+    rates = current_currency_rates()
+    docs = list(db.earnings.find({"owner_id": owner}).sort("earned_at", DESCENDING))
+    platform_ids = list({doc.get("platform_id") for doc in docs if doc.get("platform_id")})
+    pmap = {
+        platform["_id"]: platform
+        for platform in db.platforms.find(
+            {"owner_id": owner, "_id": {"$in": platform_ids}}
+        )
+    }
+
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="revnivo-earnings.csv"'
+    writer = csv.writer(response)
+    writer.writerow([
+        "Platform",
+        "Gross amount",
+        "Platform fee",
+        "Payment fee",
+        "Net amount",
+        "Currency",
+        "Status",
+        "Date earned",
+        "Expected date",
+        "Category",
+        "Description",
+    ])
+
+    for doc in docs:
+        item = serialize_earning(doc, pmap.get(doc.get("platform_id")), rates)
+        writer.writerow([
+            item["platform_name"],
+            item["gross_amount"],
+            item["platform_fee"],
+            item["payment_fee"],
+            item["net_amount"],
+            item["currency"],
+            item["status"],
+            item["earned_at"],
+            item["expected_at"],
+            item["category"],
+            item["note"],
+        ])
+
+    return response
+
+
+@api_view(["POST"])
+@parser_classes([MultiPartParser, FormParser])
+def import_earnings_csv(request):
+    db = get_db()
+    owner = owner_oid(request)
+    uploaded = request.FILES.get("file")
+
+    if not uploaded:
+        return Response({"detail": "Choose a CSV file."}, status=status.HTTP_400_BAD_REQUEST)
+    if uploaded.size > 2 * 1024 * 1024:
+        return Response({"detail": "CSV file must be 2 MB or smaller."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        raw = uploaded.read().decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return Response({"detail": "CSV must use UTF-8 encoding."}, status=status.HTTP_400_BAD_REQUEST)
+
+    reader = csv.DictReader(StringIO(raw))
+    required = {"Platform", "Gross amount", "Currency", "Date earned", "Category"}
+    if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
+        return Response(
+            {"detail": "CSV columns must include Platform, Gross amount, Currency, Date earned, and Category."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    platforms = {
+        platform.get("name", "").strip().lower(): platform
+        for platform in db.platforms.find({"owner_id": owner, "is_archived": {"$ne": True}})
+    }
+
+    inserted = 0
+    skipped = 0
+    errors = []
+
+    for row_number, row in enumerate(reader, start=2):
+        platform_name = str(row.get("Platform", "")).strip()
+        platform = platforms.get(platform_name.lower())
+
+        if not platform:
+            skipped += 1
+            errors.append(f"Row {row_number}: platform '{platform_name}' was not found.")
+            continue
+
+        payload = {
+            "platform_id": str(platform["_id"]),
+            "amount": row.get("Gross amount", ""),
+            "platform_fee": row.get("Platform fee") or 0,
+            "payment_fee": row.get("Payment fee") or 0,
+            "currency": row.get("Currency", ""),
+            "status": "pending" if str(row.get("Status", "")).strip().lower() in {"pending", "overdue"} else "paid",
+            "earned_at": row.get("Date earned", ""),
+            "expected_at": row.get("Expected date") or None,
+            "category": row.get("Category", ""),
+            "note": row.get("Description", ""),
+        }
+
+        serializer = EarningSerializer(data=payload)
+        if not serializer.is_valid():
+            skipped += 1
+            errors.append(f"Row {row_number}: invalid data.")
+            continue
+
+        data = serializer.validated_data
+        expected_at = data.get("expected_at")
+        db.earnings.insert_one({
+            "owner_id": owner,
+            "platform_id": platform["_id"],
+            "amount": decimal128(data["amount"]),
+            "platform_fee": decimal128(data.get("platform_fee", 0)),
+            "payment_fee": decimal128(data.get("payment_fee", 0)),
+            "currency": data["currency"],
+            "status": data.get("status", "paid"),
+            "earned_at": datetime.combine(data["earned_at"], time.min, tzinfo=timezone.utc),
+            "expected_at": datetime.combine(expected_at, time.min, tzinfo=timezone.utc) if expected_at else None,
+            "category": data["category"].strip(),
+            "note": data.get("note", "").strip(),
+            "created_at": utcnow(),
+            "updated_at": utcnow(),
+        })
+        inserted += 1
+
+    return Response({
+        "inserted": inserted,
+        "skipped": skipped,
+        "errors": errors[:20],
+    })
 
 
 @api_view(["GET"])
