@@ -10,9 +10,12 @@ import ProfileAvatar from './ProfileAvatar'
 const baseNav = [
   { to: '/platforms', label: 'Platforms', icon: PanelsTopLeft },
   { to: '/earnings', label: 'Earnings', icon: WalletCards },
-  { to: '/payments', label: 'Payments', icon: CreditCard },
   { to: '/notes', label: 'Notes', icon: FileText },
   { to: '/support-chat', label: 'Chat', icon: MessageCircle },
+]
+
+const userOnlyNav = [
+  { to: '/payments', label: 'Payments', icon: CreditCard },
 ]
 
 function formatNotificationDateTime(value) {
@@ -167,6 +170,7 @@ export default function AppShell() {
           {dashboardOpen && <div className={collapsed ? 'mt-1 flex flex-col items-center gap-1' : 'ml-3 border-l border-slate-200 pl-3 dark:border-white/8'}><NavLink to="/" end className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`} title="Income"><DollarSign size={18} />{!collapsed && 'Income'}</NavLink><NavLink to="/admin/users" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`} title="Users"><Users size={18} />{!collapsed && 'Users'}</NavLink></div>}
         </div> : <NavLink to="/" end className={linkClass}><BarChart3 size={18} />{!collapsed && 'Dashboard'}</NavLink>}
         {baseNav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} onClick={() => setMobileOpen(false)} className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title={label}><span className="relative"><Icon size={18} />{label === 'Chat' && unreadChat > 0 && <span className="absolute -right-2 -top-2 grid h-4 min-w-4 place-items-center rounded-full bg-[#23C55E] px-0.5 text-[9px] font-bold text-white">{unreadChat}</span>}</span>{!collapsed && label}</NavLink>)}
+        {!isAdmin && userOnlyNav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} onClick={() => setMobileOpen(false)} className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title={label}><Icon size={18} />{!collapsed && label}</NavLink>)}
         {isAdmin && <>{!collapsed && <p className="mb-2 mt-7 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-[#62656e]">Administration</p>}<NavLink to="/admin/subscriptions" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title="Subscriptions"><WalletCards size={18} />{!collapsed && 'Subscriptions'}</NavLink></>}
       </nav>
       <div ref={profileRef} className="relative mt-auto border-t border-slate-200/80 pt-3 dark:border-white/8">
