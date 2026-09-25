@@ -364,7 +364,7 @@ export default function ForgotPassword() {
                         label="New password"
                         type="password"
                         isRequired
-                        minLength={8}
+                        minLength={10}
                         autoComplete="new-password"
                         value={password}
                         onValueChange={setPassword}
