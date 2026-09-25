@@ -903,15 +903,20 @@ export default function SupportChat() {
             Delete for me
           </button>
 
-          <button
-            className="block w-full rounded-lg px-3 py-2 text-left text-xs text-danger transition-colors hover:bg-danger/10"
-            onClick={() => {
-              setDeleteTarget({ id: contextMenu.id, mode: 'everyone' })
-              setContextMenu(null)
-            }}
-          >
-            Delete for everyone
-          </button>
+          {(user?.role === 'admin' || contextMenu.sender === ownSender) && (
+            <button
+              className="block w-full rounded-lg px-3 py-2 text-left text-xs text-danger transition-colors hover:bg-danger/10"
+              onClick={() => {
+                setDeleteTarget({
+                  id: contextMenu.id,
+                  mode: 'everyone',
+                })
+                setContextMenu(null)
+              }}
+            >
+              Delete for everyone
+            </button>
+          )}
         </div>
       )}
 
@@ -923,7 +928,13 @@ export default function SupportChat() {
         <aside
           className={`
             h-full min-h-0 overflow-y-auto bg-content1 md:block md:border-r
-            ${user?.role === 'admin' && selectedUser ? 'hidden' : 'block'}
+            ${
+              user?.role === 'admin'
+                ? selectedUser
+                  ? 'hidden'
+                  : 'block'
+                : 'hidden'
+            }
           `}
         >
           <div className="sticky top-0 z-10 border-b border-divider bg-content1 p-3 sm:p-4">
@@ -1250,6 +1261,7 @@ export default function SupportChat() {
                                 setContextMenu(
                                   {
                                     id: message.id,
+                                    sender: message.sender,
                                     x: event.clientX,
                                     y: event.clientY,
                                   }
