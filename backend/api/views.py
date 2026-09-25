@@ -196,10 +196,9 @@ def dashboard_amount_expression(currency, rates):
 def health(request):
     try:
         get_db().command("ping")
-        mongo = "ok"
     except Exception:
-        mongo = "unavailable"
-    return Response({"status": "ok", "mongodb": mongo})
+        return Response({"status": "unavailable"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    return Response({"status": "ok"})
 
 
 @api_view(["POST"])
@@ -1641,6 +1640,13 @@ def support_chat(request):
             chat_user_id = oid(request.data.get("user_id"))
             if not chat_user_id:
                 return Response({"detail": "Invalid user id."}, status=status.HTTP_400_BAD_REQUEST)
+            for chat_message in db.chat_messages.find(
+                {"user_id": chat_user_id},
+                {"attachment": 1},
+            ):
+                if chat_message.get("attachment"):
+                    delete_logo(chat_message["attachment"])
+
             result = db.chat_messages.delete_many({"user_id": chat_user_id})
             db.notifications.delete_many({"kind": "chat", "chat_user_id": str(chat_user_id)})
             return Response({"status": "cleared", "deleted_messages": result.deleted_count})
@@ -1651,11 +1657,18 @@ def support_chat(request):
         message = db.chat_messages.find_one({"_id": message_id})
         if not message:
             return Response({"detail": "Message not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not is_admin_doc(user_doc) and message.get("user_id") != owner:
+            return Response({"detail": "Message not found."}, status=status.HTTP_404_NOT_FOUND)
+
         if request.data.get("mode") == "everyone":
-            allowed = is_admin_doc(user_doc) or message.get("sender") == "user"
+            allowed = is_admin_doc(user_doc) or (
+                message.get("user_id") == owner
+                and message.get("sender") == "user"
+            )
             if not allowed:
                 return Response(
-                    {"detail": "You can only delete admin messages from your own view."},
+                    {"detail": "You can only delete your own messages for everyone."},
                     status=status.HTTP_403_FORBIDDEN,
                 )
             if message.get("attachment"):
@@ -1707,12 +1720,27 @@ def support_chat(request):
         target_user = oid(request.data.get("user_id")) if is_admin_doc(user_doc) else owner
         if not target_user:
             return Response({"detail": "Select a user before replying."}, status=status.HTTP_400_BAD_REQUEST)
-        message = {"user_id": target_user, "content": content[:2000], "message_type": str(request.data.get("message_type", "text")), "sender": "admin" if is_admin_doc(user_doc) else "user", "created_at": utcnow()}
+
+        if is_admin_doc(user_doc):
+            target_doc = db.users.find_one({"_id": target_user, "role": {"$ne": "admin"}}, {"_id": 1})
+            if not target_doc:
+                return Response({"detail": "Chat user not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        requested_type = str(request.data.get("message_type", "text")).lower()
+        message_type = requested_type if requested_type in {"text", "image", "audio", "file"} else "file"
+
+        message = {
+            "user_id": target_user,
+            "content": content[:2000],
+            "message_type": message_type,
+            "sender": "admin" if is_admin_doc(user_doc) else "user",
+            "created_at": utcnow(),
+        }
         if attachment:
             message["attachment"] = save_upload(attachment, "chat")
         db.chat_messages.insert_one(message)
         if message["sender"] == "user":
-            admin_ids = [admin["_id"] for admin in db.users.find({"$or": [{"role": "admin"}, {"email": ADMIN_EMAIL}]}, {"_id": 1})]
+            admin_ids = [admin["_id"] for admin in db.users.find({"role": "admin"}, {"_id": 1})]
             for admin_id in admin_ids:
                 create_notification("chat", "New support message", f"{user_doc.get('name', user_doc.get('email'))} sent a support message.", admin_id, target_user)
         else:
@@ -1823,11 +1851,12 @@ def notes(request):
         page = max(int(request.query_params.get("page", 1)), 1)
         page_size = 8
         query = {"owner_id": owner}
-        search = request.query_params.get("search", "").strip()
+        search = request.query_params.get("search", "").strip()[:100]
         if search:
+            safe_search = re.escape(search)
             query["$or"] = [
-                {"title": {"$regex": search, "$options": "i"}},
-                {"content": {"$regex": search, "$options": "i"}},
+                {"title": {"$regex": safe_search, "$options": "i"}},
+                {"content": {"$regex": safe_search, "$options": "i"}},
             ]
         total = db.notes.count_documents(query)
         docs = db.notes.find(query).sort("updated_at", DESCENDING).skip((page - 1) * page_size).limit(page_size)
@@ -1956,13 +1985,20 @@ def earnings(request):
             end = datetime(y + 1, 1, 1, tzinfo=timezone.utc)
             query["earned_at"] = {"$gte": start, "$lt": end}
 
-        search = request.query_params.get("search", "").strip()
+        search = request.query_params.get("search", "").strip()[:100]
         if search:
-            matching_platform_ids = [platform["_id"] for platform in db.platforms.find({"owner_id": owner, "name": {"$regex": search, "$options": "i"}}, {"_id": 1})]
+            safe_search = re.escape(search)
+            matching_platform_ids = [
+                platform["_id"]
+                for platform in db.platforms.find(
+                    {"owner_id": owner, "name": {"$regex": safe_search, "$options": "i"}},
+                    {"_id": 1},
+                )
+            ]
             query["$or"] = [
-                {"note": {"$regex": search, "$options": "i"}},
-                {"category": {"$regex": search, "$options": "i"}},
-                {"currency": {"$regex": search, "$options": "i"}},
+                {"note": {"$regex": safe_search, "$options": "i"}},
+                {"category": {"$regex": safe_search, "$options": "i"}},
+                {"currency": {"$regex": safe_search, "$options": "i"}},
                 {"platform_id": {"$in": matching_platform_ids}},
             ]
         total = db.earnings.count_documents(query)
