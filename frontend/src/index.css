@@ -12,6 +12,19 @@
 }
 
 html.dark { color-scheme: dark; background: hsl(var(--heroui-background)); }
+
+/* Global light-mode app canvas.
+   Keep content cards white while every page/tab uses a very light gray background. */
+html:not(.dark) {
+  --heroui-background: 220 20% 97%;
+}
+
+html:not(.dark),
+html:not(.dark) body,
+html:not(.dark) #root {
+  background-color: #f6f7f9;
+}
+
 body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input, select, textarea { font: inherit; }
 
