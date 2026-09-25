@@ -45,9 +45,9 @@ const emptyForm = {
 
 const statusColors = {
   working: 'success',
-  applied: 'warning',
-  'under review': 'secondary',
-  'not active': 'default',
+  applied: 'primary',
+  'under review': 'warning',
+  'not active': 'danger',
 }
 
 const currencyOptions = getCurrencyOptions()
