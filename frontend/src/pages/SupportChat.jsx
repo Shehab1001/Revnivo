@@ -223,8 +223,25 @@ function AttachmentPreview({ url, file, own, messageType = '' }) {
     file?.type?.startsWith('audio/') ||
     Boolean(url?.match(/\.(webm|mp3|ogg|wav|m4a)(\?|$)/i))
 
+  const isVideo =
+    messageType === 'video' ||
+    file?.type?.startsWith('video/') ||
+    Boolean(url?.match(/\.(mp4|webm)(\?|$)/i))
+
   if (isAudio) {
     return <VoiceMessage src={imageUrl} own={own} />
+  }
+
+  if (isVideo) {
+    return (
+      <video
+        src={imageUrl}
+        crossOrigin="use-credentials"
+        controls
+        preload="metadata"
+        className="mt-2 max-h-72 w-auto max-w-full rounded-xl bg-black"
+      />
+    )
   }
 
   if (isImage) {
@@ -358,6 +375,33 @@ function AttachmentPreview({ url, file, own, messageType = '' }) {
       Open attachment
     </a>
   )
+}
+
+function getConversationPreview(message) {
+  if (!message) return ''
+
+  if (message.deleted) {
+    return message.deleted_by_me
+      ? 'You deleted this message'
+      : 'This message was deleted'
+  }
+
+  if (message.preview_text) {
+    return message.preview_text
+  }
+
+  switch (message.message_type) {
+    case 'image':
+      return 'Photo'
+    case 'audio':
+      return 'Voice message'
+    case 'video':
+      return 'Video'
+    case 'file':
+      return 'Document'
+    default:
+      return message.content || ''
+  }
 }
 
 export default function SupportChat() {
@@ -499,11 +543,18 @@ export default function SupportChat() {
       setMessages(data)
 
       if (user?.role !== 'admin') {
+        const latestVisibleMessage = data.at(-1)
+
         setContacts((items) =>
           items.map((item) => ({
             ...item,
             last_message:
-              data.at(-1)?.content || '',
+              getConversationPreview(
+                latestVisibleMessage
+              ),
+            last_message_at:
+              latestVisibleMessage?.created_at ||
+              null,
           }))
         )
       }
@@ -731,6 +782,12 @@ export default function SupportChat() {
         )
       ) {
         resolvedMessageType = 'audio'
+      } else if (
+        overrideAttachment.type?.startsWith(
+          'video/'
+        )
+      ) {
+        resolvedMessageType = 'video'
       } else {
         resolvedMessageType = 'file'
       }
@@ -991,6 +1048,7 @@ export default function SupportChat() {
       )
       setDeleteTarget(null)
       await loadMessages()
+      await loadContacts().catch(() => {})
     } finally {
       setDeleting(false)
     }
@@ -1516,7 +1574,9 @@ export default function SupportChat() {
                               >
                                 {message.deleted ? (
                                   <p className="italic opacity-60">
-                                    This message was deleted
+                                    {message.deleted_by_me
+                                      ? 'You deleted this message'
+                                      : 'This message was deleted'}
                                   </p>
                                 ) : (
                                   <>
@@ -1618,7 +1678,7 @@ export default function SupportChat() {
 
                       <input
                         type="file"
-                        accept="image/jpeg,image/png,image/webp,application/pdf,audio/webm,audio/ogg,audio/mpeg,audio/mp4,text/plain,text/csv"
+                        accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,application/pdf,audio/webm,audio/ogg,audio/mpeg,audio/mp4,text/plain,text/csv"
                         className="hidden"
                         onChange={(
                           event
