@@ -67,7 +67,7 @@ export default function GoogleAuthButton() {
 
       try {
         await loginWithGoogle(credential)
-        navigate('/')
+        navigate('/dashboard')
       } catch (err) {
         setError(
           err.response?.data?.detail ||
