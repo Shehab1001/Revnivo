@@ -770,7 +770,13 @@ def admin_users(request):
             "users": sum(1 for doc in docs if not is_admin_doc(doc)),
             "active_trials": sum(1 for doc in docs if is_active_trial(doc.get("trial_ends_at"))),
         },
-        "users": [serialize_user(doc, request) for doc in docs],
+        "users": [
+            {
+                **serialize_user(doc, request),
+                "created_at": serialize_datetime(doc.get("created_at")),
+            }
+            for doc in docs
+        ],
     })
 
 
