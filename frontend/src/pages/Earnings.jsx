@@ -92,6 +92,7 @@ export default function Earnings() {
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [selectedEarning, setSelectedEarning] = useState(null)
   const fileInputRef = useRef(null)
 
   const load = async (nextPage = page) => {
@@ -447,32 +448,32 @@ export default function Earnings() {
         </div>
 
         {items.length ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left">
-              <thead className="bg-content2/60 text-xs font-bold uppercase tracking-wide text-default-500">
+          <div className="overflow-x-auto scrollbar-thin">
+            <table className="min-w-[1180px] text-left text-[12px]">
+              <thead className="bg-content2/60 text-[10px] font-bold uppercase tracking-wide text-default-500">
                 <tr>
-                  <th className="px-4 py-3">
+                  <th className="whitespace-nowrap px-3 py-2.5">
                     Platform
                   </th>
-                  <th className="px-4 py-3">
+                  <th className="whitespace-nowrap px-3 py-2.5">
                     Gross
                   </th>
-                  <th className="px-4 py-3">
+                  <th className="whitespace-nowrap px-3 py-2.5">
                     Fees
                   </th>
-                  <th className="px-4 py-3">
+                  <th className="whitespace-nowrap px-3 py-2.5">
                     Net
                   </th>
-                  <th className="px-4 py-3">
+                  <th className="whitespace-nowrap px-3 py-2.5">
                     Status
                   </th>
-                  <th className="px-4 py-3">
+                  <th className="whitespace-nowrap px-3 py-2.5">
                     Date
                   </th>
-                  <th className="px-4 py-3">
+                  <th className="whitespace-nowrap px-3 py-2.5">
                     Category
                   </th>
-                  <th className="px-4 py-3">
+                  <th className="whitespace-nowrap px-3 py-2.5">
                     Description
                   </th>
                   <th className="px-4 py-3 text-right">
@@ -499,9 +500,18 @@ export default function Earnings() {
                   return (
                     <tr
                       key={earning.id}
-                      className="text-sm"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedEarning(earning)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          setSelectedEarning(earning)
+                        }
+                      }}
+                      className="cursor-pointer text-[12px] transition-colors hover:bg-primary/[0.045] focus:bg-primary/[0.06] focus:outline-none dark:hover:bg-white/[0.035]"
                     >
-                      <td className="px-4 py-3">
+                      <td className="whitespace-nowrap px-3 py-2.5">
                         <div className="flex items-center gap-2">
                           <PlatformAvatar
                             platform={
@@ -519,7 +529,7 @@ export default function Earnings() {
                         </div>
                       </td>
 
-                      <td className="px-4 py-3 font-semibold text-foreground">
+                      <td className="whitespace-nowrap px-3 py-2.5 font-semibold text-foreground">
                         {formatMoney(
                           earning.gross_amount ??
                             earning.amount,
@@ -527,7 +537,7 @@ export default function Earnings() {
                         )}
                       </td>
 
-                      <td className="px-4 py-3 text-default-500">
+                      <td className="whitespace-nowrap px-3 py-2.5 text-default-500">
                         {feeTotal
                           ? `-${formatMoney(
                               feeTotal,
@@ -536,7 +546,7 @@ export default function Earnings() {
                           : '—'}
                       </td>
 
-                      <td className="px-4 py-3 font-bold text-success">
+                      <td className="whitespace-nowrap px-3 py-2.5 font-bold text-success">
                         {formatMoney(
                           earning.net_amount ??
                             earning.amount,
@@ -544,7 +554,7 @@ export default function Earnings() {
                         )}
                       </td>
 
-                      <td className="px-4 py-3">
+                      <td className="whitespace-nowrap px-3 py-2.5">
                         <Chip
                           size="sm"
                           variant="bordered"
@@ -555,7 +565,7 @@ export default function Earnings() {
                         </Chip>
                       </td>
 
-                      <td className="px-4 py-3 text-default-600">
+                      <td className="whitespace-nowrap px-3 py-2.5 text-default-600">
                         <div>
                           {earning.earned_at}
                         </div>
@@ -571,17 +581,17 @@ export default function Earnings() {
                           )}
                       </td>
 
-                      <td className="px-4 py-3 text-default-600">
+                      <td className="whitespace-nowrap px-3 py-2.5 text-default-600">
                         {earning.category || '—'}
                       </td>
 
-                      <td className="max-w-xs truncate px-4 py-3 text-default-500">
+                      <td className="max-w-[260px] truncate px-3 py-2.5 text-default-500">
                         {earning.description ||
                           earning.note ||
                           '—'}
                       </td>
 
-                      <td className="px-4 py-3">
+                      <td className="whitespace-nowrap px-3 py-2.5">
                         <div className="flex justify-end gap-1">
                           <Button
                             isIconOnly
@@ -590,6 +600,7 @@ export default function Earnings() {
                             onPress={() =>
                               openEdit(earning)
                             }
+                            onClick={(event) => event.stopPropagation()}
                             aria-label="Edit income"
                           >
                             <Pencil size={16} />
@@ -603,6 +614,7 @@ export default function Earnings() {
                             onPress={() =>
                               remove(earning)
                             }
+                            onClick={(event) => event.stopPropagation()}
                             aria-label="Delete income"
                           >
                             <Trash2 size={16} />
@@ -640,6 +652,97 @@ export default function Earnings() {
           </div>
         )}
       </div>
+
+      <Modal
+        open={Boolean(selectedEarning)}
+        onClose={() => setSelectedEarning(null)}
+        title="Income details"
+      >
+        {selectedEarning && (
+          <div className="space-y-5">
+            <div className="flex items-center gap-3 rounded-2xl border border-default-200/70 bg-default-50/60 p-4 dark:border-white/8 dark:bg-white/[0.02]">
+              <PlatformAvatar
+                platform={
+                  platformMap[selectedEarning.platform_id] || {
+                    name: selectedEarning.platform_name,
+                  }
+                }
+              />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-foreground">
+                  {selectedEarning.platform_name}
+                </p>
+                <p className="mt-0.5 text-xs text-default-400">
+                  {selectedEarning.category || 'Uncategorized'}
+                </p>
+              </div>
+              <div className="ml-auto">
+                <Chip
+                  size="sm"
+                  variant="bordered"
+                  color={(statusChip[selectedEarning.status || 'paid'] || statusChip.paid).color}
+                >
+                  {(statusChip[selectedEarning.status || 'paid'] || statusChip.paid).label}
+                </Chip>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[
+                ['Gross amount', formatMoney(selectedEarning.gross_amount ?? selectedEarning.amount, selectedEarning.currency)],
+                ['Platform fee', formatMoney(selectedEarning.platform_fee || 0, selectedEarning.currency)],
+                ['Payment fee', formatMoney(selectedEarning.payment_fee || 0, selectedEarning.currency)],
+                ['Net amount', formatMoney(selectedEarning.net_amount ?? selectedEarning.amount, selectedEarning.currency)],
+                ['Currency', selectedEarning.currency || '—'],
+                ['Date earned', selectedEarning.earned_at || '—'],
+                ['Expected date', selectedEarning.expected_at || '—'],
+                ['Category', selectedEarning.category || '—'],
+              ].map(([label, value]) => (
+                <div
+                  key={label}
+                  className="rounded-xl border border-default-200/70 bg-content1 p-3 dark:border-white/8"
+                >
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-default-400">
+                    {label}
+                  </p>
+                  <p className="mt-1.5 break-words text-sm font-medium text-foreground">
+                    {value}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="rounded-xl border border-default-200/70 bg-content1 p-4 dark:border-white/8">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-default-400">
+                Description
+              </p>
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-default-600">
+                {selectedEarning.description || selectedEarning.note || 'No description.'}
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="light"
+                onPress={() => setSelectedEarning(null)}
+              >
+                Close
+              </Button>
+              <Button
+                color="primary"
+                startContent={<Pencil size={15} />}
+                onPress={() => {
+                  const current = selectedEarning
+                  setSelectedEarning(null)
+                  openEdit(current)
+                }}
+              >
+                Edit
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={modal}
