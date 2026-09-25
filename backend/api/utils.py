@@ -144,16 +144,24 @@ def _read_upload(uploaded_file, max_bytes):
     return data
 
 
+def _upload_root(folder):
+    return Path(
+        settings.PRIVATE_MEDIA_ROOT
+        if str(folder).strip().strip("/") == "chat"
+        else settings.MEDIA_ROOT
+    ).resolve()
+
+
 def _save_bytes(data, folder, extension):
     safe_folder = str(folder).strip().replace("\\", "/").strip("/")
     if not safe_folder or ".." in safe_folder.split("/"):
         raise ValidationError("Invalid upload destination.")
 
     rel = Path(safe_folder) / f"{uuid.uuid4().hex}{extension}"
-    media_root = Path(settings.MEDIA_ROOT).resolve()
-    target = (media_root / rel).resolve()
+    upload_root = _upload_root(safe_folder)
+    target = (upload_root / rel).resolve()
 
-    if media_root not in target.parents:
+    if upload_root not in target.parents:
         raise ValidationError("Invalid upload destination.")
 
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -241,18 +249,34 @@ def save_upload(uploaded_file, folder="uploads"):
     return _save_bytes(data, folder, extension)
 
 
-def delete_logo(relative_path):
+def resolve_upload_path(relative_path):
     if not relative_path:
-        return
+        return None
 
-    media_root = Path(settings.MEDIA_ROOT).resolve()
-    target = (media_root / str(relative_path)).resolve()
+    relative = str(relative_path).replace("\\", "/").lstrip("/")
+    roots = []
 
-    if media_root not in target.parents:
+    if relative.startswith("chat/"):
+        roots.append(Path(settings.PRIVATE_MEDIA_ROOT).resolve())
+        # Legacy fallback for chat files created before private-media hardening.
+        roots.append(Path(settings.MEDIA_ROOT).resolve())
+    else:
+        roots.append(Path(settings.MEDIA_ROOT).resolve())
+
+    for root in roots:
+        target = (root / relative).resolve()
+        if root in target.parents and target.is_file():
+            return target
+
+    return None
+
+
+def delete_logo(relative_path):
+    target = resolve_upload_path(relative_path)
+    if not target:
         return
 
     try:
-        if target.is_file():
-            os.remove(target)
+        os.remove(target)
     except OSError:
         pass
