@@ -17,6 +17,7 @@ from bson import ObjectId
 from bson.decimal128 import Decimal128
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
+from django.contrib.auth.password_validation import validate_password
 from django.core.mail import EmailMultiAlternatives
 from html import escape
 from google.auth.transport import requests as google_requests
@@ -24,14 +25,15 @@ from google.oauth2 import id_token
 from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import DuplicateKeyError, PyMongoError
 from rest_framework import status
-from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.decorators import api_view, parser_classes, permission_classes, throttle_classes
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .authentication import create_access_token
+from .authentication import clear_auth_cookies, create_access_token, set_auth_cookies
 from .mongo import ensure_indexes, get_db
 from .serializers import EarningSerializer, LoginSerializer, PlatformSerializer, RegisterSerializer
+from .throttles import AuthBurstThrottle, PasswordResetThrottle, RegistrationThrottle
 from .utils import (
     decimal128,
     decimal_to_float,
