@@ -22,7 +22,7 @@ from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.mail import EmailMultiAlternatives
-from django.http import FileResponse, HttpResponse
+from django.http import FileResponse, HttpResponse, HttpResponseRedirect
 from html import escape
 from html.parser import HTMLParser
 from google.auth.transport import requests as google_requests
@@ -46,6 +46,8 @@ from .utils import (
     oid,
     save_logo,
     save_upload,
+    public_upload_url,
+    private_upload_download_url,
     resolve_upload_path,
     serialize_datetime,
     serialize_note,
@@ -80,9 +82,7 @@ def is_superadmin_doc(doc):
 
 def serialize_user(doc, request):
     avatar = doc.get("profile_image") or ""
-    avatar_url = ""
-    if avatar:
-        avatar_url = f"{settings.MEDIA_URL}{avatar}".replace("//", "/")
+    avatar_url = public_upload_url(avatar) if avatar else ""
 
     # If the user explicitly removed their avatar, do not fall back to the
     # Google account photo. Returning an empty URL lets the frontend render
@@ -1906,6 +1906,13 @@ def support_chat_attachment(request, message_id):
     if owner in message.get("deleted_for", []):
         return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
 
+    cloud_url = private_upload_download_url(message["attachment"])
+    if cloud_url:
+        response = HttpResponseRedirect(cloud_url)
+        response["Cache-Control"] = "private, no-store"
+        response["Cross-Origin-Resource-Policy"] = "cross-origin"
+        return response
+
     target = resolve_upload_path(message["attachment"])
     if not target:
         return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -2326,6 +2333,13 @@ def note_attachment(request, note_id, attachment_id):
             },
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    cloud_url = private_upload_download_url(attachment.get("path"))
+    if cloud_url:
+        response = HttpResponseRedirect(cloud_url)
+        response["Cache-Control"] = "private, no-store"
+        response["Cross-Origin-Resource-Policy"] = "cross-origin"
+        return response
 
     target = resolve_upload_path(attachment.get("path"))
     if not target:
