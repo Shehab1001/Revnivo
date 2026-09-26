@@ -153,8 +153,119 @@ export default function Notes() {
     }
   }
 
+  const hydrateAttachmentBlock = (
+    block,
+    attachment
+  ) => {
+    if (!block || !attachment) return
+
+    const id = attachment.id
+    const width =
+      block.getAttribute('data-width') || '100'
+
+    block.setAttribute(
+      'contenteditable',
+      'false'
+    )
+    block.className = 'note-inline-attachment'
+    block.style.width = `${width}%`
+    block.dataset.kind = attachment.kind
+
+    if (attachment.kind === 'image') {
+      block.innerHTML = `
+        <span class="note-inline-image-frame">
+          <img src="${attachment.url}" alt="" draggable="false" />
+          <span class="note-image-resize-handle" data-resize-handle="true" title="Drag to resize"></span>
+        </span>
+      `
+    } else {
+      block.innerHTML = `
+        <span class="note-inline-file-card">
+          <span class="note-inline-file-icon">📄</span>
+          <span class="note-inline-file-meta">
+            <strong>${escapeHtml(attachment.name)}</strong>
+            <small>${formatBytes(attachment.size)}</small>
+          </span>
+          <a href="${attachment.url}" target="_blank" rel="noreferrer">Open</a>
+        </span>
+      `
+    }
+
+    block.onclick = (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      setSelectedAttachmentId(id)
+    }
+
+    block.setAttribute('draggable', 'true')
+    block.ondragstart = (event) => {
+      if (
+        event.target.closest?.(
+          '[data-resize-handle="true"]'
+        )
+      ) {
+        event.preventDefault()
+        return
+      }
+
+      event.stopPropagation()
+      event.dataTransfer.effectAllowed = 'move'
+      event.dataTransfer.setData(
+        'application/x-revnivo-note-attachment',
+        id
+      )
+      event.dataTransfer.setData(
+        'text/plain',
+        id
+      )
+      block.classList.add(
+        'note-attachment-dragging'
+      )
+      setSelectedAttachmentId(id)
+    }
+
+    block.ondragend = () => {
+      block.classList.remove(
+        'note-attachment-dragging'
+      )
+      setDraggingFiles(false)
+    }
+
+    const resizeHandle = block.querySelector(
+      '[data-resize-handle="true"]'
+    )
+
+    if (resizeHandle) {
+      resizeHandle.onpointerdown = (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+
+        const editorWidth =
+          editorRef.current?.getBoundingClientRect()
+            .width || 1
+        const startWidth =
+          block.getBoundingClientRect().width
+        const startX = event.clientX
+
+        resizeRef.current = {
+          block,
+          editorWidth,
+          startWidth,
+          startX,
+          pointerId: event.pointerId,
+        }
+
+        setSelectedAttachmentId(id)
+        setResizingAttachment(true)
+        resizeHandle.setPointerCapture?.(
+          event.pointerId
+        )
+      }
+    }
+  }
+
   const hydrateAttachmentBlocks = () => {
-    if (!editorRef.current || !activeNote) return
+    if (!editorRef.current) return
 
     editorRef.current
       .querySelectorAll('[data-note-attachment]')
@@ -165,97 +276,10 @@ export default function Notes() {
         const attachment = attachmentMap[id]
         if (!attachment) return
 
-        const width =
-          block.getAttribute('data-width') || '100'
-
-        block.setAttribute(
-          'contenteditable',
-          'false'
+        hydrateAttachmentBlock(
+          block,
+          attachment
         )
-        block.className = 'note-inline-attachment'
-        block.style.width = `${width}%`
-        block.dataset.kind = attachment.kind
-
-        if (attachment.kind === 'image') {
-          block.innerHTML = `
-            <span class="note-inline-image-frame">
-              <img src="${attachment.url}" alt="" draggable="false" />
-              <span class="note-image-resize-handle" data-resize-handle="true" title="Drag to resize"></span>
-            </span>
-          `
-        } else {
-          block.innerHTML = `
-            <span class="note-inline-file-card">
-              <span class="note-inline-file-icon">📄</span>
-              <span class="note-inline-file-meta">
-                <strong>${escapeHtml(attachment.name)}</strong>
-                <small>${formatBytes(attachment.size)}</small>
-              </span>
-              <a href="${attachment.url}" target="_blank" rel="noreferrer">Open</a>
-            </span>
-          `
-        }
-
-        block.onclick = (event) => {
-          event.preventDefault()
-          event.stopPropagation()
-          setSelectedAttachmentId(id)
-        }
-
-        block.setAttribute('draggable', 'true')
-        block.ondragstart = (event) => {
-          if (event.target.closest?.('[data-resize-handle="true"]')) {
-            event.preventDefault()
-            return
-          }
-
-          event.stopPropagation()
-          event.dataTransfer.effectAllowed = 'move'
-          event.dataTransfer.setData(
-            'application/x-revnivo-note-attachment',
-            id
-          )
-          event.dataTransfer.setData('text/plain', id)
-          block.classList.add('note-attachment-dragging')
-          setSelectedAttachmentId(id)
-        }
-
-        block.ondragend = () => {
-          block.classList.remove('note-attachment-dragging')
-          setDraggingFiles(false)
-        }
-
-        const resizeHandle = block.querySelector(
-          '[data-resize-handle="true"]'
-        )
-
-        if (resizeHandle) {
-          resizeHandle.onpointerdown = (event) => {
-            event.preventDefault()
-            event.stopPropagation()
-
-            const editorWidth =
-              editorRef.current?.getBoundingClientRect()
-                .width || 1
-            const startWidth =
-              block.getBoundingClientRect().width
-            const startX = event.clientX
-
-            resizeRef.current = {
-              block,
-              editorWidth,
-              startWidth,
-              startX,
-              pointerId: event.pointerId,
-            }
-
-            setSelectedAttachmentId(id)
-            setResizingAttachment(true)
-            resizeHandle.setPointerCapture?.(
-              event.pointerId
-            )
-          }
-        }
       })
   }
 
@@ -312,6 +336,16 @@ export default function Notes() {
     selection.addRange(nextRange)
     lastRangeRef.current =
       nextRange.cloneRange()
+
+    // Render from the upload response immediately instead of waiting
+    // for React state / attachmentMap to update.
+    hydrateAttachmentBlock(
+      placeholder,
+      attachment
+    )
+    setSelectedAttachmentId(
+      attachment.id
+    )
 
     handleEditorInput()
   }
@@ -763,9 +797,8 @@ export default function Notes() {
         )
 
         insertAttachmentPlaceholder(data)
-        window.setTimeout(
-          () => hydrateAttachmentBlocks(),
-          0
+        queueMicrotask(
+          applyEditorDirections
         )
       }
     } catch (err) {
