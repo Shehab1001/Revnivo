@@ -22,7 +22,7 @@ from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.mail import EmailMultiAlternatives
-from django.http import FileResponse, HttpResponse
+from django.http import FileResponse, HttpResponse, HttpResponseRedirect
 from html import escape
 from html.parser import HTMLParser
 from google.auth.transport import requests as google_requests
@@ -46,6 +46,8 @@ from .utils import (
     oid,
     save_logo,
     save_upload,
+    public_upload_url,
+    private_upload_download_url,
     resolve_upload_path,
     serialize_datetime,
     serialize_note,
@@ -80,9 +82,7 @@ def is_superadmin_doc(doc):
 
 def serialize_user(doc, request):
     avatar = doc.get("profile_image") or ""
-    avatar_url = ""
-    if avatar:
-        avatar_url = f"{settings.MEDIA_URL}{avatar}".replace("//", "/")
+    avatar_url = public_upload_url(avatar) if avatar else ""
 
     # If the user explicitly removed their avatar, do not fall back to the
     # Google account photo. Returning an empty URL lets the frontend render
@@ -1906,6 +1906,13 @@ def support_chat_attachment(request, message_id):
     if owner in message.get("deleted_for", []):
         return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
 
+    cloud_url = private_upload_download_url(message["attachment"])
+    if cloud_url:
+        response = HttpResponseRedirect(cloud_url)
+        response["Cache-Control"] = "private, no-store"
+        response["Cross-Origin-Resource-Policy"] = "cross-origin"
+        return response
+
     target = resolve_upload_path(message["attachment"])
     if not target:
         return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -2017,7 +2024,8 @@ NOTE_ALLOWED_TAGS = {
     "h1", "h2", "h3", "ul", "ol", "li", "blockquote",
     "pre", "code", "span",
 }
-NOTE_ATTACHMENT_WIDTHS = {"25", "33", "50", "66", "75", "100"}
+NOTE_ATTACHMENT_MIN_WIDTH = 15
+NOTE_ATTACHMENT_MAX_WIDTH = 100
 
 
 class _NoteHTMLSanitizer(HTMLParser):
@@ -2032,11 +2040,19 @@ class _NoteHTMLSanitizer(HTMLParser):
         if tag == "span":
             attrs = dict(attrs or [])
             attachment_id = str(attrs.get("data-note-attachment") or "")
-            width = str(attrs.get("data-width") or "100")
+            width_value = str(attrs.get("data-width") or "100")
 
             if re.fullmatch(r"[0-9a-f]{24}", attachment_id):
-                if width not in NOTE_ATTACHMENT_WIDTHS:
-                    width = "100"
+                try:
+                    width = int(round(float(width_value)))
+                except (TypeError, ValueError):
+                    width = 100
+
+                width = max(
+                    NOTE_ATTACHMENT_MIN_WIDTH,
+                    min(width, NOTE_ATTACHMENT_MAX_WIDTH),
+                )
+
                 self.parts.append(
                     f'<span data-note-attachment="{attachment_id}" data-width="{width}"></span>'
                 )
@@ -2318,6 +2334,13 @@ def note_attachment(request, note_id, attachment_id):
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    cloud_url = private_upload_download_url(attachment.get("path"))
+    if cloud_url:
+        response = HttpResponseRedirect(cloud_url)
+        response["Cache-Control"] = "private, no-store"
+        response["Cross-Origin-Resource-Policy"] = "cross-origin"
+        return response
+
     target = resolve_upload_path(attachment.get("path"))
     if not target:
         return Response({"detail": "Attachment file not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -2406,20 +2429,36 @@ def earnings(request):
     owner = owner_oid(request)
     if request.method == "GET":
         query = {"owner_id": owner}
+        filters = []
         currency = request.query_params.get("currency")
         platform_id = request.query_params.get("platform_id")
         earning_status = request.query_params.get("status")
         year = request.query_params.get("year")
         page = max(int(request.query_params.get("page", 1)), 1)
         page_size = 8
+
         if currency:
             query["currency"] = currency.upper()
+
         if platform_id:
             p_oid = oid(platform_id)
             if p_oid:
                 query["platform_id"] = p_oid
-        if earning_status in {"paid", "pending"}:
-            query["status"] = earning_status
+
+        # Earnings created before payment statuses were introduced do not
+        # have a status field. Everywhere else in the app they are treated
+        # as paid, so the Paid filter must include those legacy records too.
+        if earning_status == "paid":
+            filters.append({
+                "$or": [
+                    {"status": "paid"},
+                    {"status": {"$exists": False}},
+                    {"status": None},
+                ]
+            })
+        elif earning_status == "pending":
+            filters.append({"status": "pending"})
+
         if year and year.isdigit():
             y = int(year)
             start = datetime(y, 1, 1, tzinfo=timezone.utc)
@@ -2436,12 +2475,17 @@ def earnings(request):
                     {"_id": 1},
                 )
             ]
-            query["$or"] = [
-                {"note": {"$regex": safe_search, "$options": "i"}},
-                {"category": {"$regex": safe_search, "$options": "i"}},
-                {"currency": {"$regex": safe_search, "$options": "i"}},
-                {"platform_id": {"$in": matching_platform_ids}},
-            ]
+            filters.append({
+                "$or": [
+                    {"note": {"$regex": safe_search, "$options": "i"}},
+                    {"category": {"$regex": safe_search, "$options": "i"}},
+                    {"currency": {"$regex": safe_search, "$options": "i"}},
+                    {"platform_id": {"$in": matching_platform_ids}},
+                ]
+            })
+
+        if filters:
+            query["$and"] = filters
         total = db.earnings.count_documents(query)
         docs = list(db.earnings.find(query).sort("earned_at", DESCENDING).skip((page - 1) * page_size).limit(page_size))
         platform_ids = list({d.get("platform_id") for d in docs if d.get("platform_id")})
