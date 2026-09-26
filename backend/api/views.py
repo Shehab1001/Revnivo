@@ -2415,20 +2415,36 @@ def earnings(request):
     owner = owner_oid(request)
     if request.method == "GET":
         query = {"owner_id": owner}
+        filters = []
         currency = request.query_params.get("currency")
         platform_id = request.query_params.get("platform_id")
         earning_status = request.query_params.get("status")
         year = request.query_params.get("year")
         page = max(int(request.query_params.get("page", 1)), 1)
         page_size = 8
+
         if currency:
             query["currency"] = currency.upper()
+
         if platform_id:
             p_oid = oid(platform_id)
             if p_oid:
                 query["platform_id"] = p_oid
-        if earning_status in {"paid", "pending"}:
-            query["status"] = earning_status
+
+        # Earnings created before payment statuses were introduced do not
+        # have a status field. Everywhere else in the app they are treated
+        # as paid, so the Paid filter must include those legacy records too.
+        if earning_status == "paid":
+            filters.append({
+                "$or": [
+                    {"status": "paid"},
+                    {"status": {"$exists": False}},
+                    {"status": None},
+                ]
+            })
+        elif earning_status == "pending":
+            filters.append({"status": "pending"})
+
         if year and year.isdigit():
             y = int(year)
             start = datetime(y, 1, 1, tzinfo=timezone.utc)
@@ -2445,12 +2461,17 @@ def earnings(request):
                     {"_id": 1},
                 )
             ]
-            query["$or"] = [
-                {"note": {"$regex": safe_search, "$options": "i"}},
-                {"category": {"$regex": safe_search, "$options": "i"}},
-                {"currency": {"$regex": safe_search, "$options": "i"}},
-                {"platform_id": {"$in": matching_platform_ids}},
-            ]
+            filters.append({
+                "$or": [
+                    {"note": {"$regex": safe_search, "$options": "i"}},
+                    {"category": {"$regex": safe_search, "$options": "i"}},
+                    {"currency": {"$regex": safe_search, "$options": "i"}},
+                    {"platform_id": {"$in": matching_platform_ids}},
+                ]
+            })
+
+        if filters:
+            query["$and"] = filters
         total = db.earnings.count_documents(query)
         docs = list(db.earnings.find(query).sort("earned_at", DESCENDING).skip((page - 1) * page_size).limit(page_size))
         platform_ids = list({d.get("platform_id") for d in docs if d.get("platform_id")})
