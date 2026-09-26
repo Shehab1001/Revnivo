@@ -28,11 +28,16 @@ if not SECRET_KEY:
 if not DEBUG and len(SECRET_KEY) < 32:
     raise RuntimeError("DJANGO_SECRET_KEY must be at least 32 characters in production.")
 
+RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
+
 ALLOWED_HOSTS = (
     ["localhost", "127.0.0.1"]
     if DEBUG
     else env_list("ALLOWED_HOSTS")
 )
+
+if RENDER_EXTERNAL_HOSTNAME and RENDER_EXTERNAL_HOSTNAME not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
 
 if not DEBUG and not ALLOWED_HOSTS:
     raise RuntimeError("ALLOWED_HOSTS must be configured in production.")
@@ -75,12 +80,18 @@ CLOUDINARY_URL = os.getenv("CLOUDINARY_URL", "").strip()
 CLOUDINARY_FOLDER = os.getenv("CLOUDINARY_FOLDER", "revnivo").strip().strip("/") or "revnivo"
 CLOUDINARY_PRIVATE_URL_TTL = max(60, int(os.getenv("CLOUDINARY_PRIVATE_URL_TTL", "300")))
 
+if not DEBUG and not CLOUDINARY_URL:
+    raise RuntimeError("CLOUDINARY_URL must be configured in production.")
+
 # Upload limits are enforced both by Django and api.utils.
 DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("DATA_UPLOAD_MAX_MEMORY_SIZE", str(2 * 1024 * 1024)))
 FILE_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("FILE_UPLOAD_MAX_MEMORY_SIZE", str(2 * 1024 * 1024)))
 
-MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://127.0.0.1:27017")
-MONGODB_DB = os.getenv("MONGODB_DB", "revnivo")
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://127.0.0.1:27017").strip()
+MONGODB_DB = os.getenv("MONGODB_DB", "revnivo").strip() or "revnivo"
+
+if not DEBUG and not os.getenv("MONGODB_URI", "").strip():
+    raise RuntimeError("MONGODB_URI must be configured in production.")
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY).strip()
 JWT_ALGORITHM = "HS256"
@@ -128,7 +139,11 @@ PAYMOB_WEBHOOK_URL = os.getenv("PAYMOB_WEBHOOK_URL", "").strip()
 PAYMOB_REDIRECT_URL = os.getenv("PAYMOB_REDIRECT_URL", "").strip()
 
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173").rstrip("/")
-CORS_ALLOWED_ORIGINS = [FRONTEND_ORIGIN]
+
+if not DEBUG and not FRONTEND_ORIGIN.startswith("https://"):
+    raise RuntimeError("FRONTEND_ORIGIN must use HTTPS in production.")
+
+CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", FRONTEND_ORIGIN)
 CORS_ALLOW_CREDENTIALS = True
 CORS_EXPOSE_HEADERS = ["X-CSRF-Token"]
 CORS_ALLOW_HEADERS = [
