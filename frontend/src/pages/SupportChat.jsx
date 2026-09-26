@@ -105,7 +105,6 @@ function VoiceMessage({ src, own }) {
       <audio
         ref={audioRef}
         src={src}
-        crossOrigin="use-credentials"
         preload="metadata"
         onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
         onDurationChange={(event) => setDuration(event.currentTarget.duration || 0)}
@@ -236,7 +235,6 @@ function AttachmentPreview({ url, file, own, messageType = '' }) {
     return (
       <video
         src={imageUrl}
-        crossOrigin="use-credentials"
         controls
         preload="metadata"
         className="mt-2 max-h-72 w-auto max-w-full rounded-xl bg-black"
@@ -259,7 +257,6 @@ function AttachmentPreview({ url, file, own, messageType = '' }) {
         >
           <img
             src={imageUrl}
-            crossOrigin="use-credentials"
             alt="Attachment"
             className="max-h-56 w-auto max-w-full rounded-xl object-contain transition-transform hover:scale-[1.01] sm:max-h-64"
           />
@@ -336,7 +333,6 @@ function AttachmentPreview({ url, file, own, messageType = '' }) {
             >
               <img
                 src={imageUrl}
-                crossOrigin="use-credentials"
                 alt="Attachment preview"
                 draggable={false}
                 className="max-h-[88vh] max-w-[92vw] select-none object-contain transition-transform duration-150"
@@ -427,6 +423,7 @@ export default function SupportChat() {
   const recordingPresenceTimer = useRef(null)
   const recorderRef = useRef(null)
   const audioChunksRef = useRef([])
+  const recordingStartedAtRef = useRef(0)
 
   /*
    * Chat scrolling refs.
@@ -871,10 +868,23 @@ export default function SupportChat() {
         { audio: true }
       )
 
-    const recorder =
-      new MediaRecorder(stream)
+    const preferredMimeTypes = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+    ]
+
+    const mimeType =
+      preferredMimeTypes.find((type) =>
+        MediaRecorder.isTypeSupported?.(type)
+      ) || ''
+
+    const recorder = mimeType
+      ? new MediaRecorder(stream, { mimeType })
+      : new MediaRecorder(stream)
 
     audioChunksRef.current = []
+    recordingStartedAtRef.current = Date.now()
 
     recorder.ondataavailable = (
       event
@@ -884,6 +894,18 @@ export default function SupportChat() {
           event.data
         )
       }
+    }
+
+    recorder.onerror = () => {
+      stream
+        .getTracks()
+        .forEach((track) =>
+          track.stop()
+        )
+
+      clearRecordingPresence()
+      setRecording(false)
+      recordingStartedAtRef.current = 0
     }
 
     recorder.onstop = async () => {
@@ -896,27 +918,48 @@ export default function SupportChat() {
       clearRecordingPresence()
       setRecording(false)
 
-      if (!audioChunksRef.current.length) {
+      const chunks = [
+        ...audioChunksRef.current,
+      ]
+      audioChunksRef.current = []
+
+      const recordedMs =
+        recordingStartedAtRef.current
+          ? Date.now() -
+            recordingStartedAtRef.current
+          : 0
+      recordingStartedAtRef.current = 0
+
+      if (
+        !chunks.length ||
+        recordedMs < 250
+      ) {
+        return
+      }
+
+      const type =
+        recorder.mimeType ||
+        chunks[0]?.type ||
+        'audio/webm'
+
+      const extension =
+        type.includes('ogg')
+          ? 'ogg'
+          : 'webm'
+
+      const blob = new Blob(
+        chunks,
+        { type }
+      )
+
+      if (!blob.size) {
         return
       }
 
       const audio = new File(
-        [
-          new Blob(
-            audioChunksRef.current,
-            {
-              type:
-                recorder.mimeType ||
-                'audio/webm',
-            }
-          ),
-        ],
-        `voice-${Date.now()}.webm`,
-        {
-          type:
-            recorder.mimeType ||
-            'audio/webm',
-        }
+        [blob],
+        `voice-${Date.now()}.${extension}`,
+        { type }
       )
 
       await send(
@@ -928,7 +971,7 @@ export default function SupportChat() {
     }
 
     recorderRef.current = recorder
-    recorder.start()
+    recorder.start(250)
     setRecording(true)
 
     const sendRecordingPresence = () =>
