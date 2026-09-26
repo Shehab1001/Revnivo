@@ -161,12 +161,29 @@ def private_upload_download_url(storage_ref):
     if not file_format:
         return ""
 
+    resource_type = meta.get("resource_type") or "image"
+    delivery_type = meta.get("type") or "authenticated"
+
+    # Images, videos and audio need an embeddable/streamable signed CDN URL.
+    # private_download_url points at Cloudinary's download API, which is fine
+    # for documents but is a poor fit for <img>, <video> and <audio> elements.
+    if resource_type in {"image", "video"}:
+        url, _ = cloudinary.utils.cloudinary_url(
+            meta["public_id"],
+            secure=True,
+            resource_type=resource_type,
+            type=delivery_type,
+            format=file_format,
+            sign_url=True,
+        )
+        return url
+
     expires_at = int(time.time()) + int(settings.CLOUDINARY_PRIVATE_URL_TTL)
     return cloudinary.utils.private_download_url(
         meta["public_id"],
         file_format,
-        resource_type=meta.get("resource_type") or "image",
-        type=meta.get("type") or "authenticated",
+        resource_type=resource_type,
+        type=delivery_type,
         expires_at=expires_at,
     )
 
