@@ -189,6 +189,7 @@ def _cloudinary_upload_bytes(data, folder, extension):
             resource_type="auto",
             type=delivery_type,
             public_id=public_id,
+            asset_folder=f"{settings.CLOUDINARY_FOLDER}/{safe_folder}",
             unique_filename=False,
             overwrite=False,
         )
