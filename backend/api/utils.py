@@ -1,4 +1,7 @@
+import base64
+import json
 import os
+import time
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -10,6 +13,10 @@ from bson.decimal128 import Decimal128
 from django.conf import settings
 from PIL import Image, UnidentifiedImageError
 from rest_framework.exceptions import ValidationError
+
+import cloudinary
+import cloudinary.uploader
+import cloudinary.utils
 
 
 IMAGE_MIME_TYPES = {
@@ -69,6 +76,128 @@ def decimal_to_float(value):
     return float(value)
 
 
+
+CLOUDINARY_REF_PREFIX = "cld:"
+
+
+def cloudinary_enabled():
+    return bool(getattr(settings, "CLOUDINARY_URL", "").strip())
+
+
+def _configure_cloudinary():
+    if cloudinary_enabled():
+        # The SDK reads CLOUDINARY_URL from the environment. Request HTTPS URLs
+        # for all generated public and signed delivery links.
+        cloudinary.config(secure=True)
+
+
+def _encode_cloudinary_ref(result, fallback_format=""):
+    payload = {
+        "public_id": str(result.get("public_id") or ""),
+        "resource_type": str(result.get("resource_type") or "image"),
+        "type": str(result.get("type") or "upload"),
+        "format": str(result.get("format") or fallback_format or "").lstrip("."),
+        "secure_url": str(result.get("secure_url") or ""),
+    }
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    token = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    return f"{CLOUDINARY_REF_PREFIX}{token}"
+
+
+def decode_cloudinary_ref(value):
+    text = str(value or "")
+    if not text.startswith(CLOUDINARY_REF_PREFIX):
+        return None
+
+    token = text[len(CLOUDINARY_REF_PREFIX):]
+    token += "=" * (-len(token) % 4)
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+    if not isinstance(payload, dict) or not payload.get("public_id"):
+        return None
+    return payload
+
+
+def is_cloudinary_ref(value):
+    return decode_cloudinary_ref(value) is not None
+
+
+def public_upload_url(storage_ref):
+    if not storage_ref:
+        return ""
+
+    meta = decode_cloudinary_ref(storage_ref)
+    if not meta:
+        return f"{settings.MEDIA_URL}{storage_ref}".replace("//", "/")
+
+    if meta.get("type") != "upload":
+        return ""
+
+    if meta.get("secure_url"):
+        return meta["secure_url"]
+
+    _configure_cloudinary()
+    options = {
+        "secure": True,
+        "resource_type": meta.get("resource_type") or "image",
+        "type": "upload",
+    }
+    if meta.get("format"):
+        options["format"] = meta["format"]
+    url, _ = cloudinary.utils.cloudinary_url(meta["public_id"], **options)
+    return url
+
+
+def private_upload_download_url(storage_ref):
+    meta = decode_cloudinary_ref(storage_ref)
+    if not meta:
+        return ""
+
+    _configure_cloudinary()
+    file_format = str(meta.get("format") or "").lstrip(".")
+    if not file_format:
+        return ""
+
+    expires_at = int(time.time()) + int(settings.CLOUDINARY_PRIVATE_URL_TTL)
+    return cloudinary.utils.private_download_url(
+        meta["public_id"],
+        file_format,
+        resource_type=meta.get("resource_type") or "image",
+        type=meta.get("type") or "authenticated",
+        expires_at=expires_at,
+    )
+
+
+def _cloudinary_upload_bytes(data, folder, extension):
+    safe_folder = str(folder).strip().replace("\\", "/").strip("/")
+    if not safe_folder or ".." in safe_folder.split("/"):
+        raise ValidationError("Invalid upload destination.")
+
+    _configure_cloudinary()
+    stream = BytesIO(data)
+    stream.name = f"upload{extension or ''}"
+
+    delivery_type = "authenticated" if safe_folder in {"chat", "notes"} else "upload"
+    public_id = f"{settings.CLOUDINARY_FOLDER}/{safe_folder}/{uuid.uuid4().hex}"
+
+    try:
+        result = cloudinary.uploader.upload(
+            stream,
+            resource_type="auto",
+            type=delivery_type,
+            public_id=public_id,
+            asset_folder=f"{settings.CLOUDINARY_FOLDER}/{safe_folder}",
+            unique_filename=False,
+            overwrite=False,
+        )
+    except Exception as exc:
+        raise ValidationError("Could not store the uploaded file.") from exc
+
+    return _encode_cloudinary_ref(result, str(extension or "").lstrip("."))
+
 def serialize_datetime(value):
     if not value:
         return None
@@ -81,11 +210,7 @@ def serialize_platform(doc, request=None):
     if not doc:
         return None
     logo = doc.get("logo") or ""
-    logo_url = ""
-    if logo:
-        # Keep media URLs same-origin. In development Vite proxies /media to
-        # Django; in production the reverse proxy serves the same path.
-        logo_url = f"{settings.MEDIA_URL}{logo}".replace("//", "/")
+    logo_url = public_upload_url(logo) if logo else ""
     return {
         "id": str(doc["_id"]),
         "name": doc.get("name", ""),
@@ -208,6 +333,9 @@ def _save_bytes(data, folder, extension):
     safe_folder = str(folder).strip().replace("\\", "/").strip("/")
     if not safe_folder or ".." in safe_folder.split("/"):
         raise ValidationError("Invalid upload destination.")
+
+    if cloudinary_enabled():
+        return _cloudinary_upload_bytes(data, safe_folder, extension)
 
     rel = Path(safe_folder) / f"{uuid.uuid4().hex}{extension}"
     upload_root = _upload_root(safe_folder)
@@ -349,7 +477,36 @@ def resolve_upload_path(relative_path):
     return None
 
 
+def migrate_local_upload(relative_path):
+    if not relative_path or is_cloudinary_ref(relative_path):
+        return relative_path
+
+    target = resolve_upload_path(relative_path)
+    if not target:
+        raise FileNotFoundError(str(relative_path))
+
+    relative = str(relative_path).replace("\\", "/").lstrip("/")
+    folder = relative.split("/", 1)[0] if "/" in relative else "uploads"
+    return _cloudinary_upload_bytes(target.read_bytes(), folder, target.suffix)
+
+
 def delete_logo(relative_path):
+    meta = decode_cloudinary_ref(relative_path)
+    if meta:
+        _configure_cloudinary()
+        try:
+            cloudinary.uploader.destroy(
+                meta["public_id"],
+                resource_type=meta.get("resource_type") or "image",
+                type=meta.get("type") or "upload",
+                invalidate=meta.get("type") == "upload",
+            )
+        except Exception:
+            # Deleting an old asset should never prevent the database record
+            # from being updated or the user from replacing a file.
+            pass
+        return
+
     target = resolve_upload_path(relative_path)
     if not target:
         return
