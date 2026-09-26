@@ -68,6 +68,13 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 PRIVATE_MEDIA_ROOT = BASE_DIR / "private_media"
 
+# When CLOUDINARY_URL is configured, uploads are stored remotely. Local media
+# remains the development fallback and is also used to read legacy files while
+# they are being migrated.
+CLOUDINARY_URL = os.getenv("CLOUDINARY_URL", "").strip()
+CLOUDINARY_FOLDER = os.getenv("CLOUDINARY_FOLDER", "revnivo").strip().strip("/") or "revnivo"
+CLOUDINARY_PRIVATE_URL_TTL = max(60, int(os.getenv("CLOUDINARY_PRIVATE_URL_TTL", "300")))
+
 # Upload limits are enforced both by Django and api.utils.
 DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("DATA_UPLOAD_MAX_MEMORY_SIZE", str(2 * 1024 * 1024)))
 FILE_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("FILE_UPLOAD_MAX_MEMORY_SIZE", str(2 * 1024 * 1024)))
