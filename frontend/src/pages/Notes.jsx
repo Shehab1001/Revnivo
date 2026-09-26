@@ -73,6 +73,7 @@ export default function Notes() {
   const [deleting, setDeleting] = useState(false)
   const [draggingFiles, setDraggingFiles] = useState(false)
   const [selectedAttachmentId, setSelectedAttachmentId] = useState('')
+  const [resizingAttachment, setResizingAttachment] = useState(false)
 
   const [draftTitle, setDraftTitle] = useState('')
   const [draftHtml, setDraftHtml] = useState('')
@@ -84,6 +85,7 @@ export default function Notes() {
   const draftTitleRef = useRef('')
   const draftHtmlRef = useRef('')
   const lastRangeRef = useRef(null)
+  const resizeRef = useRef(null)
 
   const activeNote = useMemo(
     () => items.find((item) => item.id === activeId) || null,
@@ -99,6 +101,37 @@ export default function Notes() {
       ),
     [activeNote?.attachments]
   )
+
+  const hasArabic = (text = '') =>
+    /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(text)
+
+  const applyDirectionToElement = (element) => {
+    if (!element) return
+    const text = element.textContent || ''
+    const direction = hasArabic(text) ? 'rtl' : 'ltr'
+    element.setAttribute('dir', direction)
+    element.style.textAlign = direction === 'rtl' ? 'right' : 'left'
+  }
+
+  const applyEditorDirections = () => {
+    const editor = editorRef.current
+    if (!editor) return
+
+    const blocks = editor.querySelectorAll(
+      'p,div,h1,h2,h3,li,blockquote,pre'
+    )
+
+    if (!blocks.length) {
+      applyDirectionToElement(editor)
+      return
+    }
+
+    blocks.forEach((block) => {
+      if (!block.closest('[data-note-attachment]')) {
+        applyDirectionToElement(block)
+      }
+    })
+  }
 
   const rememberSelection = () => {
     const selection = window.getSelection()
@@ -120,8 +153,119 @@ export default function Notes() {
     }
   }
 
+  const hydrateAttachmentBlock = (
+    block,
+    attachment
+  ) => {
+    if (!block || !attachment) return
+
+    const id = attachment.id
+    const width =
+      block.getAttribute('data-width') || '100'
+
+    block.setAttribute(
+      'contenteditable',
+      'false'
+    )
+    block.className = 'note-inline-attachment'
+    block.style.width = `${width}%`
+    block.dataset.kind = attachment.kind
+
+    if (attachment.kind === 'image') {
+      block.innerHTML = `
+        <span class="note-inline-image-frame">
+          <img src="${attachment.url}" alt="" draggable="false" />
+          <span class="note-image-resize-handle" data-resize-handle="true" title="Drag to resize"></span>
+        </span>
+      `
+    } else {
+      block.innerHTML = `
+        <span class="note-inline-file-card">
+          <span class="note-inline-file-icon">📄</span>
+          <span class="note-inline-file-meta">
+            <strong>${escapeHtml(attachment.name)}</strong>
+            <small>${formatBytes(attachment.size)}</small>
+          </span>
+          <a href="${attachment.url}" target="_blank" rel="noreferrer">Open</a>
+        </span>
+      `
+    }
+
+    block.onclick = (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      setSelectedAttachmentId(id)
+    }
+
+    block.setAttribute('draggable', 'true')
+    block.ondragstart = (event) => {
+      if (
+        event.target.closest?.(
+          '[data-resize-handle="true"]'
+        )
+      ) {
+        event.preventDefault()
+        return
+      }
+
+      event.stopPropagation()
+      event.dataTransfer.effectAllowed = 'move'
+      event.dataTransfer.setData(
+        'application/x-revnivo-note-attachment',
+        id
+      )
+      event.dataTransfer.setData(
+        'text/plain',
+        id
+      )
+      block.classList.add(
+        'note-attachment-dragging'
+      )
+      setSelectedAttachmentId(id)
+    }
+
+    block.ondragend = () => {
+      block.classList.remove(
+        'note-attachment-dragging'
+      )
+      setDraggingFiles(false)
+    }
+
+    const resizeHandle = block.querySelector(
+      '[data-resize-handle="true"]'
+    )
+
+    if (resizeHandle) {
+      resizeHandle.onpointerdown = (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+
+        const editorWidth =
+          editorRef.current?.getBoundingClientRect()
+            .width || 1
+        const startWidth =
+          block.getBoundingClientRect().width
+        const startX = event.clientX
+
+        resizeRef.current = {
+          block,
+          editorWidth,
+          startWidth,
+          startX,
+          pointerId: event.pointerId,
+        }
+
+        setSelectedAttachmentId(id)
+        setResizingAttachment(true)
+        resizeHandle.setPointerCapture?.(
+          event.pointerId
+        )
+      }
+    }
+  }
+
   const hydrateAttachmentBlocks = () => {
-    if (!editorRef.current || !activeNote) return
+    if (!editorRef.current) return
 
     editorRef.current
       .querySelectorAll('[data-note-attachment]')
@@ -132,44 +276,10 @@ export default function Notes() {
         const attachment = attachmentMap[id]
         if (!attachment) return
 
-        const width =
-          block.getAttribute('data-width') || '100'
-
-        block.setAttribute(
-          'contenteditable',
-          'false'
+        hydrateAttachmentBlock(
+          block,
+          attachment
         )
-        block.className = 'note-inline-attachment'
-        block.style.width = `${width}%`
-        block.dataset.kind = attachment.kind
-
-        if (attachment.kind === 'image') {
-          block.innerHTML = `
-            <span class="note-inline-image-frame">
-              <img src="${attachment.url}" alt="" draggable="false" />
-              <span class="note-inline-attachment-caption">
-                ${escapeHtml(attachment.name)}
-              </span>
-            </span>
-          `
-        } else {
-          block.innerHTML = `
-            <span class="note-inline-file-card">
-              <span class="note-inline-file-icon">📄</span>
-              <span class="note-inline-file-meta">
-                <strong>${escapeHtml(attachment.name)}</strong>
-                <small>${formatBytes(attachment.size)}</small>
-              </span>
-              <a href="${attachment.url}" target="_blank" rel="noreferrer">Open</a>
-            </span>
-          `
-        }
-
-        block.onclick = (event) => {
-          event.preventDefault()
-          event.stopPropagation()
-          setSelectedAttachmentId(id)
-        }
       })
   }
 
@@ -226,6 +336,16 @@ export default function Notes() {
     selection.addRange(nextRange)
     lastRangeRef.current =
       nextRange.cloneRange()
+
+    // Render from the upload response immediately instead of waiting
+    // for React state / attachmentMap to update.
+    hydrateAttachmentBlock(
+      placeholder,
+      attachment
+    )
+    setSelectedAttachmentId(
+      attachment.id
+    )
 
     handleEditorInput()
   }
@@ -368,7 +488,10 @@ export default function Notes() {
         scheduleSave(title, recoveredHtml)
       }
 
-      queueMicrotask(hydrateAttachmentBlocks)
+      queueMicrotask(() => {
+        hydrateAttachmentBlocks()
+        applyEditorDirections()
+      })
     }
   }, [activeId])
 
@@ -380,6 +503,58 @@ export default function Notes() {
     },
     []
   )
+
+  useEffect(() => {
+    const handlePointerMove = (event) => {
+      const state = resizeRef.current
+      if (!state) return
+
+      const deltaX = event.clientX - state.startX
+      const nextPixels = Math.max(
+        state.editorWidth * 0.15,
+        Math.min(
+          state.startWidth + deltaX,
+          state.editorWidth
+        )
+      )
+      const nextPercent = Math.round(
+        (nextPixels / state.editorWidth) * 100
+      )
+
+      state.block.setAttribute(
+        'data-width',
+        String(nextPercent)
+      )
+      state.block.style.width = `${nextPercent}%`
+    }
+
+    const handlePointerUp = () => {
+      if (!resizeRef.current) return
+      resizeRef.current = null
+      setResizingAttachment(false)
+      handleEditorInput()
+    }
+
+    window.addEventListener(
+      'pointermove',
+      handlePointerMove
+    )
+    window.addEventListener(
+      'pointerup',
+      handlePointerUp
+    )
+
+    return () => {
+      window.removeEventListener(
+        'pointermove',
+        handlePointerMove
+      )
+      window.removeEventListener(
+        'pointerup',
+        handlePointerUp
+      )
+    }
+  }, [])
 
   const updateLocalNote = (id, updates) => {
     setItems((current) =>
@@ -480,6 +655,7 @@ export default function Notes() {
   }
 
   const handleEditorInput = () => {
+    applyEditorDirections()
     const html = editorRef.current?.innerHTML || ''
     setDraftHtml(html)
     draftHtmlRef.current = html
@@ -494,6 +670,94 @@ export default function Notes() {
 
   const formatBlock = (tag) => {
     runCommand('formatBlock', tag)
+  }
+
+  const isInternalAttachmentDrag = (event) =>
+    Array.from(event.dataTransfer?.types || []).includes(
+      'application/x-revnivo-note-attachment'
+    )
+
+  const moveAttachmentToDropPoint = (event) => {
+    const attachmentId = event.dataTransfer.getData(
+      'application/x-revnivo-note-attachment'
+    )
+
+    if (!attachmentId || !editorRef.current) {
+      return false
+    }
+
+    const block = editorRef.current.querySelector(
+      `[data-note-attachment="${attachmentId}"]`
+    )
+
+    if (!block) return false
+
+    let range =
+      document.caretRangeFromPoint?.(
+        event.clientX,
+        event.clientY
+      ) || null
+
+    if (!range && document.caretPositionFromPoint) {
+      const position = document.caretPositionFromPoint(
+        event.clientX,
+        event.clientY
+      )
+
+      if (position) {
+        range = document.createRange()
+        range.setStart(
+          position.offsetNode,
+          position.offset
+        )
+        range.collapse(true)
+      }
+    }
+
+    if (
+      !range ||
+      !editorRef.current.contains(
+        range.commonAncestorContainer
+      )
+    ) {
+      range = document.createRange()
+      range.selectNodeContents(editorRef.current)
+      range.collapse(false)
+    }
+
+    // Dropping onto the same image should not nest it inside itself.
+    if (
+      block === range.commonAncestorContainer ||
+      block.contains(range.commonAncestorContainer)
+    ) {
+      return true
+    }
+
+    range.collapse(true)
+    range.insertNode(block)
+
+    const spacer = document.createTextNode('\u00A0')
+    block.after(spacer)
+
+    const nextRange = document.createRange()
+    nextRange.setStartAfter(spacer)
+    nextRange.collapse(true)
+
+    const selection = window.getSelection()
+    selection.removeAllRanges()
+    selection.addRange(nextRange)
+    lastRangeRef.current = nextRange.cloneRange()
+
+    block.classList.remove('note-attachment-dragging')
+    setSelectedAttachmentId(attachmentId)
+    setDraggingFiles(false)
+    handleEditorInput()
+    queueMicrotask(() => {
+      hydrateAttachmentBlocks()
+      applyEditorDirections()
+    })
+
+    return true
   }
 
   const uploadFiles = async (files) => {
@@ -533,9 +797,8 @@ export default function Notes() {
         )
 
         insertAttachmentPlaceholder(data)
-        window.setTimeout(
-          () => hydrateAttachmentBlocks(),
-          0
+        queueMicrotask(
+          applyEditorDirections
         )
       }
     } catch (err) {
@@ -755,11 +1018,20 @@ export default function Notes() {
               }`}
               onDragEnter={(event) => {
                 event.preventDefault()
-                setDraggingFiles(true)
+                if (!isInternalAttachmentDrag(event)) {
+                  setDraggingFiles(true)
+                }
               }}
               onDragOver={(event) => {
                 event.preventDefault()
-                setDraggingFiles(true)
+
+                if (isInternalAttachmentDrag(event)) {
+                  event.dataTransfer.dropEffect = 'move'
+                  setDraggingFiles(false)
+                } else {
+                  event.dataTransfer.dropEffect = 'copy'
+                  setDraggingFiles(true)
+                }
               }}
               onDragLeave={(event) => {
                 if (
@@ -772,6 +1044,11 @@ export default function Notes() {
               }}
               onDrop={(event) => {
                 event.preventDefault()
+
+                if (isInternalAttachmentDrag(event)) {
+                  moveAttachmentToDropPoint(event)
+                  return
+                }
 
                 const caretRange =
                   document.caretRangeFromPoint?.(
@@ -986,6 +1263,8 @@ export default function Notes() {
                     )
                   }
                   placeholder="Untitled"
+                  dir={hasArabic(draftTitle) ? 'rtl' : 'ltr'}
+                  style={{ textAlign: hasArabic(draftTitle) ? 'right' : 'left' }}
                   className="w-full border-0 bg-transparent text-3xl font-bold tracking-tight text-foreground outline-none placeholder:text-default-300 sm:text-4xl"
                 />
 
@@ -1033,7 +1312,7 @@ export default function Notes() {
                     }
                   }}
                   data-placeholder="Start writing…"
-                  className="note-editor mt-7 min-h-[300px] w-full text-[15px] leading-7 text-foreground outline-none"
+                  className={`note-editor mt-7 min-h-[300px] w-full text-[15px] leading-7 text-foreground outline-none ${resizingAttachment ? 'select-none' : ''}`}
                 />
 
 

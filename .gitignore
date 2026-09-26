@@ -46,3 +46,10 @@ Desktop.ini
 coverage/
 .nyc_output/
 *.tsbuildinfo
+
+
+# Database backups
+backups/
+dump/
+*.bson
+*.archive
