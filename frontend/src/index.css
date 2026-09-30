@@ -13,6 +13,12 @@
 
 html.dark { color-scheme: dark; background: hsl(var(--heroui-background)); }
 
+@supports (scrollbar-gutter: stable) {
+  html {
+    scrollbar-gutter: stable;
+  }
+}
+
 /* Global light-mode app canvas.
    Keep content cards white while every page/tab uses a very light gray background. */
 html:not(.dark) {
