@@ -1,25 +1,417 @@
 import { Button, Card, CardBody, Chip, Input, Textarea } from '@heroui/react'
-import { Mic, MessageCircle, Paperclip, Search, Smile } from 'lucide-react'
+import { ChevronLeft, Mic, MessageCircle, Paperclip, Pause, Play, Search, Smile, Trash2, Volume2, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+
 import Loading from '../components/Loading'
+import ConfirmDeleteModal from '../components/ConfirmDeleteModal'
+import ProfileAvatar from '../components/ProfileAvatar'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
+import { formatDate, formatTime } from '../utils/format'
 
-function Avatar({ user }) {
-  return <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full bg-[#1688ff]/15 font-bold text-[#4aa3ff]">{user?.profile_image_url ? <img src={user.profile_image_url} alt="" className="h-full w-full object-cover"/> : user?.name?.slice(0, 1).toUpperCase() || '?'}</div>
+function isSameCalendarDay(first, second) {
+  if (!first || !second) return false
+
+  return localDateKey(first) === localDateKey(second)
 }
 
-function AttachmentPreview({ url, file, own }) {
-  const imageUrl = file ? URL.createObjectURL(file) : url
+function localDateKey(value) {
+  return formatDate(value, 'en-CA')
+}
+
+function getMessageDateLabel(value) {
+  const now = new Date()
+  const messageDay = localDateKey(value)
+
+  if (messageDay === localDateKey(now)) return 'Today'
+  if (messageDay === localDateKey(now.getTime() - 86400000)) return 'Yesterday'
+
+  return formatDate(value, 'en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+}
+
+function formatMessageTime(value) {
+  return formatTime(value, 'en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).toLowerCase()
+}
+
+function Avatar({
+  user,
+  showSupportLogo = false,
+}) {
+  return (
+    <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border border-default-300/80 bg-primary/10 font-bold text-primary dark:border-white/15">
+      {showSupportLogo ? (
+        <img
+          src="/profile.png"
+          alt="Revnivo Support"
+          className="h-full w-full bg-white object-cover p-1.5"
+        />
+      ) : (
+        <ProfileAvatar
+          user={user}
+          className="h-full w-full"
+          alt="Profile"
+        />
+      )}
+    </div>
+  )
+}
+
+
+function formatVoiceDuration(value) {
+  const seconds = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+function VoiceMessage({ src, own }) {
+  const audioRef = useRef(null)
+  const [playing, setPlaying] = useState(false)
+  const [duration, setDuration] = useState(0)
+  const [currentTime, setCurrentTime] = useState(0)
+
+  const progress = duration > 0 ? Math.min(currentTime / duration, 1) : 0
+  const bars = [6, 10, 15, 8, 18, 12, 21, 9, 16, 23, 12, 19, 14, 24, 9, 17, 21, 12, 19, 8, 15, 23, 12, 18, 10, 20, 13, 18]
+
+  const togglePlayback = async () => {
+    const audio = audioRef.current
+    if (!audio) return
+
+    if (audio.paused) {
+      await audio.play().catch(() => {})
+    } else {
+      audio.pause()
+    }
+  }
+
+  const seek = (event) => {
+    const audio = audioRef.current
+    if (!audio || !duration) return
+
+    const rect = event.currentTarget.getBoundingClientRect()
+    const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1)
+    audio.currentTime = ratio * duration
+    setCurrentTime(audio.currentTime)
+  }
+
+  return (
+    <div
+      className={`
+        mt-1 flex w-[min(72vw,300px)] min-w-0 max-w-full items-center gap-2.5 rounded-2xl bg-transparent px-1.5 py-2 sm:w-[280px] sm:gap-3 sm:px-2.5
+        ${own ? 'text-white' : 'text-foreground'}
+      `}
+    >
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
+        onDurationChange={(event) => setDuration(event.currentTarget.duration || 0)}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime || 0)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => {
+          setPlaying(false)
+          setCurrentTime(0)
+        }}
+      />
+
+      <button
+        type="button"
+        onClick={togglePlayback}
+        className={`
+          grid h-10 w-10 shrink-0 place-items-center rounded-full transition
+          ${own ? 'bg-white/18 text-white hover:bg-white/25' : 'bg-primary/12 text-primary hover:bg-primary/18'}
+        `}
+        aria-label={playing ? 'Pause voice message' : 'Play voice message'}
+      >
+        {playing ? (
+          <Pause size={18} fill="currentColor" />
+        ) : (
+          <Play size={18} fill="currentColor" className="translate-x-px" />
+        )}
+      </button>
+
+      <div className="min-w-0 flex-1">
+        <button
+          type="button"
+          onClick={seek}
+          className="flex h-8 w-full items-center gap-[2px]"
+          aria-label="Seek voice message"
+        >
+          {bars.map((height, index) => {
+            const filled = (index + 1) / bars.length <= progress
+
+            return (
+              <span
+                key={`${height}-${index}`}
+                className={`w-[3px] shrink-0 rounded-full transition-colors ${
+                  own
+                    ? filled
+                      ? 'bg-white'
+                      : 'bg-white/40'
+                    : filled
+                      ? 'bg-primary'
+                      : 'bg-default-400/65'
+                }`}
+                style={{ height: `${height}px` }}
+              />
+            )
+          })}
+        </button>
+
+        <div className={`mt-0.5 flex items-center justify-between text-[10px] ${own ? 'text-white/75' : 'text-default-500'}`}>
+          <span>{formatVoiceDuration(currentTime > 0 ? currentTime : duration)}</span>
+          <Volume2 size={13} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AttachmentPreview({ url, file, own, messageType = '' }) {
+  const [localUrl, setLocalUrl] = useState('')
+  const [viewerOpen, setViewerOpen] = useState(false)
+  const [zoom, setZoom] = useState(1)
+
+  useEffect(() => {
+    if (!file) {
+      setLocalUrl('')
+      return undefined
+    }
+
+    const objectUrl = URL.createObjectURL(file)
+    setLocalUrl(objectUrl)
+
+    return () => URL.revokeObjectURL(objectUrl)
+  }, [file])
+
+  useEffect(() => {
+    if (!viewerOpen) return undefined
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setViewerOpen(false)
+      }
+
+      if (event.key === '+' || event.key === '=') {
+        setZoom((value) => Math.min(4, value + 0.25))
+      }
+
+      if (event.key === '-') {
+        setZoom((value) => Math.max(0.5, value - 0.25))
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [viewerOpen])
+
+  const imageUrl = localUrl || url
+
   if (!imageUrl) return null
-  const isImage = file?.type?.startsWith('image/') || Boolean(url?.match(/\.(jpe?g|png|gif|webp)(\?|$)/i))
-  const isAudio = file?.type?.startsWith('audio/') || Boolean(url?.match(/\.(webm|mp3|ogg|wav|m4a)(\?|$)/i))
-  if (isAudio) return <audio className="mt-2 max-w-full" controls src={imageUrl}/>
-  return isImage ? <img src={imageUrl} alt="Attachment" className="mt-2 max-h-64 max-w-full rounded-xl object-contain"/> : <a className={`mt-2 block rounded-xl px-3 py-2 text-xs underline ${own ? 'bg-black/10' : 'bg-default-100'}`} href={imageUrl} target="_blank" rel="noreferrer">Open attachment</a>
+
+  const isImage =
+    messageType === 'image' ||
+    file?.type?.startsWith('image/') ||
+    Boolean(url?.match(/\.(jpe?g|png|gif|webp)(\?|$)/i))
+
+  const isAudio =
+    messageType === 'audio' ||
+    file?.type?.startsWith('audio/') ||
+    Boolean(url?.match(/\.(webm|mp3|ogg|wav|m4a)(\?|$)/i))
+
+  const isVideo =
+    messageType === 'video' ||
+    file?.type?.startsWith('video/') ||
+    Boolean(url?.match(/\.(mp4|webm)(\?|$)/i))
+
+  if (isAudio) {
+    return <VoiceMessage src={imageUrl} own={own} />
+  }
+
+  if (isVideo) {
+    return (
+      <video
+        src={imageUrl}
+        controls
+        preload="metadata"
+        className="mt-2 max-h-72 w-auto max-w-full rounded-xl bg-black"
+      />
+    )
+  }
+
+  if (isImage) {
+    return (
+      <>
+        <button
+          type="button"
+          className="mt-2 block max-w-full cursor-zoom-in overflow-hidden rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          onClick={(event) => {
+            event.stopPropagation()
+            setZoom(1)
+            setViewerOpen(true)
+          }}
+          aria-label="Open image"
+        >
+          <img
+            src={imageUrl}
+            alt="Attachment"
+            className="max-h-56 w-auto max-w-full rounded-xl object-contain transition-transform hover:scale-[1.01] sm:max-h-64"
+          />
+        </button>
+
+        {viewerOpen && (
+          <div
+            className="fixed inset-0 z-[120] flex items-center justify-center overflow-hidden bg-black/90 p-3 backdrop-blur-sm sm:p-6"
+            onClick={() => setViewerOpen(false)}
+            onWheel={(event) => {
+              event.preventDefault()
+              setZoom((value) =>
+                Math.min(
+                  4,
+                  Math.max(
+                    0.5,
+                    value + (event.deltaY < 0 ? 0.2 : -0.2)
+                  )
+                )
+              )
+            }}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Image viewer"
+          >
+            <div
+              className="absolute right-3 top-3 z-20 flex items-center gap-2 sm:right-5 sm:top-5"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white backdrop-blur transition hover:bg-white/20 disabled:opacity-40"
+                onClick={() =>
+                  setZoom((value) => Math.max(0.5, value - 0.25))
+                }
+                disabled={zoom <= 0.5}
+                aria-label="Zoom out"
+              >
+                <ZoomOut size={20} />
+              </button>
+
+              <div className="min-w-14 rounded-full bg-white/10 px-3 py-2 text-center text-xs font-semibold text-white backdrop-blur">
+                {Math.round(zoom * 100)}%
+              </div>
+
+              <button
+                type="button"
+                className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white backdrop-blur transition hover:bg-white/20 disabled:opacity-40"
+                onClick={() =>
+                  setZoom((value) => Math.min(4, value + 0.25))
+                }
+                disabled={zoom >= 4}
+                aria-label="Zoom in"
+              >
+                <ZoomIn size={20} />
+              </button>
+
+              <button
+                type="button"
+                className="ml-1 grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white backdrop-blur transition hover:bg-white/20"
+                onClick={() => setViewerOpen(false)}
+                aria-label="Close image"
+              >
+                <X size={21} />
+              </button>
+            </div>
+
+            <div
+              className="flex h-full w-full items-center justify-center overflow-auto"
+              onClick={(event) => event.stopPropagation()}
+              onDoubleClick={() =>
+                setZoom((value) => (value === 1 ? 2 : 1))
+              }
+            >
+              <img
+                src={imageUrl}
+                alt="Attachment preview"
+                draggable={false}
+                className="max-h-[88vh] max-w-[92vw] select-none object-contain transition-transform duration-150"
+                style={{
+                  transform: `scale(${zoom})`,
+                  transformOrigin: 'center center',
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </>
+    )
+  }
+
+  return (
+    <a
+      className={`
+        mt-2
+        block
+        rounded-xl
+        px-3
+        py-2
+        text-xs
+        underline
+        ${
+          own
+            ? 'bg-black/10 text-white'
+            : 'bg-black/5 text-black dark:bg-white/5 dark:text-white'
+        }
+      `}
+      href={imageUrl}
+      target="_blank"
+      rel="noreferrer"
+    >
+      Open attachment
+    </a>
+  )
+}
+
+function getConversationPreview(message) {
+  if (!message) return ''
+
+  if (message.deleted) {
+    return message.deleted_by_me
+      ? 'You deleted this message'
+      : 'This message was deleted'
+  }
+
+  if (message.preview_text) {
+    return message.preview_text
+  }
+
+  switch (message.message_type) {
+    case 'image':
+      return 'Photo'
+    case 'audio':
+      return 'Voice message'
+    case 'video':
+      return 'Video'
+    case 'file':
+      return 'Document'
+    default:
+      return message.content || ''
+  }
 }
 
 export default function SupportChat() {
   const { user } = useAuth()
+  const [searchParams] = useSearchParams()
+  const notifiedUserId = searchParams.get('user') || ''
+
   const [contacts, setContacts] = useState([])
   const [selectedUser, setSelectedUser] = useState('')
   const [messages, setMessages] = useState([])
@@ -30,124 +422,1516 @@ export default function SupportChat() {
   const [recording, setRecording] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [contextMenu, setContextMenu] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [clearChatOpen, setClearChatOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
   const typingTimer = useRef(null)
+  const recordingPresenceTimer = useRef(null)
   const recorderRef = useRef(null)
   const audioChunksRef = useRef([])
+  const recordingStartedAtRef = useRef(0)
+
+  /*
+   * Chat scrolling refs.
+   *
+   * scrollToLatestRef:
+   *   Forces the next rendered message list to jump to the latest message.
+   *
+   * lastMessageIdRef:
+   *   Lets polling detect whether a new message arrived without forcing the
+   *   user back to the bottom while they are reading older messages.
+   */
+  const messageListRef = useRef(null)
+  const messagesEndRef = useRef(null)
+  const scrollToLatestRef = useRef(false)
+  const lastMessageIdRef = useRef(null)
+
+  const isNearBottom = () => {
+    const element = messageListRef.current
+
+    if (!element) return true
+
+    const remaining =
+      element.scrollHeight -
+      element.scrollTop -
+      element.clientHeight
+
+    return remaining < 180
+  }
+
+  const scrollToBottom = (behavior = 'auto') => {
+    window.requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({
+        behavior,
+        block: 'end',
+      })
+    })
+  }
 
   const loadContacts = async () => {
     if (user?.role !== 'admin') return
-    const { data } = await api.get('/support-chat/', { params: { summary: 1 } })
-    setContacts([...data].sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0)))
+
+    const { data } = await api.get('/support-chat/', {
+      params: { summary: 1 },
+    })
+
+    setContacts(
+      [...data].sort(
+        (a, b) =>
+          new Date(b.last_message_at || 0) -
+          new Date(a.last_message_at || 0)
+      )
+    )
   }
 
   const loadPresence = async () => {
     const { data } = await api.get('/chat-presence/')
+
     if (user?.role !== 'admin') {
-      const admin = data.find((person) => person.id !== user?.id)
-      setContacts((items) => [{ ...(items[0] || { id: 'support', name: 'Revnivo Support', email: 'Technical support' }), online: admin?.online, typing: admin?.typing }])
+      const supportPresence = {
+        online: data.some((person) => person.online),
+        typing: data.some((person) => person.typing),
+        recording: data.some((person) => person.recording),
+      }
+
+      setContacts((items) => [
+        {
+          ...(items[0] || {
+            id: 'support',
+            name: 'Revnivo Support',
+            email: 'Technical support',
+          }),
+          ...supportPresence,
+        },
+      ])
     }
   }
 
-  const loadMessages = async (userId = selectedUser) => {
+  const loadMessages = async (
+    userId = selectedUser
+  ) => {
+    /*
+     * Check the scroll position before replacing the messages.
+     * If the user is already near the bottom, incoming messages can keep
+     * following the conversation. If they scrolled up, polling will not
+     * keep pulling them back down.
+     */
+    const wasNearBottom = isNearBottom()
+
     try {
-      const { data } = await api.get('/support-chat/', { params: user?.role === 'admin' && userId ? { user_id: userId } : {} })
-      setMessages(data)
-      if (user?.role !== 'admin') setContacts((items) => items.map((item) => ({ ...item, last_message: data.at(-1)?.content || '' })))
-      if (user?.role === 'admin' ? userId : user) {
-        api.patch('/support-chat/', { user_id: user?.role === 'admin' ? userId : 'support' }).catch(() => {})
-        if (user?.role === 'admin' && userId) setContacts((items) => items.map((item) => item.id === userId ? { ...item, unread_count: 0 } : item))
+      const { data } = await api.get(
+        '/support-chat/',
+        {
+          params:
+            user?.role === 'admin' && userId
+              ? { user_id: userId }
+              : {},
+        }
+      )
+
+      const incomingLastMessageId =
+        data.at(-1)?.id ?? null
+
+      const hasNewLastMessage =
+        incomingLastMessageId !==
+        lastMessageIdRef.current
+
+      if (
+        hasNewLastMessage &&
+        wasNearBottom
+      ) {
+        scrollToLatestRef.current = true
       }
-    } finally { setLoading(false) }
+
+      setMessages(data)
+
+      if (user?.role !== 'admin') {
+        const latestVisibleMessage = data.at(-1)
+
+        setContacts((items) =>
+          items.map((item) => ({
+            ...item,
+            last_message:
+              getConversationPreview(
+                latestVisibleMessage
+              ),
+            last_message_at:
+              latestVisibleMessage?.created_at ||
+              null,
+          }))
+        )
+      }
+
+      if (
+        user?.role === 'admin'
+          ? userId
+          : user
+      ) {
+        api
+          .patch('/support-chat/', {
+            user_id:
+              user?.role === 'admin'
+                ? userId
+                : 'support',
+          })
+          .catch(() => {})
+
+        if (
+          user?.role === 'admin' &&
+          userId
+        ) {
+          setContacts((items) =>
+            items.map((item) =>
+              item.id === userId
+                ? {
+                    ...item,
+                    unread_count: 0,
+                  }
+                : item
+            )
+          )
+        }
+      }
+    } finally {
+      setLoading(false)
+    }
   }
+
+  /*
+   * Scroll only after the messages have actually rendered.
+   *
+   * This is what makes a newly opened conversation start at the latest
+   * messages instead of showing the beginning of the history.
+   */
+  useEffect(() => {
+    const currentLastMessageId =
+      messages.at(-1)?.id ?? null
+
+    if (
+      scrollToLatestRef.current &&
+      messagesEndRef.current
+    ) {
+      scrollToBottom('auto')
+      scrollToLatestRef.current = false
+    }
+
+    lastMessageIdRef.current =
+      currentLastMessageId
+  }, [messages, contacts, selectedUser])
 
   useEffect(() => {
-    if (user?.role === 'admin') loadContacts().catch(() => setLoading(false))
-    else {
-      window.dispatchEvent(new CustomEvent('chat-read', { detail: { chatUserId: String(user?.id) } }))
-      api.patch('/support-chat/', { user_id: 'support' }).catch(() => {}).finally(() => loadMessages())
+    if (user?.role === 'admin' && notifiedUserId) {
+      scrollToLatestRef.current = true
+      lastMessageIdRef.current = null
+      setSelectedUser(notifiedUserId)
     }
+  }, [notifiedUserId, user?.role])
+
+  useEffect(() => {
+    if (user?.role === 'admin') {
+      loadContacts().catch(() =>
+        setLoading(false)
+      )
+    } else {
+      scrollToLatestRef.current = true
+
+      window.dispatchEvent(
+        new CustomEvent('chat-read', {
+          detail: {
+            chatUserId: String(user?.id),
+          },
+        })
+      )
+
+      api
+        .patch('/support-chat/', {
+          user_id: 'support',
+        })
+        .catch(() => {})
+        .finally(() => loadMessages())
+    }
+
     loadPresence().catch(() => {})
   }, [user?.role])
-  useEffect(() => { if (selectedUser && user?.role === 'admin') loadMessages(selectedUser) }, [selectedUser])
+
+  useEffect(() => {
+    if (
+      selectedUser &&
+      user?.role === 'admin'
+    ) {
+      /*
+       * Every newly selected conversation opens at its latest message.
+       */
+      scrollToLatestRef.current = true
+      lastMessageIdRef.current = null
+      loadMessages(selectedUser)
+    }
+  }, [selectedUser])
+
+  useEffect(() => {
+    return () => {
+      if (typingTimer.current) {
+        window.clearTimeout(typingTimer.current)
+      }
+
+      if (recordingPresenceTimer.current) {
+        window.clearInterval(recordingPresenceTimer.current)
+      }
+    }
+  }, [])
+
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (user?.role !== 'admin' || selectedUser) loadMessages()
+      if (
+        user?.role !== 'admin' ||
+        selectedUser
+      ) {
+        loadMessages()
+      }
+
       loadContacts().catch(() => {})
       loadPresence().catch(() => {})
     }, 3000)
-    return () => window.clearInterval(timer)
+
+    return () =>
+      window.clearInterval(timer)
   }, [selectedUser, user?.role])
 
   const clearTyping = () => {
-    if (typingTimer.current) window.clearTimeout(typingTimer.current)
-    api.post('/chat-presence/', { typing: false }).catch(() => {})
+    if (typingTimer.current) {
+      window.clearTimeout(
+        typingTimer.current
+      )
+    }
+
+    api
+      .post('/chat-presence/', {
+        typing: false,
+      })
+      .catch(() => {})
   }
 
   const updateTyping = (value) => {
     setContent(value)
-    if (typingTimer.current) window.clearTimeout(typingTimer.current)
-    if (!value.trim() || (user?.role === 'admin' && !selectedUser)) return clearTyping()
-    api.post('/chat-presence/', { typing: true, user_id: user?.role === 'admin' ? selectedUser : undefined }).catch(() => {})
-    typingTimer.current = window.setTimeout(clearTyping, 3500)
+
+    if (typingTimer.current) {
+      window.clearTimeout(
+        typingTimer.current
+      )
+    }
+
+    if (
+      !value.trim() ||
+      (user?.role === 'admin' &&
+        !selectedUser)
+    ) {
+      return clearTyping()
+    }
+
+    api
+      .post('/chat-presence/', {
+        typing: true,
+        user_id:
+          user?.role === 'admin'
+            ? selectedUser
+            : undefined,
+      })
+      .catch(() => {})
+
+    typingTimer.current =
+      window.setTimeout(
+        clearTyping,
+        3500
+      )
   }
 
-  const send = async (event, overrideContent = content, messageType = 'text', overrideAttachment = attachment) => {
+  const send = async (
+    event,
+    overrideContent = content,
+    messageType = 'text',
+    overrideAttachment = attachment
+  ) => {
     event?.preventDefault()
-    if (!overrideContent.trim() && !overrideAttachment) return
+
+    if (
+      !overrideContent.trim() &&
+      !overrideAttachment
+    ) {
+      return
+    }
+
     const form = new FormData()
-    form.append('content', overrideContent)
-    form.append('message_type', messageType)
-    if (user?.role === 'admin') form.append('user_id', selectedUser)
-    if (overrideAttachment) form.append('attachment', overrideAttachment)
-    await api.post('/support-chat/', form, { headers: { 'Content-Type': 'multipart/form-data' } })
-    clearTyping(); setContent(''); setAttachment(null); await loadMessages(); await loadContacts().catch(() => {})
+
+    form.append(
+      'content',
+      overrideContent
+    )
+
+    let resolvedMessageType = messageType
+
+    if (
+      overrideAttachment &&
+      messageType === 'text'
+    ) {
+      if (
+        overrideAttachment.type?.startsWith(
+          'image/'
+        )
+      ) {
+        resolvedMessageType = 'image'
+      } else if (
+        overrideAttachment.type?.startsWith(
+          'audio/'
+        )
+      ) {
+        resolvedMessageType = 'audio'
+      } else if (
+        overrideAttachment.type?.startsWith(
+          'video/'
+        )
+      ) {
+        resolvedMessageType = 'video'
+      } else {
+        resolvedMessageType = 'file'
+      }
+    }
+
+    form.append(
+      'message_type',
+      resolvedMessageType
+    )
+
+    if (user?.role === 'admin') {
+      form.append(
+        'user_id',
+        selectedUser
+      )
+    }
+
+    if (overrideAttachment) {
+      form.append(
+        'attachment',
+        overrideAttachment
+      )
+    }
+
+    /*
+     * Messages sent by the current user should always leave the viewport
+     * at the new message.
+     */
+    scrollToLatestRef.current = true
+
+    await api.post(
+      '/support-chat/',
+      form,
+      {
+        headers: {
+          'Content-Type':
+            'multipart/form-data',
+        },
+      }
+    )
+
+    clearTyping()
+    setContent('')
+    setAttachment(null)
+
+    await loadMessages()
+    await loadContacts().catch(() => {})
+  }
+
+  const clearRecordingPresence = () => {
+    if (recordingPresenceTimer.current) {
+      window.clearInterval(recordingPresenceTimer.current)
+      recordingPresenceTimer.current = null
+    }
+
+    api
+      .post('/chat-presence/', {
+        recording: false,
+        user_id:
+          user?.role === 'admin'
+            ? selectedUser
+            : undefined,
+      })
+      .catch(() => {})
   }
 
   const startRecording = async () => {
-    if (recording) { recorderRef.current?.stop(); return }
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    const recorder = new MediaRecorder(stream)
-    audioChunksRef.current = []
-    recorder.ondataavailable = (event) => audioChunksRef.current.push(event.data)
-    recorder.onstop = async () => {
-      stream.getTracks().forEach((track) => track.stop())
-      const audio = new File([new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' })], `voice-${Date.now()}.webm`, { type: recorder.mimeType || 'audio/webm' })
-      setRecording(false)
-      await send(null, '', 'audio', audio)
+    if (recording) {
+      recorderRef.current?.stop()
+      return
     }
+
+    if (user?.role === 'admin' && !selectedUser) {
+      return
+    }
+
+    clearTyping()
+
+    const stream =
+      await navigator.mediaDevices.getUserMedia(
+        { audio: true }
+      )
+
+    const preferredMimeTypes = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+    ]
+
+    const mimeType =
+      preferredMimeTypes.find((type) =>
+        MediaRecorder.isTypeSupported?.(type)
+      ) || ''
+
+    const recorder = mimeType
+      ? new MediaRecorder(stream, { mimeType })
+      : new MediaRecorder(stream)
+
+    audioChunksRef.current = []
+    recordingStartedAtRef.current = Date.now()
+
+    recorder.ondataavailable = (
+      event
+    ) => {
+      if (event.data?.size) {
+        audioChunksRef.current.push(
+          event.data
+        )
+      }
+    }
+
+    recorder.onerror = () => {
+      stream
+        .getTracks()
+        .forEach((track) =>
+          track.stop()
+        )
+
+      clearRecordingPresence()
+      setRecording(false)
+      recordingStartedAtRef.current = 0
+    }
+
+    recorder.onstop = async () => {
+      stream
+        .getTracks()
+        .forEach((track) =>
+          track.stop()
+        )
+
+      clearRecordingPresence()
+      setRecording(false)
+
+      const chunks = [
+        ...audioChunksRef.current,
+      ]
+      audioChunksRef.current = []
+
+      const recordedMs =
+        recordingStartedAtRef.current
+          ? Date.now() -
+            recordingStartedAtRef.current
+          : 0
+      recordingStartedAtRef.current = 0
+
+      if (
+        !chunks.length ||
+        recordedMs < 250
+      ) {
+        return
+      }
+
+      const type =
+        recorder.mimeType ||
+        chunks[0]?.type ||
+        'audio/webm'
+
+      const extension =
+        type.includes('ogg')
+          ? 'ogg'
+          : 'webm'
+
+      const blob = new Blob(
+        chunks,
+        { type }
+      )
+
+      if (!blob.size) {
+        return
+      }
+
+      const audio = new File(
+        [blob],
+        `voice-${Date.now()}.${extension}`,
+        { type }
+      )
+
+      await send(
+        null,
+        '',
+        'audio',
+        audio
+      )
+    }
+
     recorderRef.current = recorder
-    recorder.start()
+    recorder.start(250)
     setRecording(true)
+
+    const sendRecordingPresence = () =>
+      api
+        .post('/chat-presence/', {
+          recording: true,
+          user_id:
+            user?.role === 'admin'
+              ? selectedUser
+              : undefined,
+        })
+        .catch(() => {})
+
+    sendRecordingPresence()
+    recordingPresenceTimer.current =
+      window.setInterval(
+        sendRecordingPresence,
+        3000
+      )
   }
 
-  const selectContact = async (contact) => {
+  const selectContact = async (
+    contact
+  ) => {
+    /*
+     * Set this before changing selectedUser so the first render for the
+     * new conversation is anchored at the bottom.
+     */
+    scrollToLatestRef.current = true
+    lastMessageIdRef.current = null
+
     setSelectedUser(contact.id)
     setMessages([])
-    setContacts((items) => items.map((item) => item.id === contact.id ? { ...item, unread_count: 0 } : item))
+
+    setContacts((items) =>
+      items.map((item) =>
+        item.id === contact.id
+          ? {
+              ...item,
+              unread_count: 0,
+            }
+          : item
+      )
+    )
+
     try {
-      await api.patch('/support-chat/', { user_id: contact.id })
+      await api.patch(
+        '/support-chat/',
+        {
+          user_id: contact.id,
+        }
+      )
     } finally {
-      window.dispatchEvent(new CustomEvent('chat-read', { detail: { chatUserId: user?.role === 'admin' ? String(contact.id) : String(user?.id) } }))
-      await loadMessages(contact.id)
+      window.dispatchEvent(
+        new CustomEvent('chat-read', {
+          detail: {
+            chatUserId:
+              user?.role === 'admin'
+                ? String(contact.id)
+                : String(user?.id),
+          },
+        })
+      )
     }
   }
 
-  const deleteMessage = async (messageId, mode) => {
-    await api.delete('/support-chat/', { data: { id: messageId, mode } })
-    setContextMenu(null)
-    await loadMessages()
+  const clearConversation = async () => {
+    if (!selectedUser || user?.role !== 'admin') return
+
+    setDeleting(true)
+
+    try {
+      await api.delete('/support-chat/', {
+        data: {
+          mode: 'chat',
+          user_id: selectedUser,
+        },
+      })
+
+      setMessages([])
+      lastMessageIdRef.current = null
+      setClearChatOpen(false)
+
+      setContacts((items) =>
+        items.map((item) =>
+          item.id === selectedUser
+            ? {
+                ...item,
+                last_message: '',
+                last_message_at: null,
+                unread_count: 0,
+              }
+            : item
+        )
+      )
+
+      await loadContacts().catch(() => {})
+    } finally {
+      setDeleting(false)
+    }
   }
 
-  const active = selectedUser ? contacts.find((contact) => contact.id === selectedUser) : null
-  const visibleContacts = contacts.filter((contact) => `${contact.name} ${contact.email} ${contact.last_message || ''}`.toLowerCase().includes(search.toLowerCase()))
-  const ownSender = user?.role === 'admin' ? 'admin' : 'user'
-  if (loading && !contacts.length) return <Loading label="Loading support chat..." />
+  const deleteMessage = async (
+    messageId,
+    mode
+  ) => {
+    setDeleting(true)
+    try {
+      await api.delete(
+        '/support-chat/',
+        {
+          data: {
+            id: messageId,
+            mode,
+          },
+        }
+      )
+      setDeleteTarget(null)
+      await loadMessages()
+      await loadContacts().catch(() => {})
+    } finally {
+      setDeleting(false)
+    }
+  }
 
-  return <div className="-mx-4 -my-4 flex h-[calc(100vh-4rem)] min-h-0 w-[calc(100%+2rem)] flex-col md:-mx-6 md:-my-6 md:w-[calc(100%+3rem)] lg:-mx-8 lg:-my-8 lg:w-[calc(100%+4rem)]" onClick={() => contextMenu && setContextMenu(null)}>
-    {contextMenu && <div className="fixed z-70 w-44 rounded-xl border border-white/10 bg-[#1b1c21] p-1 shadow-2xl" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()}><button className="block w-full rounded-lg px-3 py-2 text-left text-xs text-[#d8d9dd] hover:bg-white/8" onClick={() => deleteMessage(contextMenu.id, 'me')}>Delete for me</button><button className="block w-full rounded-lg px-3 py-2 text-left text-xs text-danger-300 hover:bg-danger-500/10" onClick={() => deleteMessage(contextMenu.id, 'everyone')}>Delete for everyone</button></div>}
-    <Card className="grid h-full min-h-0 w-full flex-1 overflow-hidden rounded-none border-white/8 bg-[#101114] text-white shadow-none md:grid-cols-[280px_1fr]" radius="none">
-      <aside className="min-h-0 overflow-y-auto border-b border-white/8 md:border-b-0 md:border-r"><div className="border-b border-white/8 p-4"><Input aria-label="Search people" placeholder="Search people..." value={search} onValueChange={setSearch} startContent={<Search size={16}/>} classNames={{ inputWrapper: 'bg-[#0b0c0f] border-white/8', input: 'text-white placeholder:text-[#62656e]' }}/></div><div className="divide-y divide-white/6">{visibleContacts.map((contact) => <button key={contact.id} onClick={() => selectContact(contact)} className={`flex w-full items-center gap-3 p-3 text-left transition ${contact.unread_count > 0 ? 'chat-contact-new' : ''} ${active?.id === contact.id ? 'bg-[#1688ff]/12' : 'hover:bg-white/5'}`}><div className="relative"><Avatar user={contact}/><span className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-1 border-[#101114] ${contact.online ? 'bg-[#25d17f]' : 'bg-[#62656e]'}`}/></div><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><div className="truncate text-sm font-semibold">{contact.name}</div>{contact.last_message_at && <time className="shrink-0 text-[10px] text-[#777a84]">{new Date(contact.last_message_at).toLocaleTimeString('en-EG', { hour: 'numeric', minute: '2-digit' })}</time>}</div><div className="flex items-center justify-between gap-2"><div className={`flex items-center gap-1 truncate text-xs ${contact.typing ? 'text-[#4aa3ff]' : 'text-[#858891]'}`}>{contact.typing ? <><span>typing</span><span className="typing-dots"><i/><i/><i/></span></> : contact.last_message || 'No messages yet'}</div>{contact.unread_count > 0 && <Chip size="sm" color="primary" variant="solid" className="h-5 min-w-5 px-1 text-[10px]">{contact.unread_count}</Chip>}</div></div></button>)}</div></aside>
-      <section className="flex min-h-0 flex-col bg-[#0b0c0f]">{active ? <><div className="flex shrink-0 items-center gap-3 border-b border-white/8 p-4"><div className="relative"><Avatar user={active}/><span className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-[#0b0c0f] ${active.online ? 'bg-[#25d17f]' : 'bg-[#62656e]'}`}/></div><div className="min-w-0"><div className="truncate text-sm font-semibold">{active.name}</div><div className="text-xs text-[#777a84]">{active.online ? 'Online now' : 'Offline'}</div></div></div><div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">{messages.length ? messages.map((message) => { const own = message.sender === ownSender; return <div key={message.id} onContextMenu={(event) => { event.preventDefault(); setContextMenu({ id: message.id, x: event.clientX, y: event.clientY }) }} className={`flex gap-3 ${own ? 'flex-row-reverse' : ''}`}><Avatar user={own ? user : active}/><div className={`max-w-[80%] ${own ? 'items-end' : 'items-start'} flex flex-col`}><div className={`rounded-2xl px-4 py-3 text-sm ${own ? 'rounded-tr-sm bg-[#1688ff] text-white' : 'rounded-tl-sm bg-[#1b1c21] text-[#e1e2e5]'}`}>{message.deleted ? <p className="italic opacity-60">This message was deleted</p> : <>{message.content && <p className={`whitespace-pre-wrap wrap-break-word ${message.message_type === 'sticker' ? 'text-5xl' : ''}`}>{message.content}</p>}<AttachmentPreview url={message.attachment_url} own={own}/></>}</div><time className="mt-1 px-1 text-[10px] text-[#62656e]">{new Date(message.created_at).toLocaleString('en-EG')}</time></div></div>}) : <div className="m-auto text-sm text-[#777a84]">No messages yet.</div>}{active.typing && <div className="flex items-center gap-2 text-xs text-[#4aa3ff]">typing <span className="typing-dots"><i/><i/><i/></span></div>}</div><form onSubmit={send} className="shrink-0 border-t border-white/8 bg-[#15161a] p-3"><div className="relative flex items-end"><div className="absolute bottom-2 left-2 z-10 flex items-center gap-1"><label className="grid h-8 w-8 cursor-pointer place-items-center rounded-full text-[#9da0a8] hover:bg-white/8 hover:text-white"><Paperclip size={18}/><input type="file" className="hidden" onChange={(event) => setAttachment(event.target.files?.[0] || null)}/></label><Button isIconOnly size="sm" variant="light" className="h-8 w-8 min-w-8 text-[#9da0a8]" onPress={() => setEmojiOpen(!emojiOpen)} aria-label="Emoji"><Smile size={18}/></Button></div><Textarea aria-label="Message" value={content} onValueChange={updateTyping} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(event) } }} placeholder={recording ? 'Recording voice message...' : 'Type a message'} minRows={1} maxRows={4} className="w-full" classNames={{ inputWrapper: 'bg-[#242527] border-transparent min-h-12', input: 'text-white placeholder:text-[#858891]' }}/><Button isIconOnly type="button" onPress={startRecording} color={recording ? 'danger' : 'default'} variant="light" className="absolute bottom-2 right-2 z-10 h-8 w-8 min-w-8 text-[#d8d9dd]" aria-label="Record voice"><Mic size={18}/></Button></div>{emojiOpen && <div className="mt-2 flex flex-wrap gap-2 rounded-xl bg-[#0b0c0f] p-2">{['😀', '😂', '😍', '👍', '🙏', '🔥', '🎉', '❤️'].map((item) => <button type="button" key={item} className="text-2xl transition hover:scale-125" onClick={() => updateTyping(`${content}${item}`)}>{item}</button>)}</div>}{attachment && <div className="mt-2 flex items-center gap-2 text-xs text-[#858891]"><AttachmentPreview file={attachment} own/><button type="button" className="text-[#9da0a8] hover:text-white" onClick={() => setAttachment(null)}>Remove</button></div>}</form></> : <div className="flex flex-1 flex-col items-center justify-center p-8 text-center"><div className="grid h-16 w-16 place-items-center rounded-2xl bg-[#1688ff]/12 text-[#4aa3ff]"><MessageCircle size={30}/></div><h2 className="mt-5 text-xl font-semibold">Welcome to chat</h2><p className="mt-2 max-w-sm text-[#777a84]">Stay connected with your clients. Select a conversation from the list when you are ready.</p></div>}</section>
-    </Card>
-  </div>
+  const active =
+    user?.role === 'admin'
+      ? selectedUser
+        ? contacts.find(
+            (contact) =>
+              contact.id === selectedUser
+          )
+        : null
+      : contacts[0] || {
+          id: 'support',
+          name: 'Revnivo Support',
+          email: 'Technical support',
+          online: false,
+        }
+
+  const normalizedSearch =
+    search.trim().toLowerCase()
+
+  const visibleContacts =
+    contacts.filter((contact) =>
+      `${contact.name} ${contact.email} ${
+        contact.last_message || ''
+      }`
+        .toLowerCase()
+        .includes(normalizedSearch)
+    )
+
+  const ownSender =
+    user?.role === 'admin'
+      ? 'admin'
+      : 'user'
+
+  if (
+    loading &&
+    !contacts.length
+  ) {
+    return (
+      <Loading label="Loading support chat..." />
+    )
+  }
+
+  return (
+    <div
+      className="-mx-4 -my-4 flex h-[calc(100dvh-4rem)] min-h-0 w-[calc(100%+2rem)] flex-col overflow-hidden md:-mx-6 md:-my-6 md:w-[calc(100%+3rem)] lg:-mx-8 lg:-my-8 lg:w-[calc(100%+4rem)]"
+      onClick={() =>
+        contextMenu &&
+        setContextMenu(null)
+      }
+    >
+      {/* Message context menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-70 w-44 max-w-[calc(100vw-1rem)] rounded-xl border border-divider bg-content1 p-1 text-foreground shadow-2xl"
+          style={{
+            left: contextMenu.x,
+            top: contextMenu.y,
+          }}
+          onClick={(event) =>
+            event.stopPropagation()
+          }
+        >
+          <button
+            className="block w-full rounded-lg px-3 py-2 text-left text-xs text-foreground transition-colors hover:bg-default-100"
+            onClick={() => {
+              setDeleteTarget({ id: contextMenu.id, mode: 'me' })
+              setContextMenu(null)
+            }}
+          >
+            Delete for me
+          </button>
+
+          {(contextMenu.isMine ?? (contextMenu.sender === ownSender)) && (
+            <button
+              className="block w-full rounded-lg px-3 py-2 text-left text-xs text-danger transition-colors hover:bg-danger/10"
+              onClick={() => {
+                setDeleteTarget({
+                  id: contextMenu.id,
+                  mode: 'everyone',
+                })
+                setContextMenu(null)
+              }}
+            >
+              Delete for everyone
+            </button>
+          )}
+        </div>
+      )}
+
+      <Card
+        radius="none"
+        className="grid h-full min-h-0 w-full flex-1 grid-cols-1 overflow-hidden rounded-none border-divider bg-content1 text-foreground shadow-none md:grid-cols-[280px_minmax(0,1fr)] lg:grid-cols-[300px_minmax(0,1fr)]"
+      >
+        {/* Contacts sidebar */}
+        <aside
+          className={`
+            h-full min-h-0 overflow-y-auto bg-content1 md:block md:border-r md:border-slate-200/80 dark:md:border-[#2b2d31]
+            ${
+              user?.role === 'admin'
+                ? selectedUser
+                  ? 'hidden'
+                  : 'block'
+                : 'hidden'
+            }
+          `}
+        >
+          <div className="sticky top-0 z-10 border-b border-divider bg-content1 p-3 sm:p-4">
+            <Input
+              aria-label="Search people"
+              placeholder="Search or start a chat..."
+              value={search}
+              onValueChange={setSearch}
+              startContent={
+                <Search
+                  size={16}
+                  className="text-default-400"
+                />
+              }
+              classNames={{
+                inputWrapper:
+                  'bg-default-100/70 border border-divider',
+                input:
+                  'text-foreground placeholder:text-default-400',
+              }}
+            />
+          </div>
+
+          <div className="divide-y divide-divider">
+            {!visibleContacts.length && (
+              <div className="px-4 py-10 text-center text-sm text-default-400">
+                {search.trim()
+                  ? 'No accounts match your search.'
+                  : 'No other accounts found.'}
+              </div>
+            )}
+
+            {visibleContacts.map(
+              (contact) => (
+                <button
+                  key={contact.id}
+                  onClick={() =>
+                    selectContact(
+                      contact
+                    )
+                  }
+                  className={`
+                    flex
+                    w-full
+                    items-center
+                    gap-3
+                    p-3 sm:p-3.5
+                    text-left
+                    transition-colors
+                    ${
+                      contact.unread_count >
+                      0
+                        ? 'chat-contact-new'
+                        : ''
+                    }
+                    ${
+                      active?.id ===
+                      contact.id
+                        ? 'bg-primary/10'
+                        : 'hover:bg-default-100/70'
+                    }
+                  `}
+                >
+                  <div className="relative">
+                    <Avatar
+                      user={contact}
+                    />
+
+                    <span
+                      className={`
+                        absolute
+                        bottom-0
+                        right-0
+                        h-3
+                        w-3
+                        rounded-full
+                        border-2
+                        border-content1
+                        ${
+                          contact.online
+                            ? 'bg-success'
+                            : 'bg-default-400'
+                        }
+                      `}
+                    />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="truncate text-sm font-semibold text-foreground">
+                        {contact.name}
+                      </div>
+
+                      {contact.last_message_at && (
+                        <time className="shrink-0 text-[10px] text-default-400">
+                          {formatTime(contact.last_message_at, 'en-EG', {
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })}
+                        </time>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <div
+                        className={`
+                          flex
+                          items-center
+                          gap-1
+                          truncate
+                          text-xs
+                          ${
+                            contact.recording || contact.typing
+                              ? 'text-primary'
+                              : 'text-default-500'
+                          }
+                        `}
+                      >
+                        {contact.recording ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <Mic size={13} />
+                            Recording voice...
+                          </span>
+                        ) : contact.typing ? (
+                          <>
+                            <span>
+                              typing
+                            </span>
+
+                            <span className="typing-dots">
+                              <i />
+                              <i />
+                              <i />
+                            </span>
+                          </>
+                        ) : (
+                          contact.last_message ||
+                          'No messages yet'
+                        )}
+                      </div>
+
+                      {contact.unread_count >
+                        0 && (
+                        <Chip
+                          size="sm"
+                          color="primary"
+                          variant="solid"
+                          className="h-5 min-w-5 px-1 text-[10px]"
+                        >
+                          {
+                            contact.unread_count
+                          }
+                        </Chip>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              )
+            )}
+          </div>
+        </aside>
+
+        {/* Active chat */}
+        <section
+          className={`
+            h-full min-h-0 flex-col bg-background md:flex
+            ${user?.role === 'admin' && !selectedUser ? 'hidden' : 'flex'}
+          `}
+        >
+          {active ? (
+            <>
+              {/* Chat header */}
+              <div className="flex min-h-16 shrink-0 items-center gap-2 border-b border-divider bg-content1 px-3 py-2.5 sm:gap-3 sm:p-4">
+                {user?.role === 'admin' && (
+                  <Button
+                    isIconOnly
+                    size="sm"
+                    variant="light"
+                    className="-ml-1 h-9 w-9 min-w-9 md:hidden"
+                    onPress={() => {
+                      setSelectedUser('')
+                      setMessages([])
+                      lastMessageIdRef.current = null
+                    }}
+                    aria-label="Back to chats"
+                    title="Back to chats"
+                  >
+                    <ChevronLeft size={20} />
+                  </Button>
+                )}
+
+                <div className="relative">
+                  <Avatar
+                    user={active}
+                    showSupportLogo={
+                      user?.role !== 'admin'
+                    }
+                  />
+
+                  <span
+                    className={`
+                      absolute
+                      bottom-0
+                      right-0
+                      h-3
+                      w-3
+                      rounded-full
+                      border-2
+                      border-content1
+                      ${
+                        active.online
+                          ? 'bg-success'
+                          : 'bg-default-400'
+                      }
+                    `}
+                  />
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-foreground">
+                    {active.name}
+                  </div>
+
+                  <div className={`text-xs ${active.recording || active.typing ? 'text-primary' : 'text-default-500'}`}>
+                    {active.recording
+                      ? 'Recording voice...'
+                      : active.typing
+                        ? 'Typing...'
+                        : active.online
+                          ? 'Online now'
+                          : 'Offline'}
+                  </div>
+                </div>
+
+                {user?.role === 'admin' && (
+                  <Button
+                    isIconOnly
+                    size="sm"
+                    variant="light"
+                    color="danger"
+                    className="ml-1 shrink-0"
+                    onPress={() => setClearChatOpen(true)}
+                    aria-label="Delete chat"
+                    title="Delete chat"
+                  >
+                    <Trash2 size={17} />
+                  </Button>
+                )}
+              </div>
+
+              {/* Messages */}
+              <div
+                ref={messageListRef}
+                className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-background px-3 py-4 sm:p-5"
+              >
+                {messages.length ? (
+                  <div className="flex min-h-full flex-col justify-end">
+                    {messages.map(
+                      (
+                        message,
+                        index
+                      ) => {
+                        const own =
+                          typeof message.is_mine === 'boolean'
+                            ? message.is_mine
+                            : message.sender === ownSender
+
+                        const previous =
+                          messages[
+                            index - 1
+                          ]
+
+                        const next =
+                          messages[
+                            index + 1
+                          ]
+
+                        const previousOwn =
+                          previous
+                            ? typeof previous.is_mine === 'boolean'
+                              ? previous.is_mine
+                              : previous.sender === ownSender
+                            : null
+
+                        const nextOwn =
+                          next
+                            ? typeof next.is_mine === 'boolean'
+                              ? next.is_mine
+                              : next.sender === ownSender
+                            : null
+
+                        const sameDayAsPrevious =
+                          previous &&
+                          isSameCalendarDay(
+                            previous.created_at,
+                            message.created_at
+                          )
+
+                        const sameDayAsNext =
+                          next &&
+                          isSameCalendarDay(
+                            next.created_at,
+                            message.created_at
+                          )
+
+                        const previousSameSender =
+                          Boolean(previous) &&
+                          previousOwn === own &&
+                          sameDayAsPrevious
+
+                        const nextSameSender =
+                          Boolean(next) &&
+                          nextOwn === own &&
+                          sameDayAsNext
+
+                        const showDateLabel =
+                          !sameDayAsPrevious
+
+                        /*
+                         * Only the last message in a consecutive sender group
+                         * displays the avatar. A new date starts a new group.
+                         */
+                        const showAvatar =
+                          !nextSameSender
+
+                        return (
+                          <div key={message.id}>
+                            {showDateLabel && (
+                              <div className="my-4 flex items-center justify-center sm:my-5">
+                                <span className="rounded-full bg-default-100 px-3 py-1 text-[11px] font-medium text-default-500 ring-1 ring-inset ring-divider">
+                                  {getMessageDateLabel(
+                                    message.created_at
+                                  )}
+                                </span>
+                              </div>
+                            )}
+
+                            <div
+                              onContextMenu={(
+                                event
+                              ) => {
+                                event.preventDefault()
+
+                                setContextMenu(
+                                  {
+                                    id: message.id,
+                                    sender: message.sender,
+                                    isMine: own,
+                                    x: event.clientX,
+                                    y: event.clientY,
+                                  }
+                                )
+                              }}
+                              className={`
+                                flex
+                                items-end
+                                gap-3
+                                ${
+                                  own
+                                    ? 'flex-row-reverse'
+                                    : ''
+                                }
+                                ${
+                                  previousSameSender
+                                    ? 'mt-1.5'
+                                    : showDateLabel
+                                      ? 'mt-0'
+                                      : 'mt-4'
+                                }
+                              `}
+                            >
+                            {showAvatar ? (
+                              <Avatar
+                                user={
+                                  own
+                                    ? user
+                                    : active
+                                }
+                                showSupportLogo={
+                                  user?.role !== 'admin' &&
+                                  !own
+                                }
+                              />
+                            ) : (
+                              <div
+                                aria-hidden="true"
+                                className="h-10 w-10 shrink-0"
+                              />
+                            )}
+
+                            <div
+                              className={`
+                                flex
+                                max-w-[88%]
+                                sm:max-w-[80%]
+                                flex-col
+                                ${
+                                  own
+                                    ? 'items-end'
+                                    : 'items-start'
+                                }
+                              `}
+                            >
+                              <div
+                                className={`
+                                  rounded-2xl
+                                  px-3
+                                  py-2.5
+                                  sm:px-4
+                                  sm:py-3
+                                  text-sm
+                                  shadow-sm
+                                  ${
+                                    own
+                                      ? `
+                                        bg-[#60B8FF]
+                                        text-white
+                                        dark:bg-[#1688ff]
+                                        dark:text-white
+                                        ${
+                                          showAvatar
+                                            ? 'rounded-br-sm'
+                                            : ''
+                                        }
+                                      `
+                                      : `
+                                        bg-[#E7E9ED]
+                                        text-[#111318]
+                                        dark:bg-[#1b1c21]
+                                        dark:text-[#e1e2e5]
+                                        ${
+                                          showAvatar
+                                            ? 'rounded-bl-sm'
+                                            : ''
+                                        }
+                                      `
+                                  }
+                                `}
+                              >
+                                {message.deleted ? (
+                                  <p className="italic opacity-60">
+                                    {message.deleted_by_me
+                                      ? 'You deleted this message'
+                                      : 'This message was deleted'}
+                                  </p>
+                                ) : (
+                                  <>
+                                    {message.content && (
+                                      <p
+                                        className={`
+                                          whitespace-pre-wrap
+                                          wrap-break-word
+                                          ${
+                                            message.message_type ===
+                                            'sticker'
+                                              ? 'text-5xl'
+                                              : ''
+                                          }
+                                        `}
+                                      >
+                                        {message.content}
+                                      </p>
+                                    )}
+
+                                    <AttachmentPreview
+                                      url={
+                                        message.attachment_url
+                                      }
+                                      own={own}
+                                      messageType={message.message_type}
+                                    />
+                                  </>
+                                )}
+
+                                <div
+                                  className={`
+                                    mt-1.5
+                                    flex
+                                    justify-end
+                                    text-[10px]
+                                    leading-none
+                                    ${
+                                      own
+                                        ? 'text-white/75'
+                                        : 'text-black/55 dark:text-white/55'
+                                    }
+                                  `}
+                                >
+                                  <time>
+                                    {formatMessageTime(
+                                      message.created_at
+                                    )}
+                                  </time>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        )
+                      }
+                    )}
+
+                    {active.recording ? (
+                      <div className="mt-3 flex items-center gap-2 text-xs font-medium text-primary">
+                        <Mic size={14} />
+                        Recording voice...
+                      </div>
+                    ) : active.typing ? (
+                      <div className="mt-3 flex items-center gap-2 text-xs text-primary">
+                        typing
+
+                        <span className="typing-dots">
+                          <i />
+                          <i />
+                          <i />
+                        </span>
+                      </div>
+                    ) : null}
+
+                    <div
+                      ref={messagesEndRef}
+                      className="h-px"
+                    />
+                  </div>
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-default-500">
+                    No messages yet.
+                  </div>
+                )}
+              </div>
+
+              {/* Composer */}
+              <form
+                onSubmit={send}
+                className="shrink-0 border-t border-divider bg-content1 px-2.5 pb-[max(.625rem,env(safe-area-inset-bottom))] pt-2.5 sm:p-3"
+              >
+                <div className="relative flex min-w-0 items-end">
+                  <div className="absolute bottom-2 left-2 z-10 flex items-center gap-1">
+                    <label className="grid h-8 w-8 cursor-pointer place-items-center rounded-full text-default-500 transition-colors hover:bg-default-100 hover:text-foreground">
+                      <Paperclip
+                        size={18}
+                      />
+
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,application/pdf,audio/webm,audio/ogg,audio/mpeg,audio/mp4,text/plain,text/csv"
+                        className="hidden"
+                        onChange={(
+                          event
+                        ) =>
+                          setAttachment(
+                            event
+                              .target
+                              .files?.[0] ||
+                              null
+                          )
+                        }
+                      />
+                    </label>
+
+                    <Button
+                      isIconOnly
+                      size="sm"
+                      variant="light"
+                      className="h-8 w-8 min-w-8 text-default-500"
+                      onPress={() =>
+                        setEmojiOpen(
+                          !emojiOpen
+                        )
+                      }
+                      aria-label="Emoji"
+                    >
+                      <Smile
+                        size={18}
+                      />
+                    </Button>
+                  </div>
+
+                  <Textarea
+                    aria-label="Message"
+                    value={content}
+                    onValueChange={
+                      updateTyping
+                    }
+                    onKeyDown={(
+                      event
+                    ) => {
+                      if (
+                        event.key ===
+                          'Enter' &&
+                        !event.shiftKey
+                      ) {
+                        event.preventDefault()
+                        send(event)
+                      }
+                    }}
+                    placeholder={
+                      recording
+                        ? 'Recording voice message...'
+                        : 'Type a message'
+                    }
+                    minRows={1}
+                    maxRows={4}
+                    className="w-full"
+                    classNames={{
+                      inputWrapper:
+                        'bg-default-100 border border-divider min-h-12 pr-11 pl-20 sm:pl-20',
+                      input:
+                        'text-foreground placeholder:text-default-400',
+                    }}
+                  />
+
+                  <Button
+                    isIconOnly
+                    type="button"
+                    onPress={
+                      startRecording
+                    }
+                    color={
+                      recording
+                        ? 'danger'
+                        : 'default'
+                    }
+                    variant="light"
+                    className="absolute bottom-2 right-2 z-10 h-8 w-8 min-w-8 text-default-600"
+                    aria-label="Record voice"
+                  >
+                    <Mic size={18} />
+                  </Button>
+                </div>
+
+                {emojiOpen && (
+                  <div className="mt-2 flex flex-wrap gap-2 rounded-xl border border-divider bg-default-100 p-2">
+                    {[
+                      '😀',
+                      '😂',
+                      '😍',
+                      '👍',
+                      '🙏',
+                      '🔥',
+                      '🎉',
+                      '❤️',
+                    ].map(
+                      (item) => (
+                        <button
+                          type="button"
+                          key={item}
+                          className="text-2xl transition hover:scale-125"
+                          onClick={() =>
+                            updateTyping(
+                              `${content}${item}`
+                            )
+                          }
+                        >
+                          {item}
+                        </button>
+                      )
+                    )}
+                  </div>
+                )}
+
+                {attachment && (
+                  <div className="mt-2 flex items-center gap-2 text-xs text-default-500">
+                    <AttachmentPreview
+                      file={
+                        attachment
+                      }
+                      own
+                    />
+
+                    <button
+                      type="button"
+                      className="text-default-500 transition-colors hover:text-foreground"
+                      onClick={() =>
+                        setAttachment(
+                          null
+                        )
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+              </form>
+            </>
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
+              <div className="grid h-16 w-16 place-items-center rounded-2xl bg-primary/10 text-primary">
+                <MessageCircle
+                  size={30}
+                />
+              </div>
+
+              <h2 className="mt-5 text-xl font-semibold text-foreground">
+                Welcome to chat
+              </h2>
+
+              <p className="mt-2 max-w-sm text-default-500">
+                Stay connected with
+                your clients. Select a
+                conversation from the
+                list when you are
+                ready.
+              </p>
+            </div>
+          )}
+        </section>
+      </Card>
+      <ConfirmDeleteModal
+        open={clearChatOpen}
+        onClose={() => setClearChatOpen(false)}
+        onConfirm={clearConversation}
+        loading={deleting}
+        title="Delete this chat?"
+        message={`Delete the entire conversation with ${active?.name || 'this user'}? All messages and chat attachments will be removed from the database.`}
+      />
+
+      <ConfirmDeleteModal
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteMessage(deleteTarget.id, deleteTarget.mode)}
+        loading={deleting}
+        title={deleteTarget?.mode === 'everyone' ? 'Delete for everyone?' : 'Delete message?'}
+        message={deleteTarget?.mode === 'everyone' ? 'This message will be removed for everyone in the conversation.' : 'This message will be hidden from your view.'}
+      />
+    </div>
+  )
 }
