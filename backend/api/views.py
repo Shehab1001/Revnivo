@@ -163,11 +163,8 @@ def admin_contact_message_query(db, viewer, contact):
 
     support_admin_id = contact.get("support_admin_id")
     owns_legacy_support = (
-        support_admin_id == owner
-        or (
-            not support_admin_id
-            and is_superadmin_doc(viewer)
-        )
+        is_superadmin_doc(viewer)
+        or support_admin_id == owner
     )
 
     if owns_legacy_support:
@@ -200,11 +197,8 @@ def message_visible_to_admin(message, viewer, db):
 
     support_admin_id = contact.get("support_admin_id")
     return bool(
-        support_admin_id == viewer["_id"]
-        or (
-            not support_admin_id
-            and is_superadmin_doc(viewer)
-        )
+        is_superadmin_doc(viewer)
+        or support_admin_id == viewer["_id"]
     )
 
 
