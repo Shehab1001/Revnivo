@@ -197,7 +197,7 @@ def _cloudinary_upload_bytes(data, folder, extension):
     stream = BytesIO(data)
     stream.name = f"upload{extension or ''}"
 
-    delivery_type = "authenticated" if safe_folder in {"chat", "notes"} else "upload"
+    delivery_type = "authenticated" if safe_folder in {"chat", "notes", "applications"} else "upload"
     public_id = f"{settings.CLOUDINARY_FOLDER}/{safe_folder}/{uuid.uuid4().hex}"
 
     try:
@@ -448,20 +448,21 @@ def save_upload(uploaded_file, folder="uploads"):
     if folder in {"profiles", "platforms"}:
         return _save_image(uploaded_file, folder)
 
-    is_note = str(folder).strip().strip("/") == "notes"
-    max_bytes = MAX_NOTE_BYTES if is_note else MAX_CHAT_BYTES
+    normalized_folder = str(folder).strip().strip("/")
+    is_document_upload = normalized_folder in {"notes", "applications"}
+    max_bytes = MAX_NOTE_BYTES if is_document_upload else MAX_CHAT_BYTES
     data = _read_upload(uploaded_file, max_bytes)
     mime = str(getattr(uploaded_file, "content_type", "") or "").split(";", 1)[0].lower()
 
     if mime in IMAGE_MIME_TYPES:
         return _save_image(uploaded_file, folder)
 
-    file_types = NOTE_FILE_TYPES if is_note else CHAT_FILE_TYPES
-    validator = _validate_note_file if is_note else _validate_chat_file
+    file_types = NOTE_FILE_TYPES if is_document_upload else CHAT_FILE_TYPES
+    validator = _validate_note_file if is_document_upload else _validate_chat_file
     extension = file_types.get(mime)
 
     if not extension or not validator(data, mime):
-        if is_note:
+        if is_document_upload:
             raise ValidationError(
                 "Unsupported note attachment. Allowed: images, PDF, Word, Excel, PowerPoint, MP4/WebM video, audio, TXT, and CSV."
             )
@@ -479,7 +480,7 @@ def resolve_upload_path(relative_path):
     relative = str(relative_path).replace("\\", "/").lstrip("/")
     roots = []
 
-    if relative.startswith(("chat/", "notes/")):
+    if relative.startswith(("chat/", "notes/", "applications/")):
         roots.append(Path(settings.PRIVATE_MEDIA_ROOT).resolve())
         # Legacy fallback for chat files created before private-media hardening.
         roots.append(Path(settings.MEDIA_ROOT).resolve())
