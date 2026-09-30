@@ -898,7 +898,7 @@ export default function Notes() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-5">
+    <div className="min-w-0 max-w-full overflow-x-hidden space-y-4 sm:space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
@@ -932,8 +932,8 @@ export default function Notes() {
         </div>
       )}
 
-      <div className="grid overflow-hidden rounded-2xl border border-default-200/70 bg-content1 shadow-sm dark:border-white/8 lg:min-h-[70vh] lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="flex min-h-0 flex-col border-b border-divider bg-default-50/55 dark:bg-white/[0.015] lg:border-b-0 lg:border-r">
+      <div className="grid min-w-0 max-w-full overflow-hidden rounded-2xl border border-default-200/70 bg-content1 shadow-sm dark:border-white/8 lg:min-h-[70vh] lg:grid-cols-[280px_minmax(0,1fr)]">
+        <aside className="flex min-h-0 min-w-0 max-w-full flex-col overflow-hidden border-b border-divider bg-default-50/55 dark:bg-white/[0.015] lg:border-b-0 lg:border-r">
           <div className="p-3">
             <Input
               aria-label="Search notes"
@@ -951,14 +951,14 @@ export default function Notes() {
             />
           </div>
 
-          <div className="notes-list flex max-h-none flex-1 gap-2 overflow-x-auto border-t border-divider p-2 lg:block lg:max-h-none lg:overflow-y-auto lg:p-0">
+          <div className="notes-list max-h-[210px] flex-1 overflow-y-auto overflow-x-hidden border-t border-divider p-2 lg:max-h-none lg:p-0">
             {items.length ? (
               items.map((note) => (
                 <button
                   key={note.id}
                   type="button"
                   onClick={() => setActiveId(note.id)}
-                  className={`group flex min-w-[220px] max-w-[260px] items-start gap-3 rounded-xl border border-divider/70 px-3 py-3 text-left transition lg:max-w-none lg:min-w-0 lg:w-full lg:rounded-none lg:border-x-0 lg:border-t-0 ${
+                  className={`group flex w-full min-w-0 items-start gap-3 rounded-xl border border-divider/70 px-3 py-2.5 text-left transition lg:rounded-none lg:border-x-0 lg:border-t-0 lg:py-3 ${
                     activeId === note.id
                       ? 'bg-primary/8'
                       : 'hover:bg-default-100/70 dark:hover:bg-white/[0.03]'
@@ -1017,7 +1017,7 @@ export default function Notes() {
           </div>
         </aside>
 
-        <main className="min-w-0 bg-content1">
+        <main className="min-w-0 max-w-full overflow-hidden bg-content1">
           {activeNote ? (
             <div
               className={`relative flex min-h-[55vh] flex-col transition sm:min-h-[60vh] lg:min-h-[70vh] ${
@@ -1095,7 +1095,7 @@ export default function Notes() {
               )}
 
               <div className="border-b border-divider px-3 py-2.5 sm:px-7 sm:py-3">
-                <div className="notes-toolbar flex items-center gap-1 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0">
+                <div className="notes-toolbar flex min-w-0 flex-wrap items-center gap-1">
                   <ToolbarButton
                     label="Heading 1"
                     icon={Heading1}
@@ -1110,7 +1110,7 @@ export default function Notes() {
                       formatBlock('h2')
                     }
                   />
-                  <span className="mx-1 h-5 w-px shrink-0 bg-divider" />
+                  <span className="mx-0.5 h-5 w-px shrink-0 bg-divider sm:mx-1" />
                   <ToolbarButton
                     label="Bold"
                     icon={Bold}
@@ -1132,7 +1132,7 @@ export default function Notes() {
                       runCommand('underline')
                     }
                   />
-                  <span className="mx-1 h-5 w-px shrink-0 bg-divider" />
+                  <span className="mx-0.5 h-5 w-px shrink-0 bg-divider sm:mx-1" />
                   <ToolbarButton
                     label="Bulleted list"
                     icon={List}
@@ -1166,7 +1166,7 @@ export default function Notes() {
                     }
                   />
 
-                  <span className="mx-1 h-5 w-px shrink-0 bg-divider" />
+                  <span className="mx-0.5 h-5 w-px shrink-0 bg-divider sm:mx-1" />
 
                   <input
                     ref={fileInputRef}
@@ -1198,7 +1198,7 @@ export default function Notes() {
                     Attach
                   </Button>
 
-                  <div className="ml-auto shrink-0 pl-2">
+                  <div className="ml-auto shrink-0 pl-1 sm:pl-2">
                     <Chip
                       size="sm"
                       variant="flat"
@@ -1217,7 +1217,7 @@ export default function Notes() {
               </div>
 
               {selectedAttachmentId && (
-                <div className="notes-attachment-controls flex items-center gap-2 overflow-x-auto border-b border-divider bg-default-50/60 px-3 py-2 dark:bg-white/[0.02] sm:flex-wrap sm:px-7">
+                <div className="notes-attachment-controls flex min-w-0 flex-wrap items-center gap-2 overflow-hidden border-b border-divider bg-default-50/60 px-3 py-2 dark:bg-white/[0.02] sm:px-7">
                   <span className="mr-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-default-400">
                     Attachment size
                   </span>
@@ -1265,7 +1265,7 @@ export default function Notes() {
                 </div>
               )}
 
-              <div className="mx-auto w-full max-w-4xl flex-1 px-4 py-5 sm:px-8 sm:py-8 lg:px-10 lg:py-10">
+              <div className="mx-auto w-full min-w-0 max-w-4xl flex-1 overflow-hidden px-3 py-4 sm:px-8 sm:py-8 lg:px-10 lg:py-10">
                 <input
                   value={draftTitle}
                   onChange={(event) =>
@@ -1276,7 +1276,7 @@ export default function Notes() {
                   placeholder="Untitled"
                   dir={hasArabic(draftTitle) ? 'rtl' : 'ltr'}
                   style={{ textAlign: hasArabic(draftTitle) ? 'right' : 'left' }}
-                  className="w-full border-0 bg-transparent text-2xl font-bold tracking-tight text-foreground outline-none placeholder:text-default-300 sm:text-4xl"
+                  className="block w-full min-w-0 border-0 bg-transparent text-2xl font-bold tracking-tight text-foreground outline-none placeholder:text-default-300 sm:text-4xl"
                 />
 
                 <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-default-400">
@@ -1323,7 +1323,7 @@ export default function Notes() {
                     }
                   }}
                   data-placeholder="Start writing…"
-                  className={`note-editor mt-5 min-h-[240px] w-full max-w-full overflow-x-hidden text-[15px] leading-7 text-foreground outline-none sm:mt-7 sm:min-h-[300px] ${resizingAttachment ? 'select-none' : ''}`}
+                  className={`note-editor mt-4 min-h-[220px] w-full min-w-0 max-w-full overflow-x-hidden text-[15px] leading-7 text-foreground outline-none sm:mt-7 sm:min-h-[300px] ${resizingAttachment ? 'select-none' : ''}`}
                 />
 
 
