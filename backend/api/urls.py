@@ -2,6 +2,7 @@ from django.urls import path
 from . import views
 from . import jobs as job_views
 from . import applications as application_views
+from . import application_workspace as application_workspace_views
 
 urlpatterns = [
     path("health/", views.health),
@@ -31,6 +32,14 @@ urlpatterns = [
     path("applications/<str:application_id>/", application_views.application_detail),
     path("applications/<str:application_id>/status/", application_views.application_status),
     path("applications/<str:application_id>/events/", application_views.application_events),
+    path("applications/agenda/", application_workspace_views.application_agenda),
+    path("applications/analytics/", application_workspace_views.application_analytics),
+    path("applications/<str:application_id>/tasks/", application_workspace_views.application_tasks),
+    path("applications/<str:application_id>/tasks/<str:task_id>/", application_workspace_views.application_task_detail),
+    path("applications/<str:application_id>/interviews/", application_workspace_views.application_interviews),
+    path("applications/<str:application_id>/interviews/<str:interview_id>/", application_workspace_views.application_interview_detail),
+    path("applications/<str:application_id>/documents/", application_workspace_views.application_documents),
+    path("applications/<str:application_id>/documents/<str:document_id>/", application_workspace_views.application_document_detail),
     path("notes/", views.notes),
     path("notes/<str:note_id>/attachments/", views.note_attachments),
     path("notes/<str:note_id>/attachments/<str:attachment_id>/", views.note_attachment),
