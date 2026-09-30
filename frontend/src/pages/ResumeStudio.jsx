@@ -24,6 +24,7 @@ import {
   Save,
   SearchCheck,
   Sparkles,
+  WandSparkles,
   Trash2,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -35,6 +36,7 @@ const EDITOR_TABS = [
   { key: 'resume', label: 'Resume Builder', icon: FileText },
   { key: 'cover', label: 'Cover Letters', icon: FileCheck2 },
   { key: 'ats', label: 'ATS Match', icon: SearchCheck },
+  { key: 'matches', label: 'Job Matches', icon: WandSparkles },
   { key: 'versions', label: 'Versions', icon: History },
 ]
 
@@ -222,6 +224,9 @@ export default function ResumeStudio() {
   const [jobDescription, setJobDescription] = useState('')
   const [analysis, setAnalysis] = useState(null)
   const [analyzing, setAnalyzing] = useState(false)
+  const [jobMatches, setJobMatches] = useState([])
+  const [jobMatchMeta, setJobMatchMeta] = useState(null)
+  const [matchingJobs, setMatchingJobs] = useState(false)
 
   const loadLibrary = async () => {
     setLoading(true)
@@ -614,6 +619,35 @@ export default function ResumeStudio() {
       setAnalyzing(false)
     }
   }
+
+  const loadJobMatches = async () => {
+    if (!draft?.id) return
+
+    setMatchingJobs(true)
+    setError('')
+
+    try {
+      await saveResume()
+
+      const { data } = await api.get(
+        `/resumes/${draft.id}/job-matches/`,
+        {
+          params: { limit: 100 },
+        }
+      )
+
+      setJobMatches(data.matches || [])
+      setJobMatchMeta(data)
+    } catch (requestError) {
+      setError(
+        requestError.response?.data?.detail ||
+          'Could not calculate job matches.'
+      )
+    } finally {
+      setMatchingJobs(false)
+    }
+  }
+
 
   const updateProfile = (field, value) => {
     setDraft((current) => ({
@@ -2158,6 +2192,180 @@ export default function ResumeStudio() {
               </Card>
             )}
           </div>
+        </div>
+      )}
+
+      {tab === 'matches' && (
+        <div className="space-y-4">
+          <Card
+            shadow="none"
+            className="border border-default-200/80 bg-content1"
+          >
+            <CardBody className="gap-4 p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <h2 className="text-base font-semibold">
+                    Smart job recommendations
+                  </h2>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-default-500">
+                    Compare this resume with the jobs already loaded in
+                    Revnivo. Scores are relevance heuristics based on
+                    keyword and skill overlap, not hiring predictions.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Select
+                    className="min-w-56"
+                    label="Resume"
+                    selectedKeys={
+                      selectedId
+                        ? new Set([selectedId])
+                        : new Set([])
+                    }
+                    onSelectionChange={(keys) => {
+                      const id = String(
+                        Array.from(keys)[0] || ''
+                      )
+                      const resume = resumes.find(
+                        (item) => item.id === id
+                      )
+                      if (resume) {
+                        selectResume(resume)
+                      }
+                    }}
+                  >
+                    {resumes.map((resume) => (
+                      <SelectItem key={resume.id}>
+                        {resume.name}
+                      </SelectItem>
+                    ))}
+                  </Select>
+
+                  <Button
+                    color="primary"
+                    startContent={<WandSparkles size={15} />}
+                    isLoading={matchingJobs}
+                    onPress={loadJobMatches}
+                  >
+                    Find matches
+                  </Button>
+                </div>
+              </div>
+
+              {jobMatchMeta?.method && (
+                <div className="rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-default-500">
+                  Compared against {(jobMatchMeta.total_jobs || 0).toLocaleString()} loaded jobs.
+                </div>
+              )}
+            </CardBody>
+          </Card>
+
+          {jobMatches.length ? (
+            <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+              {jobMatches.map((item) => {
+                const job = item.job || {}
+
+                return (
+                  <Card
+                    key={job.id}
+                    shadow="none"
+                    className="border border-default-200/80 bg-content1"
+                  >
+                    <CardBody className="gap-3 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-default-400">
+                            {job.platform}
+                          </div>
+                          <h3 className="mt-1 line-clamp-2 text-sm font-semibold">
+                            {job.title}
+                          </h3>
+                        </div>
+
+                        <Chip
+                          color={
+                            item.score >= 60
+                              ? 'success'
+                              : item.score >= 35
+                                ? 'warning'
+                                : 'default'
+                          }
+                          variant="flat"
+                          size="sm"
+                        >
+                          {item.score}% match
+                        </Chip>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1">
+                        {(item.matched_skills || [])
+                          .slice(0, 5)
+                          .map((skill) => (
+                            <Chip
+                              key={skill}
+                              size="sm"
+                              variant="flat"
+                              color="primary"
+                              className="h-5 text-[10px]"
+                            >
+                              {skill}
+                            </Chip>
+                          ))}
+                      </div>
+
+                      {job.location && (
+                        <div className="text-xs text-default-500">
+                          {job.location}
+                        </div>
+                      )}
+
+                      {job.pay && (
+                        <div className="text-xs font-medium text-success">
+                          {job.pay}
+                        </div>
+                      )}
+
+                      <div className="mt-auto flex justify-end gap-2 border-t border-divider pt-3">
+                        <Button
+                          as="a"
+                          href={job.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          size="sm"
+                          color="primary"
+                          variant="flat"
+                        >
+                          View role
+                        </Button>
+                      </div>
+                    </CardBody>
+                  </Card>
+                )
+              })}
+            </div>
+          ) : (
+            <Card
+              shadow="none"
+              className="border border-default-200/80 bg-content1"
+            >
+              <CardBody className="grid min-h-56 place-items-center text-center">
+                <div>
+                  <WandSparkles
+                    size={34}
+                    className="mx-auto text-default-300"
+                  />
+                  <div className="mt-3 text-sm font-semibold">
+                    No recommendations yet
+                  </div>
+                  <p className="mt-1 max-w-md text-xs leading-5 text-default-500">
+                    Refresh the Jobs board, choose a resume, then run
+                    the match engine.
+                  </p>
+                </div>
+              </CardBody>
+            </Card>
+          )}
         </div>
       )}
 
