@@ -53,6 +53,3 @@ backups/
 dump/
 *.bson
 *.archive
-
-repo.bundle
-*.bundle
