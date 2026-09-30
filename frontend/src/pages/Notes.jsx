@@ -951,14 +951,14 @@ export default function Notes() {
             />
           </div>
 
-          <div className="max-h-[220px] flex-1 overflow-y-auto border-t border-divider sm:max-h-[280px] lg:max-h-none">
+          <div className="notes-list flex max-h-none flex-1 gap-2 overflow-x-auto border-t border-divider p-2 lg:block lg:max-h-none lg:overflow-y-auto lg:p-0">
             {items.length ? (
               items.map((note) => (
                 <button
                   key={note.id}
                   type="button"
                   onClick={() => setActiveId(note.id)}
-                  className={`group flex w-full items-start gap-3 border-b border-divider/70 px-3 py-3 text-left transition ${
+                  className={`group flex min-w-[220px] max-w-[260px] items-start gap-3 rounded-xl border border-divider/70 px-3 py-3 text-left transition lg:max-w-none lg:min-w-0 lg:w-full lg:rounded-none lg:border-x-0 lg:border-t-0 ${
                     activeId === note.id
                       ? 'bg-primary/8'
                       : 'hover:bg-default-100/70 dark:hover:bg-white/[0.03]'
@@ -986,17 +986,25 @@ export default function Notes() {
                     </span>
                   </span>
 
-                  <button
-                    type="button"
-                    className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-default-400 opacity-100 transition hover:bg-danger/10 hover:text-danger sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100"
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-default-400 opacity-100 transition hover:bg-danger/10 hover:text-danger lg:h-7 lg:w-7 lg:opacity-0 lg:group-hover:opacity-100"
                     onClick={(event) => {
                       event.stopPropagation()
                       setDeleteTarget(note)
                     }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        setDeleteTarget(note)
+                      }
+                    }}
                     aria-label="Delete note"
                   >
                     <Trash2 size={14} />
-                  </button>
+                  </span>
                 </button>
               ))
             ) : (
@@ -1221,6 +1229,7 @@ export default function Notes() {
                         size="sm"
                         variant="flat"
                         radius="lg"
+                        className={size === 100 ? 'shrink-0' : 'hidden shrink-0 sm:inline-flex'}
                         onPress={() =>
                           changeAttachmentWidth(
                             size
@@ -1238,7 +1247,7 @@ export default function Notes() {
                     size="sm"
                     variant="light"
                     color="danger"
-                    className="ml-auto"
+                    className="ml-auto shrink-0"
                     onPress={() => {
                       const attachment =
                         attachmentMap[
