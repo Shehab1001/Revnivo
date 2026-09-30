@@ -186,6 +186,12 @@ function PlatformCard({ source }) {
           {source.description}
         </p>
 
+        {source.error && (
+          <p className="rounded-lg border border-warning/20 bg-warning/5 px-2.5 py-2 text-[11px] leading-4 text-warning">
+            Source error: {source.error}
+          </p>
+        )}
+
         <div className="flex items-center justify-between gap-2">
           <Chip
             size="sm"
