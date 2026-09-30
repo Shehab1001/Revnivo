@@ -2359,9 +2359,12 @@ def support_chat_attachment(request, message_id):
         return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
 
     if message.get("conversation_key"):
-        if not is_admin_doc(viewer) or str(owner) not in set(message.get("participant_ids") or []):
+        if str(owner) not in set(message.get("participant_ids") or []):
             return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
-    elif not is_admin_doc(viewer) and message.get("user_id") != owner:
+    elif is_admin_doc(viewer):
+        if not message_visible_to_admin(message, viewer, db):
+            return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+    elif message.get("user_id") != owner:
         return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
 
     if owner in message.get("deleted_for", []):
@@ -2400,46 +2403,120 @@ def support_chat_attachment(request, message_id):
 def chat_presence(request):
     db = get_db()
     owner = owner_oid(request)
+    viewer = db.users.find_one({"_id": owner})
 
     if request.method == "POST":
         if request.data.get("offline"):
             db.users.update_one(
                 {"_id": owner},
-                {"$set": {
-                    "last_seen": None,
-                    "typing_until": None,
-                    "typing_for": None,
-                    "recording_until": None,
-                    "recording_for": None,
-                }},
+                {
+                    "$set": {
+                        "last_seen": None,
+                        "typing_until": None,
+                        "typing_for": None,
+                        "recording_until": None,
+                        "recording_for": None,
+                    }
+                },
             )
             return Response({"status": "offline"})
 
-        activity_for = request.data.get("user_id") if request.data.get("user_id") else "admin"
+        requested_target = oid(request.data.get("user_id"))
+        if is_admin_doc(viewer):
+            activity_for = (
+                str(requested_target)
+                if requested_target
+                else ""
+            )
+        else:
+            support_admin = _support_admin_from_user(
+                db,
+                viewer,
+            )
+            activity_for = (
+                str(support_admin["_id"])
+                if support_admin
+                else "admin"
+            )
 
         if "recording" in request.data:
-            is_recording = bool(request.data.get("recording"))
+            is_recording = bool(
+                request.data.get("recording")
+            )
             updates = {
-                "recording_until": utcnow() + timedelta(seconds=5) if is_recording else None,
-                "recording_for": str(activity_for) if is_recording else None,
+                "recording_until": (
+                    utcnow() + timedelta(seconds=5)
+                    if is_recording
+                    else None
+                ),
+                "recording_for": (
+                    activity_for
+                    if is_recording
+                    else None
+                ),
             }
             if is_recording:
-                updates.update({"typing_until": None, "typing_for": None})
-            db.users.update_one({"_id": owner}, {"$set": updates})
-            return Response({"status": "recording" if is_recording else "idle"})
+                updates.update(
+                    {
+                        "typing_until": None,
+                        "typing_for": None,
+                    }
+                )
+            db.users.update_one(
+                {"_id": owner},
+                {"$set": updates},
+            )
+            return Response(
+                {
+                    "status": (
+                        "recording"
+                        if is_recording
+                        else "idle"
+                    )
+                }
+            )
 
-        is_typing = bool(request.data.get("typing"))
+        is_typing = bool(
+            request.data.get("typing")
+        )
         updates = {
-            "typing_until": utcnow() + timedelta(seconds=4) if is_typing else None,
-            "typing_for": str(activity_for) if is_typing else None,
+            "typing_until": (
+                utcnow() + timedelta(seconds=4)
+                if is_typing
+                else None
+            ),
+            "typing_for": (
+                activity_for
+                if is_typing
+                else None
+            ),
         }
         if is_typing:
-            updates.update({"recording_until": None, "recording_for": None})
-        db.users.update_one({"_id": owner}, {"$set": updates})
-        return Response({"status": "typing" if is_typing else "idle"})
+            updates.update(
+                {
+                    "recording_until": None,
+                    "recording_for": None,
+                }
+            )
+        db.users.update_one(
+            {"_id": owner},
+            {"$set": updates},
+        )
+        return Response(
+            {
+                "status": (
+                    "typing"
+                    if is_typing
+                    else "idle"
+                )
+            }
+        )
 
-    db.users.update_one({"_id": owner}, {"$set": {"last_seen": utcnow()}})
-    viewer = db.users.find_one({"_id": owner})
+    db.users.update_one(
+        {"_id": owner},
+        {"$set": {"last_seen": utcnow()}},
+    )
+
     query = (
         {"role": "admin"}
         if not is_admin_doc(viewer)
@@ -2447,44 +2524,73 @@ def chat_presence(request):
     )
     people = []
 
-    for person in db.users.find(query).sort("created_at", DESCENDING):
-        if is_admin_doc(viewer) and not can_admin_chat_with(viewer, person):
+    for person in db.users.find(query).sort(
+        "created_at",
+        DESCENDING,
+    ):
+        if (
+            is_admin_doc(viewer)
+            and not can_admin_chat_with(viewer, person)
+        ):
             continue
+
         last_seen = person.get("last_seen")
         typing_until = person.get("typing_until")
         recording_until = person.get("recording_until")
 
         if last_seen and last_seen.tzinfo is None:
-            last_seen = last_seen.replace(tzinfo=timezone.utc)
+            last_seen = last_seen.replace(
+                tzinfo=timezone.utc
+            )
         if typing_until and typing_until.tzinfo is None:
-            typing_until = typing_until.replace(tzinfo=timezone.utc)
+            typing_until = typing_until.replace(
+                tzinfo=timezone.utc
+            )
         if recording_until and recording_until.tzinfo is None:
-            recording_until = recording_until.replace(tzinfo=timezone.utc)
+            recording_until = recording_until.replace(
+                tzinfo=timezone.utc
+            )
 
-        typing_for = str(person.get("typing_for") or "")
-        recording_for = str(person.get("recording_for") or "")
-        viewer_target = ("admin", str(owner))
+        typing_for = str(
+            person.get("typing_for") or ""
+        )
+        recording_for = str(
+            person.get("recording_for") or ""
+        )
 
         is_typing = bool(
             typing_until
             and utcnow() < typing_until
-            and typing_for in viewer_target
+            and typing_for == str(owner)
         )
         is_recording = bool(
             recording_until
             and utcnow() < recording_until
-            and recording_for in viewer_target
+            and recording_for == str(owner)
         )
 
-        people.append({
-            "id": str(person["_id"]),
-            "name": person.get("name") or person.get("email", ""),
-            "online": bool(last_seen and utcnow() - last_seen <= timedelta(minutes=2)),
-            "typing": is_typing and not is_recording,
-            "recording": is_recording,
-        })
+        people.append(
+            {
+                "id": str(person["_id"]),
+                "name": (
+                    person.get("name")
+                    or person.get("email", "")
+                ),
+                "online": bool(
+                    last_seen
+                    and utcnow() - last_seen
+                    <= timedelta(minutes=2)
+                ),
+                "typing": (
+                    is_typing
+                    and not is_recording
+                ),
+                "recording": is_recording,
+            }
+        )
 
     return Response(people)
+
 
 NOTE_ALLOWED_TAGS = {
     "p", "div", "br", "b", "strong", "i", "em", "u",
