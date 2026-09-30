@@ -16,6 +16,7 @@ import SupportChat from './pages/SupportChat'
 import Landing from './pages/Landing'
 import Jobs from './pages/Jobs'
 import Applications from './pages/Applications'
+import ApplicationWorkspace from './pages/ApplicationWorkspace'
 
 function Protected({ children }) {
   const { isAuthenticated, sessionChecked } = useAuth()
@@ -56,6 +57,7 @@ export default function App() {
         <Route path="/notes" element={<Notes/>}/>
         <Route path="/jobs" element={<Jobs/>}/>
         <Route path="/applications" element={<Applications/>}/>
+        <Route path="/applications/:applicationId" element={<ApplicationWorkspace/>}/>
         <Route path="/settings" element={<Settings/>}/>
         <Route path="/admin/users" element={<AdminUsers/>}/>
         <Route path="/admin/subscriptions" element={<Subscriptions/>}/>
