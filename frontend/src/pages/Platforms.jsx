@@ -81,6 +81,7 @@ function StatusPicker({
 
   return (
     <Popover
+      disableAnimation
       isOpen={open}
       onOpenChange={setOpen}
       placement="bottom-end"
