@@ -435,6 +435,7 @@ export default function Earnings() {
           />
 
           <Select
+          disableAnimation
             aria-label="Status"
             className="w-full sm:w-40"
             selectedKeys={new Set([statusFilter])}
@@ -783,6 +784,7 @@ export default function Earnings() {
           className="space-y-5"
         >
           <Select
+          disableAnimation
             label="Platform"
             isRequired
             size="md"
@@ -825,6 +827,7 @@ export default function Earnings() {
             />
 
             <Autocomplete
+          disableAnimation
               label="Currency"
               size="md"
               variant="flat"
@@ -899,6 +902,7 @@ export default function Earnings() {
           </div>
 
           <Select
+          disableAnimation
             label="Payment status"
             selectedKeys={
               new Set([form.status])
