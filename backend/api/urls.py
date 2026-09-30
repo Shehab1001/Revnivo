@@ -34,6 +34,7 @@ urlpatterns = [
     path("resumes/<str:resume_id>/versions/", resume_views.resume_versions),
     path("resumes/<str:resume_id>/versions/<str:version_id>/restore/", resume_views.resume_restore_version),
     path("resumes/<str:resume_id>/analyze/", resume_views.resume_analyze),
+    path("resumes/<str:resume_id>/job-matches/", resume_views.resume_job_matches),
     path("cover-letters/", resume_views.cover_letters),
     path("cover-letters/<str:cover_letter_id>/", resume_views.cover_letter_detail),
     path("applications/", application_views.applications),
