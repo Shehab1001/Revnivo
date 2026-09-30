@@ -1,6 +1,6 @@
 import { Bell, BarChart3, BriefcaseBusiness, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, CreditCard, DollarSign, FileText, FileUser, LogOut, Menu, MessageCircle, Moon, PanelLeft, PanelsTopLeft, Settings as SettingsIcon, Sun, Trash2, Users, WalletCards } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
 import api from '../services/api'
@@ -40,7 +40,6 @@ export default function AppShell() {
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
-  const location = useLocation()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [dashboardOpen, setDashboardOpen] = useState(true)
@@ -183,7 +182,7 @@ export default function AppShell() {
               if (collapsed) setCollapsed(false)
               setJobsOpen((open) => !open)
             }}
-            className={`${linkClass({ isActive: location.pathname.startsWith('/jobs') })} w-full ${collapsed ? 'justify-center' : ''}`}
+            className={`${linkClass({ isActive: false })} w-full ${collapsed ? 'justify-center' : ''}`}
             title="Jobs"
           >
             <BriefcaseBusiness size={18} />
