@@ -30,6 +30,7 @@ const statusLabel = {
   live: 'Live listings',
   browse: 'Browse official site',
   directory: 'Account-matched roles',
+  account_only: 'Sign in to view matched jobs',
   unavailable: 'Temporarily unavailable',
 }
 
@@ -37,6 +38,7 @@ const statusColor = {
   live: 'success',
   browse: 'primary',
   directory: 'secondary',
+  account_only: 'secondary',
   unavailable: 'warning',
 }
 
@@ -161,8 +163,10 @@ function PlatformCard({ source }) {
             </div>
             <div className="mt-0.5 text-xs text-default-400">
               {source.job_count
-                ? `${source.job_count} detected roles`
-                : 'Official opportunities page'}
+                ? `${source.job_count} public roles loaded`
+                : source.status === 'account_only'
+                  ? 'Jobs are personalized after sign-in'
+                  : 'No public roles detected right now'}
             </div>
           </div>
         </div>
@@ -336,9 +340,10 @@ export default function Jobs() {
             </h1>
 
             <p className="mt-2 max-w-2xl text-sm leading-6 text-default-500">
-              Browse public AI training and expert opportunities from
-              multiple platforms in one place. Always verify availability,
-              eligibility, and pay on the original platform before applying.
+              Browse the individual public roles currently exposed by
+              AI training and expert-work platforms in one place. Revnivo
+              loads each role as its own listing; platforms that only reveal
+              personalized jobs after sign-in are clearly marked below.
             </p>
           </div>
 
@@ -364,7 +369,7 @@ export default function Jobs() {
               {payload.total || 0}
             </div>
             <div className="mt-1 text-xs text-default-500">
-              Roles detected
+              Public roles loaded
             </div>
           </div>
 
@@ -382,7 +387,7 @@ export default function Jobs() {
               {payload.live_sources || 0}
             </div>
             <div className="mt-1 text-xs text-default-500">
-              Live sources responding
+              Sources with live roles
             </div>
           </div>
         </div>
@@ -553,12 +558,12 @@ export default function Jobs() {
               className="mx-auto text-default-300"
             />
             <div className="mt-3 text-sm font-semibold text-foreground">
-              No matching roles detected
+              No matching public roles
             </div>
             <p className="mx-auto mt-1 max-w-lg text-xs leading-5 text-default-500">
-              Try clearing filters, refreshing the feed, or use the
-              official platform links below. Some platforms only show
-              roles after sign-in or based on your profile.
+              Try clearing filters or refreshing the feed. If a platform
+              only reveals jobs after sign-in or profile matching, use its
+              official access card below.
             </p>
           </div>
         )}
@@ -570,7 +575,8 @@ export default function Jobs() {
             AI training platforms
           </h2>
           <p className="mt-0.5 text-xs text-default-500">
-            Direct access to every platform currently tracked by Revnivo.
+            Source status, loaded role counts, and direct access for
+            platforms whose jobs are account-only.
           </p>
         </div>
 
