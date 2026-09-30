@@ -1738,6 +1738,53 @@ def payload_next_cursor(payload):
     return ""
 
 
+def discover_alignerr_openapi_endpoints():
+    endpoints = []
+    seen = set()
+    specs = [
+        "https://api.alignerr.com/openapi.json",
+        "https://api.alignerr.com/swagger.json",
+        "https://api.alignerr.com/api-docs",
+        "https://api.alignerr.com/v1/openapi.json",
+    ]
+
+    for spec_url in specs:
+        try:
+            payload = request_json(spec_url)
+        except (
+            requests.RequestException,
+            ValueError,
+            json.JSONDecodeError,
+        ):
+            continue
+
+        paths = payload.get("paths")
+        if not isinstance(paths, dict):
+            continue
+
+        for path, operations in paths.items():
+            if not isinstance(path, str):
+                continue
+            lowered = path.lower()
+            if not any(
+                word in lowered
+                for word in ("job", "role", "opportun", "listing", "position")
+            ):
+                continue
+            if isinstance(operations, dict) and "get" not in operations:
+                continue
+
+            endpoint = urljoin(
+                "https://api.alignerr.com/",
+                path.lstrip("/"),
+            )
+            if "{" in endpoint or endpoint in seen:
+                continue
+            seen.add(endpoint)
+            endpoints.append(endpoint)
+
+    return endpoints
+
 def alignerr_fallback_endpoints():
     return [
         "https://api.alignerr.com/jobs",
