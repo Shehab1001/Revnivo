@@ -1003,7 +1003,7 @@ def parse_text_salary_roles(source, soup):
     return jobs
 
 
-def dedupe_jobs(jobs):
+def dedupe_jobs(jobs, max_items=None):
     result = []
     seen = set()
 
@@ -1024,7 +1024,7 @@ def dedupe_jobs(jobs):
         seen.add(key)
         result.append(job)
 
-        if len(result) >= MAX_JOBS_PER_SOURCE:
+        if max_items and len(result) >= max_items:
             break
 
     return result
@@ -1073,7 +1073,7 @@ def parse_public_page(source, url):
         parse_text_salary_roles(source, soup)
     )
 
-    return dedupe_jobs(jobs)
+    return dedupe_jobs(jobs, MAX_JOBS_PER_SOURCE)
 
 
 def fetch_public_source(source):
@@ -1098,7 +1098,7 @@ def fetch_public_source(source):
                 f"{urlparse(url).netloc}: {exc.__class__.__name__}"
             )
 
-    jobs = dedupe_jobs(jobs)
+    jobs = dedupe_jobs(jobs, MAX_JOBS_PER_SOURCE)
 
     return {
         **source,
@@ -1163,7 +1163,7 @@ def fetch_ashby_source(source):
         return {
             **source,
             "status": "live" if jobs else "browse",
-            "jobs": dedupe_jobs(jobs),
+            "jobs": dedupe_jobs(jobs, MAX_JOBS_PER_SOURCE),
             "error": "",
         }
     except (
@@ -1212,7 +1212,7 @@ def fetch_telus_source(source):
             )
             before = len(jobs)
             jobs.extend(page_jobs)
-            jobs = dedupe_jobs(jobs)
+            jobs = dedupe_jobs(jobs, MAX_JOBS_PER_SOURCE)
 
             if len(jobs) == before:
                 empty_pages += 1
@@ -1233,7 +1233,7 @@ def fetch_telus_source(source):
                 f"{url}: {exc.__class__.__name__}"
             )
 
-    jobs = dedupe_jobs(jobs)
+    jobs = dedupe_jobs(jobs, MAX_JOBS_PER_SOURCE)
 
     return {
         **source,
