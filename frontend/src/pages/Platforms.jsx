@@ -7,6 +7,9 @@ import {
   Chip,
   Input,
   Pagination,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Select,
   SelectItem,
 } from '@heroui/react'
@@ -48,6 +51,115 @@ const statusColors = {
   applied: 'primary',
   'under review': 'warning',
   'not active': 'danger',
+}
+
+const statusOptions = [
+  { key: 'working', label: 'Working' },
+  { key: 'applied', label: 'Applied' },
+  { key: 'under review', label: 'Under review' },
+  { key: 'not active', label: 'Not active' },
+]
+
+function StatusPicker({
+  platform,
+  onChange,
+  updating = false,
+  variant = 'bordered',
+}) {
+  const [open, setOpen] = useState(false)
+  const currentStatus = platform.status || 'not active'
+
+  const chooseStatus = async (status) => {
+    setOpen(false)
+
+    if (status === currentStatus || updating) {
+      return
+    }
+
+    await onChange(platform, status)
+  }
+
+  return (
+    <Popover
+      isOpen={open}
+      onOpenChange={setOpen}
+      placement="bottom-end"
+      showArrow
+      backdrop="transparent"
+    >
+      <PopoverTrigger>
+        <button
+          type="button"
+          draggable={false}
+          disabled={updating}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          className="rounded-full outline-none transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-primary/60 disabled:cursor-wait disabled:opacity-60"
+          aria-label={`Change ${platform.name} status`}
+        >
+          <Chip
+            size="sm"
+            radius="full"
+            variant={variant}
+            color={statusColors[currentStatus] || 'default'}
+            classNames={{
+              base: 'cursor-pointer border font-medium',
+              content: 'text-[12px] font-medium capitalize',
+            }}
+          >
+            {updating ? 'Updating…' : currentStatus}
+          </Chip>
+        </button>
+      </PopoverTrigger>
+
+      <PopoverContent className="w-44 rounded-2xl border border-default-200 bg-content1 p-1.5 shadow-xl dark:border-white/10 dark:bg-[#202023]">
+        <div className="w-full space-y-1">
+          {statusOptions.map((status) => {
+            const selected = status.key === currentStatus
+
+            return (
+              <button
+                key={status.key}
+                type="button"
+                onClick={() => chooseStatus(status.key)}
+                className={`
+                  flex
+                  w-full
+                  items-center
+                  justify-between
+                  rounded-xl
+                  px-3
+                  py-2
+                  text-left
+                  text-sm
+                  font-medium
+                  transition-colors
+                  ${
+                    selected
+                      ? 'bg-default-100 text-foreground dark:bg-white/10'
+                      : 'text-default-600 hover:bg-default-100 hover:text-foreground dark:text-zinc-300 dark:hover:bg-white/8'
+                  }
+                `}
+              >
+                <span>{status.label}</span>
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    status.key === 'working'
+                      ? 'bg-success'
+                      : status.key === 'applied'
+                        ? 'bg-primary'
+                        : status.key === 'under review'
+                          ? 'bg-warning'
+                          : 'bg-danger'
+                  }`}
+                />
+              </button>
+            )
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 const currencyOptions = getCurrencyOptions()
@@ -108,6 +220,8 @@ export default function Platforms() {
   const [tablePage, setTablePage] = useState(1)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleting, setDeleting] = useState(false)
+  const [statusUpdatingId, setStatusUpdatingId] = useState('')
+  const [statusError, setStatusError] = useState('')
 
   const tablePageSize = 8
 
@@ -195,6 +309,44 @@ export default function Platforms() {
   useEffect(() => {
     setTablePage((page) => Math.min(page, tablePages))
   }, [tablePages])
+
+  const updateStatus = async (platform, nextStatus) => {
+    const previousStatus = platform.status || 'not active'
+
+    if (previousStatus === nextStatus) return
+
+    setStatusUpdatingId(platform.id)
+    setStatusError('')
+
+    setItems((current) =>
+      current.map((item) =>
+        item.id === platform.id
+          ? { ...item, status: nextStatus }
+          : item
+      )
+    )
+
+    try {
+      await api.patch(`/platforms/${platform.id}/`, {
+        status: nextStatus,
+      })
+    } catch (err) {
+      setItems((current) =>
+        current.map((item) =>
+          item.id === platform.id
+            ? { ...item, status: previousStatus }
+            : item
+        )
+      )
+
+      setStatusError(
+        err.response?.data?.detail ||
+          'Could not update platform status.'
+      )
+    } finally {
+      setStatusUpdatingId('')
+    }
+  }
 
   const reorder = async (targetId) => {
     if (!draggedId || draggedId === targetId) return
@@ -360,18 +512,12 @@ export default function Platforms() {
                 </span>
               )}
 
-              <Chip
-                size="sm"
-                radius="full"
+              <StatusPicker
+                platform={platform}
+                onChange={updateStatus}
+                updating={statusUpdatingId === platform.id}
                 variant="bordered"
-                color={statusColors[platform.status] || 'default'}
-                classNames={{
-                  base: 'border font-medium',
-                  content: 'text-[12px] font-medium capitalize',
-                }}
-              >
-                {platform.status || 'not active'}
-              </Chip>
+              />
             </div>
           </CardBody>
         </Card>
@@ -479,14 +625,12 @@ export default function Platforms() {
                   </td>
 
                   <td className="px-5 py-3">
-                    <Chip
-                      size="sm"
-                      radius="full"
+                    <StatusPicker
+                      platform={platform}
+                      onChange={updateStatus}
+                      updating={statusUpdatingId === platform.id}
                       variant="flat"
-                      color={statusColors[platform.status] || 'default'}
-                    >
-                      {platform.status || 'not active'}
-                    </Chip>
+                    />
                   </td>
 
                   <td className="px-5 py-3">
@@ -753,6 +897,12 @@ export default function Platforms() {
           </Button>
         </div>
       </div>
+
+      {statusError && (
+        <div className="rounded-xl border border-danger/25 bg-danger/10 px-4 py-3 text-sm text-danger">
+          {statusError}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-col gap-3 sm:flex-row">
