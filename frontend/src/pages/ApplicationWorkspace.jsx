@@ -19,6 +19,7 @@ import {
   Download,
   ExternalLink,
   FileText,
+  FileUser,
   Mail,
   MapPin,
   Plus,
@@ -36,6 +37,7 @@ const TABS = [
   { key: 'tasks', label: 'Tasks' },
   { key: 'interviews', label: 'Interviews' },
   { key: 'documents', label: 'Documents' },
+  { key: 'materials', label: 'Resume & Letter' },
   { key: 'timeline', label: 'Timeline' },
 ]
 
@@ -141,6 +143,8 @@ export default function ApplicationWorkspace() {
   const [tasks, setTasks] = useState([])
   const [interviews, setInterviews] = useState([])
   const [documents, setDocuments] = useState([])
+  const [resumes, setResumes] = useState([])
+  const [coverLetters, setCoverLetters] = useState([])
 
   const [tab, setTab] = useState('overview')
   const [loading, setLoading] = useState(true)
@@ -181,6 +185,8 @@ export default function ApplicationWorkspace() {
     useState('')
   const [documentUploading, setDocumentUploading] =
     useState(false)
+  const [materialSaving, setMaterialSaving] =
+    useState(false)
 
   const loadWorkspace = async () => {
     setLoading(true)
@@ -192,6 +198,8 @@ export default function ApplicationWorkspace() {
         taskResponse,
         interviewResponse,
         documentResponse,
+        resumeResponse,
+        coverResponse,
       ] = await Promise.all([
         api.get(
           `/applications/${applicationId}/`
@@ -205,6 +213,8 @@ export default function ApplicationWorkspace() {
         api.get(
           `/applications/${applicationId}/documents/`
         ),
+        api.get('/resumes/'),
+        api.get('/cover-letters/'),
       ])
 
       setApplication(
@@ -217,6 +227,12 @@ export default function ApplicationWorkspace() {
       )
       setDocuments(
         documentResponse.data.documents || []
+      )
+      setResumes(
+        resumeResponse.data.resumes || []
+      )
+      setCoverLetters(
+        coverResponse.data.cover_letters || []
       )
     } catch (requestError) {
       setError(
@@ -490,6 +506,39 @@ export default function ApplicationWorkspace() {
         requestError.response?.data?.detail ||
           'Could not remove document.'
       )
+    }
+  }
+
+  const saveMaterials = async (
+    resumeId,
+    coverLetterId
+  ) => {
+    setMaterialSaving(true)
+    setError('')
+
+    try {
+      const { data } = await api.patch(
+        `/applications/${applicationId}/materials/`,
+        {
+          resume_id: resumeId || null,
+          cover_letter_id:
+            coverLetterId || null,
+        }
+      )
+
+      setApplication((current) => ({
+        ...current,
+        resume_id: data.resume_id || '',
+        cover_letter_id:
+          data.cover_letter_id || '',
+      }))
+    } catch (requestError) {
+      setError(
+        requestError.response?.data?.detail ||
+          'Could not link career materials.'
+      )
+    } finally {
+      setMaterialSaving(false)
     }
   }
 
@@ -1544,6 +1593,145 @@ export default function ApplicationWorkspace() {
                   detail="Upload the exact CV and supporting files used for this application."
                 />
               )}
+            </CardBody>
+          </Card>
+        </div>
+      )}
+
+      {tab === 'materials' && (
+        <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <Card
+            shadow="none"
+            className="border border-default-200/80 bg-content1"
+          >
+            <CardBody className="gap-4 p-5">
+              <div>
+                <h2 className="text-base font-semibold">
+                  Application materials
+                </h2>
+                <p className="mt-1 text-xs leading-5 text-default-500">
+                  Link the exact resume and cover letter used for this application.
+                </p>
+              </div>
+
+              <Select
+                label="Resume"
+                selectedKeys={
+                  application.resume_id
+                    ? new Set([
+                        application.resume_id,
+                      ])
+                    : new Set([])
+                }
+                onSelectionChange={(keys) => {
+                  const resumeId = String(
+                    Array.from(keys)[0] || ''
+                  )
+                  saveMaterials(
+                    resumeId,
+                    application.cover_letter_id
+                  )
+                }}
+                isDisabled={materialSaving}
+              >
+                {resumes.map((resume) => (
+                  <SelectItem key={resume.id}>
+                    {resume.name}
+                  </SelectItem>
+                ))}
+              </Select>
+
+              <Select
+                label="Cover letter"
+                selectedKeys={
+                  application.cover_letter_id
+                    ? new Set([
+                        application.cover_letter_id,
+                      ])
+                    : new Set([])
+                }
+                onSelectionChange={(keys) => {
+                  const coverId = String(
+                    Array.from(keys)[0] || ''
+                  )
+                  saveMaterials(
+                    application.resume_id,
+                    coverId
+                  )
+                }}
+                isDisabled={materialSaving}
+              >
+                {coverLetters.map((letter) => (
+                  <SelectItem key={letter.id}>
+                    {letter.name}
+                  </SelectItem>
+                ))}
+              </Select>
+
+              <Button
+                color="primary"
+                variant="flat"
+                startContent={<FileUser size={15} />}
+                onPress={() =>
+                  navigate('/jobs/resume-studio')
+                }
+              >
+                Open Resume Studio
+              </Button>
+            </CardBody>
+          </Card>
+
+          <Card
+            shadow="none"
+            className="border border-default-200/80 bg-content1"
+          >
+            <CardBody className="gap-4 p-5">
+              <div>
+                <h2 className="text-base font-semibold">
+                  Linked material summary
+                </h2>
+                <p className="mt-1 text-xs text-default-500">
+                  Keep a clear record of exactly what you submitted.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="rounded-xl border border-default-200 bg-default-50 p-4">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-default-400">
+                    Resume
+                  </div>
+                  <div className="mt-1 text-sm font-semibold">
+                    {
+                      resumes.find(
+                        (item) =>
+                          item.id ===
+                          application.resume_id
+                      )?.name ||
+                      'No resume linked'
+                    }
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-default-200 bg-default-50 p-4">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-default-400">
+                    Cover letter
+                  </div>
+                  <div className="mt-1 text-sm font-semibold">
+                    {
+                      coverLetters.find(
+                        (item) =>
+                          item.id ===
+                          application.cover_letter_id
+                      )?.name ||
+                      'No cover letter linked'
+                    }
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs leading-5 text-default-600">
+                  You can keep uploaded PDFs in Documents and also link the editable source version here.
+                </div>
+              </div>
             </CardBody>
           </Card>
         </div>
