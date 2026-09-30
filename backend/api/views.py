@@ -25,6 +25,7 @@ from django.core.mail import EmailMultiAlternatives
 from django.http import FileResponse, HttpResponse, HttpResponseRedirect
 from html import escape
 from html.parser import HTMLParser
+from google.auth.exceptions import GoogleAuthError
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from pymongo import ASCENDING, DESCENDING
@@ -899,49 +900,131 @@ def google_login(request):
         detail = "Invalid Google credential."
         if settings.DEBUG:
             try:
-                payload = json.loads(base64.urlsafe_b64decode(credential.split(".")[1] + "=="))
+                payload = json.loads(
+                    base64.urlsafe_b64decode(
+                        credential.split(".")[1] + "=="
+                    )
+                )
                 if payload.get("aud") != settings.GOOGLE_CLIENT_ID:
-                    detail = "Google credential audience does not match GOOGLE_CLIENT_ID. Restart both servers and verify the same Web client ID is used."
-                elif payload.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+                    detail = (
+                        "Google credential audience does not match "
+                        "GOOGLE_CLIENT_ID. Verify that frontend "
+                        "VITE_GOOGLE_CLIENT_ID and backend GOOGLE_CLIENT_ID "
+                        "use the same Web client ID."
+                    )
+                elif payload.get("iss") not in (
+                    "accounts.google.com",
+                    "https://accounts.google.com",
+                ):
                     detail = "Google credential has an invalid issuer."
-                elif payload.get("exp", 0) <= int(datetime.now(timezone.utc).timestamp()):
-                    detail = "Google credential has expired. Refresh the page and try again."
-                elif payload.get("iat", 0) > int(datetime.now(timezone.utc).timestamp()) + 300:
-                    detail = "Google credential starts in the future. Check your computer date and time."
+                elif payload.get("exp", 0) <= int(
+                    datetime.now(timezone.utc).timestamp()
+                ):
+                    detail = (
+                        "Google credential has expired. Refresh the page "
+                        "and try again."
+                    )
+                elif payload.get("iat", 0) > int(
+                    datetime.now(timezone.utc).timestamp()
+                ) + 300:
+                    detail = (
+                        "Google credential starts in the future. "
+                        "Check your computer date and time."
+                    )
                 else:
-                    detail = f"Google credential rejected: {type(exc).__name__}. Restart the backend and try again."
-            except (IndexError, TypeError, ValueError, binascii.Error, json.JSONDecodeError):
-                detail = "Google credential is malformed. Refresh the page and try again."
-        return Response({"detail": detail}, status=status.HTTP_401_UNAUTHORIZED)
+                    detail = (
+                        "Google rejected the credential. "
+                        f"Reason: {type(exc).__name__}."
+                    )
+            except (
+                IndexError,
+                TypeError,
+                ValueError,
+                binascii.Error,
+                json.JSONDecodeError,
+            ):
+                detail = (
+                    "Google credential is malformed. Refresh the page "
+                    "and try again."
+                )
+
+        return Response(
+            {"detail": detail},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+    except GoogleAuthError as exc:
+        detail = (
+            "Revnivo could not verify the Google credential because "
+            "Google verification services could not be reached."
+        )
+        if settings.DEBUG:
+            detail += f" ({type(exc).__name__})"
+
+        return Response(
+            {"detail": detail},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    except Exception as exc:
+        detail = "Google credential verification failed unexpectedly."
+        if settings.DEBUG:
+            detail += f" ({type(exc).__name__})"
+
+        return Response(
+            {"detail": detail},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
 
     email = google_user.get("email", "").strip().lower()
     if not email or not google_user.get("email_verified"):
         return Response({"detail": "Google account email is not verified."}, status=status.HTTP_401_UNAUTHORIZED)
 
-    db = get_db()
-    doc = db.users.find_one({"email": email})
-    if not doc:
-        name = google_user.get("name") or email.split("@", 1)[0]
-        try:
-            new_doc = create_user_doc(name, email, google_picture=google_user.get("picture", ""))
-            result = db.users.insert_one(new_doc)
-            doc = {"_id": result.inserted_id, **new_doc}
-        except DuplicateKeyError:
-            doc = db.users.find_one({"email": email})
-        for admin_doc in db.users.find({"role": "admin"}, {"_id": 1}):
-            create_notification(
-                "user",
-                "New user registered",
-                f"{email} created a Revnivo account.",
-                admin_doc["_id"],
+    try:
+        db = get_db()
+        doc = db.users.find_one({"email": email})
+
+        if not doc:
+            name = google_user.get("name") or email.split("@", 1)[0]
+            try:
+                new_doc = create_user_doc(
+                    name,
+                    email,
+                    google_picture=google_user.get("picture", ""),
+                )
+                result = db.users.insert_one(new_doc)
+                doc = {"_id": result.inserted_id, **new_doc}
+            except DuplicateKeyError:
+                doc = db.users.find_one({"email": email})
+
+            for admin_doc in db.users.find({"role": "admin"}, {"_id": 1}):
+                create_notification(
+                    "user",
+                    "New user registered",
+                    f"{email} created a Revnivo account.",
+                    admin_doc["_id"],
+                )
+
+        if not doc:
+            return Response(
+                {"detail": "Google sign-in succeeded but the Revnivo user record could not be loaded."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    if google_user.get("picture") and doc.get("google_picture") != google_user["picture"]:
-        db.users.update_one({"_id": doc["_id"]}, {"$set": {"google_picture": google_user["picture"]}})
-        doc["google_picture"] = google_user["picture"]
+        if google_user.get("picture") and doc.get("google_picture") != google_user["picture"]:
+            db.users.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"google_picture": google_user["picture"]}},
+            )
+            doc["google_picture"] = google_user["picture"]
 
-    return auth_success_response(doc, request)
-
+        return auth_success_response(doc, request)
+    except PyMongoError as exc:
+        detail = "Google sign-in succeeded, but Revnivo could not reach MongoDB."
+        if settings.DEBUG:
+            detail += f" ({type(exc).__name__})"
+        return Response(
+            {"detail": detail},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
 @api_view(["POST"])
 def logout(request):
