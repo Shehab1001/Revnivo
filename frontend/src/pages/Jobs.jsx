@@ -27,6 +27,48 @@ import api from '../services/api'
 
 const ALL = 'all'
 
+const JOB_LOGOS = {
+  alignerr:
+    'https://media.licdn.com/dms/image/v2/D560BAQHD7jKpwp33DA/company-logo_200_200/B56ZsP32kCG4AI-/0/1765497858824/alignerr_logo?e=2147483647&v=beta&t=UDlpcvOztgexPJrKXDmCyA0QVEsOmUaI8zynUdE3WyU',
+  afterquery:
+    'https://media.licdn.com/dms/image/v2/D4D0BAQHrMvnaJnxiVQ/company-logo_200_200/B4DZXt37yzGkAM-/0/1743452618201/afterquery_experts_logo?e=2147483647&v=beta&t=z6wW1zc9g0djXgJ6BH6ck6JpnqATiZm_3P3ozEMKrkg',
+  dataannotation:
+    'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQZR4_cE_TBxwvSHE3nKV6EBtIkxhbVNM5szkfKYoG4sQeVPr7QesaTG-ZJ&s=10',
+  mercor:
+    'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQMx0VgcBu1HxhBYi7ZBa3C1x-O6ieAih8A_ouUkBvbPO7ETOsQ-iYB7m7-&s=10',
+  prolific:
+    'https://pbs.twimg.com/profile_images/2076957420530589696/8pWBYaGV_400x400.jpg',
+}
+
+function getJobLogo(name) {
+  const normalized = String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+
+  if (normalized.includes('alignerr')) {
+    return JOB_LOGOS.alignerr
+  }
+
+  if (normalized.includes('afterquery')) {
+    return JOB_LOGOS.afterquery
+  }
+
+  if (normalized.includes('dataannotation')) {
+    return JOB_LOGOS.dataannotation
+  }
+
+  if (normalized.includes('mercor')) {
+    return JOB_LOGOS.mercor
+  }
+
+  if (normalized.includes('prolific')) {
+    return JOB_LOGOS.prolific
+  }
+
+  return ''
+}
+
 const statusLabel = {
   live: 'Live listings',
   browse: 'Browse official site',
@@ -50,6 +92,11 @@ const statusColor = {
 }
 
 function SourceMark({ name }) {
+  const [imageFailed, setImageFailed] =
+    useState(false)
+
+  const logoUrl = getJobLogo(name)
+
   const initials = String(name || '')
     .split(/\s+/)
     .filter(Boolean)
@@ -59,8 +106,21 @@ function SourceMark({ name }) {
     .toUpperCase()
 
   return (
-    <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-default-200 bg-default-100 text-sm font-bold text-foreground">
-      {initials || 'AI'}
+    <div className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-xl border border-default-200 bg-white text-sm font-bold text-foreground">
+      {logoUrl && !imageFailed ? (
+        <img
+          src={logoUrl}
+          alt={`${name || 'Platform'} logo`}
+          className="h-full w-full object-contain"
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        <span className="bg-default-100 grid h-full w-full place-items-center">
+          {initials || 'AI'}
+        </span>
+      )}
     </div>
   )
 }
