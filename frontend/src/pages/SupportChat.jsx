@@ -1445,7 +1445,7 @@ export default function SupportChat() {
               {/* Messages */}
               <div
                 ref={messageListRef}
-                className="chat-grid-bg min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-4 sm:p-5"
+                className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-background px-3 py-4 sm:p-5"
               >
                 {messages.length ? (
                   <div className="flex min-h-full flex-col justify-end">
