@@ -65,6 +65,8 @@ APPLICATION_FIELDS = {
     "recruiter_linkedin",
     "notes",
     "tags",
+    "resume_id",
+    "cover_letter_id",
     "archived",
 }
 
@@ -211,6 +213,8 @@ def _serialize_application(doc):
         "recruiter_linkedin": doc.get("recruiter_linkedin", ""),
         "notes": doc.get("notes", ""),
         "tags": doc.get("tags", []),
+        "resume_id": str(doc.get("resume_id") or ""),
+        "cover_letter_id": str(doc.get("cover_letter_id") or ""),
         "archived": bool(doc.get("archived")),
         "created_at": serialize_datetime(doc.get("created_at")),
         "updated_at": serialize_datetime(doc.get("updated_at")),
@@ -356,6 +360,24 @@ def _normalize_application_payload(data, existing=None):
     if "tags" in data:
         output["tags"] = _clean_tags(data.get("tags"))
 
+    if "resume_id" in data:
+        resume_value = data.get("resume_id")
+        output["resume_id"] = (
+            ObjectId(str(resume_value))
+            if resume_value
+            and ObjectId.is_valid(str(resume_value))
+            else None
+        )
+
+    if "cover_letter_id" in data:
+        cover_value = data.get("cover_letter_id")
+        output["cover_letter_id"] = (
+            ObjectId(str(cover_value))
+            if cover_value
+            and ObjectId.is_valid(str(cover_value))
+            else None
+        )
+
     if "archived" in data:
         output["archived"] = bool(data.get("archived"))
 
@@ -458,6 +480,8 @@ def applications(request):
             "recruiter_linkedin": payload.get("recruiter_linkedin", ""),
             "notes": payload.get("notes", ""),
             "tags": payload.get("tags", []),
+            "resume_id": payload.get("resume_id"),
+            "cover_letter_id": payload.get("cover_letter_id"),
             "archived": payload.get("archived", False),
             "created_at": now,
             "updated_at": now,
