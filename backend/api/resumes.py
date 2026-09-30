@@ -1,0 +1,1869 @@
+import copy
+import re
+from collections import Counter
+from datetime import datetime, timezone
+
+from bson import ObjectId
+from pymongo import ASCENDING, DESCENDING
+from rest_framework import status
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+
+from .mongo import get_db
+from .utils import serialize_datetime, utcnow
+
+
+RESUME_TEMPLATES = {
+    "modern",
+    "classic",
+    "compact",
+    "minimal",
+}
+
+SECTION_KEYS = (
+    "experience",
+    "education",
+    "skills",
+    "projects",
+    "certifications",
+    "languages",
+)
+
+STOP_WORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "been", "being",
+    "by", "for", "from", "has", "have", "in", "into", "is", "it",
+    "its", "of", "on", "or", "our", "that", "the", "their", "this",
+    "to", "we", "will", "with", "you", "your", "they", "them", "who",
+    "what", "when", "where", "which", "while", "work", "working",
+    "role", "job", "position", "candidate", "candidates", "team",
+    "teams", "company", "years", "year", "experience", "preferred",
+    "required", "requirements", "responsibilities", "responsibility",
+    "skills", "skill", "including", "such", "using", "use", "used",
+}
+
+
+def _owner_oid(request):
+    return ObjectId(request.user.id)
+
+
+def _oid(value):
+    if isinstance(value, ObjectId):
+        return value
+
+    if not ObjectId.is_valid(str(value)):
+        return None
+
+    return ObjectId(str(value))
+
+
+def _text(value, limit=5000):
+    if value is None:
+        return ""
+
+    return str(value).strip()[:limit]
+
+
+def _bool(value):
+    if isinstance(value, bool):
+        return value
+
+    return str(value or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _clean_list(value, limit=100, item_limit=200):
+    if value is None:
+        return []
+
+    if isinstance(value, str):
+        items = [
+            item.strip()
+            for item in re.split(r"[,\n]", value)
+        ]
+    elif isinstance(value, (list, tuple)):
+        items = value
+    else:
+        items = []
+
+    output = []
+    seen = set()
+
+    for raw in items:
+        if isinstance(raw, dict):
+            continue
+
+        item = _text(raw, item_limit)
+        key = item.lower()
+
+        if not item or key in seen:
+            continue
+
+        seen.add(key)
+        output.append(item)
+
+        if len(output) >= limit:
+            break
+
+    return output
+
+
+def _clean_bullets(value):
+    return _clean_list(
+        value,
+        limit=30,
+        item_limit=700,
+    )
+
+
+def _clean_experience(value):
+    if not isinstance(value, list):
+        return []
+
+    output = []
+
+    for item in value[:30]:
+        if not isinstance(item, dict):
+            continue
+
+        output.append(
+            {
+                "id": _text(
+                    item.get("id"),
+                    80,
+                ),
+                "company": _text(
+                    item.get("company"),
+                    180,
+                ),
+                "title": _text(
+                    item.get("title"),
+                    180,
+                ),
+                "location": _text(
+                    item.get("location"),
+                    180,
+                ),
+                "start_date": _text(
+                    item.get("start_date"),
+                    30,
+                ),
+                "end_date": _text(
+                    item.get("end_date"),
+                    30,
+                ),
+                "current": _bool(
+                    item.get("current")
+                ),
+                "summary": _text(
+                    item.get("summary"),
+                    3000,
+                ),
+                "bullets": _clean_bullets(
+                    item.get("bullets")
+                ),
+            }
+        )
+
+    return output
+
+
+def _clean_education(value):
+    if not isinstance(value, list):
+        return []
+
+    output = []
+
+    for item in value[:30]:
+        if not isinstance(item, dict):
+            continue
+
+        output.append(
+            {
+                "id": _text(
+                    item.get("id"),
+                    80,
+                ),
+                "school": _text(
+                    item.get("school"),
+                    220,
+                ),
+                "degree": _text(
+                    item.get("degree"),
+                    220,
+                ),
+                "field": _text(
+                    item.get("field"),
+                    220,
+                ),
+                "location": _text(
+                    item.get("location"),
+                    180,
+                ),
+                "start_date": _text(
+                    item.get("start_date"),
+                    30,
+                ),
+                "end_date": _text(
+                    item.get("end_date"),
+                    30,
+                ),
+                "details": _text(
+                    item.get("details"),
+                    2500,
+                ),
+            }
+        )
+
+    return output
+
+
+def _clean_projects(value):
+    if not isinstance(value, list):
+        return []
+
+    output = []
+
+    for item in value[:40]:
+        if not isinstance(item, dict):
+            continue
+
+        output.append(
+            {
+                "id": _text(
+                    item.get("id"),
+                    80,
+                ),
+                "name": _text(
+                    item.get("name"),
+                    220,
+                ),
+                "role": _text(
+                    item.get("role"),
+                    180,
+                ),
+                "url": _text(
+                    item.get("url"),
+                    2000,
+                ),
+                "description": _text(
+                    item.get("description"),
+                    3000,
+                ),
+                "bullets": _clean_bullets(
+                    item.get("bullets")
+                ),
+                "technologies": _clean_list(
+                    item.get("technologies"),
+                    limit=30,
+                    item_limit=100,
+                ),
+            }
+        )
+
+    return output
+
+
+def _clean_certifications(value):
+    if not isinstance(value, list):
+        return []
+
+    output = []
+
+    for item in value[:50]:
+        if not isinstance(item, dict):
+            continue
+
+        output.append(
+            {
+                "id": _text(
+                    item.get("id"),
+                    80,
+                ),
+                "name": _text(
+                    item.get("name"),
+                    220,
+                ),
+                "issuer": _text(
+                    item.get("issuer"),
+                    220,
+                ),
+                "date": _text(
+                    item.get("date"),
+                    30,
+                ),
+                "url": _text(
+                    item.get("url"),
+                    2000,
+                ),
+            }
+        )
+
+    return output
+
+
+def _clean_languages(value):
+    if not isinstance(value, list):
+        return []
+
+    output = []
+
+    for item in value[:30]:
+        if not isinstance(item, dict):
+            continue
+
+        output.append(
+            {
+                "id": _text(
+                    item.get("id"),
+                    80,
+                ),
+                "language": _text(
+                    item.get("language"),
+                    120,
+                ),
+                "level": _text(
+                    item.get("level"),
+                    120,
+                ),
+            }
+        )
+
+    return output
+
+
+def _clean_profile(value):
+    if not isinstance(value, dict):
+        value = {}
+
+    return {
+        "full_name": _text(
+            value.get("full_name"),
+            180,
+        ),
+        "headline": _text(
+            value.get("headline"),
+            240,
+        ),
+        "email": _text(
+            value.get("email"),
+            320,
+        ),
+        "phone": _text(
+            value.get("phone"),
+            80,
+        ),
+        "location": _text(
+            value.get("location"),
+            180,
+        ),
+        "website": _text(
+            value.get("website"),
+            2000,
+        ),
+        "linkedin": _text(
+            value.get("linkedin"),
+            2000,
+        ),
+        "github": _text(
+            value.get("github"),
+            2000,
+        ),
+    }
+
+
+def _normalize_resume(data, existing=None):
+    existing = existing or {}
+    updates = {}
+
+    if "name" in data:
+        updates["name"] = _text(
+            data.get("name"),
+            180,
+        )
+
+    if "template" in data:
+        template = _text(
+            data.get("template"),
+            40,
+        ).lower()
+
+        if template not in RESUME_TEMPLATES:
+            raise ValueError(
+                "Invalid resume template."
+            )
+
+        updates["template"] = template
+
+    if "profile" in data:
+        updates["profile"] = _clean_profile(
+            data.get("profile")
+        )
+
+    if "summary" in data:
+        updates["summary"] = _text(
+            data.get("summary"),
+            6000,
+        )
+
+    if "experience" in data:
+        updates["experience"] = (
+            _clean_experience(
+                data.get("experience")
+            )
+        )
+
+    if "education" in data:
+        updates["education"] = (
+            _clean_education(
+                data.get("education")
+            )
+        )
+
+    if "skills" in data:
+        updates["skills"] = _clean_list(
+            data.get("skills"),
+            limit=150,
+            item_limit=120,
+        )
+
+    if "projects" in data:
+        updates["projects"] = (
+            _clean_projects(
+                data.get("projects")
+            )
+        )
+
+    if "certifications" in data:
+        updates["certifications"] = (
+            _clean_certifications(
+                data.get("certifications")
+            )
+        )
+
+    if "languages" in data:
+        updates["languages"] = (
+            _clean_languages(
+                data.get("languages")
+            )
+        )
+
+    if "section_order" in data:
+        requested = _clean_list(
+            data.get("section_order"),
+            limit=20,
+            item_limit=40,
+        )
+
+        order = [
+            key
+            for key in requested
+            if key in SECTION_KEYS
+        ]
+
+        for key in SECTION_KEYS:
+            if key not in order:
+                order.append(key)
+
+        updates["section_order"] = order
+
+    if "archived" in data:
+        updates["archived"] = _bool(
+            data.get("archived")
+        )
+
+    if "accent" in data:
+        updates["accent"] = _text(
+            data.get("accent"),
+            40,
+        )
+
+    name = updates.get(
+        "name",
+        existing.get("name", ""),
+    )
+
+    if not name:
+        raise ValueError(
+            "Resume name is required."
+        )
+
+    return updates
+
+
+def _resume_defaults(name="Untitled Resume"):
+    return {
+        "name": name,
+        "template": "modern",
+        "accent": "primary",
+        "profile": {
+            "full_name": "",
+            "headline": "",
+            "email": "",
+            "phone": "",
+            "location": "",
+            "website": "",
+            "linkedin": "",
+            "github": "",
+        },
+        "summary": "",
+        "experience": [],
+        "education": [],
+        "skills": [],
+        "projects": [],
+        "certifications": [],
+        "languages": [],
+        "section_order": list(
+            SECTION_KEYS
+        ),
+        "archived": False,
+    }
+
+
+def _serialize_resume(doc):
+    if not doc:
+        return None
+
+    return {
+        "id": str(doc["_id"]),
+        "name": doc.get(
+            "name",
+            "Untitled Resume",
+        ),
+        "template": doc.get(
+            "template",
+            "modern",
+        ),
+        "accent": doc.get(
+            "accent",
+            "primary",
+        ),
+        "profile": doc.get(
+            "profile",
+            {},
+        ),
+        "summary": doc.get(
+            "summary",
+            "",
+        ),
+        "experience": doc.get(
+            "experience",
+            [],
+        ),
+        "education": doc.get(
+            "education",
+            [],
+        ),
+        "skills": doc.get(
+            "skills",
+            [],
+        ),
+        "projects": doc.get(
+            "projects",
+            [],
+        ),
+        "certifications": doc.get(
+            "certifications",
+            [],
+        ),
+        "languages": doc.get(
+            "languages",
+            [],
+        ),
+        "section_order": doc.get(
+            "section_order",
+            list(SECTION_KEYS),
+        ),
+        "archived": bool(
+            doc.get("archived")
+        ),
+        "created_at": serialize_datetime(
+            doc.get("created_at")
+        ),
+        "updated_at": serialize_datetime(
+            doc.get("updated_at")
+        ),
+    }
+
+
+def _snapshot_resume(doc):
+    return {
+        key: copy.deepcopy(value)
+        for key, value in doc.items()
+        if key
+        not in {
+            "_id",
+            "owner_id",
+            "created_at",
+            "updated_at",
+        }
+    }
+
+
+def _serialize_version(doc):
+    return {
+        "id": str(doc["_id"]),
+        "resume_id": str(
+            doc.get("resume_id", "")
+        ),
+        "version": int(
+            doc.get("version", 1) or 1
+        ),
+        "label": doc.get(
+            "label",
+            "",
+        ),
+        "created_at": serialize_datetime(
+            doc.get("created_at")
+        ),
+    }
+
+
+def _serialize_cover_letter(doc):
+    return {
+        "id": str(doc["_id"]),
+        "name": doc.get(
+            "name",
+            "Cover Letter",
+        ),
+        "resume_id": str(
+            doc.get("resume_id", "")
+        )
+        if doc.get("resume_id")
+        else "",
+        "application_id": str(
+            doc.get("application_id", "")
+        )
+        if doc.get("application_id")
+        else "",
+        "company": doc.get(
+            "company",
+            "",
+        ),
+        "job_title": doc.get(
+            "job_title",
+            "",
+        ),
+        "recipient_name": doc.get(
+            "recipient_name",
+            "",
+        ),
+        "salutation": doc.get(
+            "salutation",
+            "Dear Hiring Manager,",
+        ),
+        "body": doc.get(
+            "body",
+            "",
+        ),
+        "closing": doc.get(
+            "closing",
+            "Sincerely,",
+        ),
+        "archived": bool(
+            doc.get("archived")
+        ),
+        "created_at": serialize_datetime(
+            doc.get("created_at")
+        ),
+        "updated_at": serialize_datetime(
+            doc.get("updated_at")
+        ),
+    }
+
+
+def _resume_doc(db, owner_id, resume_id):
+    resume_oid = _oid(resume_id)
+
+    if not resume_oid:
+        return None
+
+    return db.resumes.find_one(
+        {
+            "_id": resume_oid,
+            "owner_id": owner_id,
+        }
+    )
+
+
+def _cover_letter_doc(
+    db,
+    owner_id,
+    cover_letter_id,
+):
+    cover_oid = _oid(cover_letter_id)
+
+    if not cover_oid:
+        return None
+
+    return db.cover_letters.find_one(
+        {
+            "_id": cover_oid,
+            "owner_id": owner_id,
+        }
+    )
+
+
+def _ensure_indexes(db):
+    try:
+        db.resumes.create_index(
+            [
+                ("owner_id", ASCENDING),
+                ("updated_at", DESCENDING),
+            ]
+        )
+        db.resume_versions.create_index(
+            [
+                ("owner_id", ASCENDING),
+                ("resume_id", ASCENDING),
+                ("version", DESCENDING),
+            ]
+        )
+        db.cover_letters.create_index(
+            [
+                ("owner_id", ASCENDING),
+                ("updated_at", DESCENDING),
+            ]
+        )
+    except Exception:
+        pass
+
+
+@api_view(["GET", "POST"])
+def resumes(request):
+    db = get_db()
+    owner_id = _owner_oid(request)
+    _ensure_indexes(db)
+
+    if request.method == "POST":
+        name = _text(
+            request.data.get("name"),
+            180,
+        ) or "Untitled Resume"
+
+        defaults = _resume_defaults(name)
+        now = utcnow()
+
+        doc = {
+            "owner_id": owner_id,
+            **defaults,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        try:
+            updates = _normalize_resume(
+                request.data,
+                existing=doc,
+            )
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        doc.update(updates)
+
+        result = db.resumes.insert_one(doc)
+        doc["_id"] = result.inserted_id
+
+        return Response(
+            {
+                "resume": _serialize_resume(
+                    doc
+                )
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    archived = str(
+        request.query_params.get(
+            "archived",
+            "false",
+        )
+    ).lower()
+
+    query = {"owner_id": owner_id}
+
+    if archived == "only":
+        query["archived"] = True
+    elif archived not in {
+        "all",
+        "1",
+        "true",
+    }:
+        query["archived"] = {
+            "$ne": True
+        }
+
+    docs = list(
+        db.resumes.find(query).sort(
+            "updated_at",
+            DESCENDING,
+        )
+    )
+
+    return Response(
+        {
+            "resumes": [
+                _serialize_resume(doc)
+                for doc in docs
+            ],
+            "total": len(docs),
+            "templates": sorted(
+                RESUME_TEMPLATES
+            ),
+        }
+    )
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+def resume_detail(request, resume_id):
+    db = get_db()
+    owner_id = _owner_oid(request)
+    doc = _resume_doc(
+        db,
+        owner_id,
+        resume_id,
+    )
+
+    if not doc:
+        return Response(
+            {"detail": "Resume not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if request.method == "GET":
+        return Response(
+            {
+                "resume": _serialize_resume(
+                    doc
+                )
+            }
+        )
+
+    if request.method == "DELETE":
+        db.resume_versions.delete_many(
+            {
+                "owner_id": owner_id,
+                "resume_id": doc["_id"],
+            }
+        )
+        db.resumes.delete_one(
+            {
+                "_id": doc["_id"],
+                "owner_id": owner_id,
+            }
+        )
+        db.job_applications.update_many(
+            {
+                "owner_id": owner_id,
+                "resume_id": doc["_id"],
+            },
+            {
+                "$unset": {
+                    "resume_id": "",
+                }
+            },
+        )
+        return Response(
+            status=status.HTTP_204_NO_CONTENT
+        )
+
+    try:
+        updates = _normalize_resume(
+            request.data,
+            existing=doc,
+        )
+    except ValueError as exc:
+        return Response(
+            {"detail": str(exc)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    updates["updated_at"] = utcnow()
+
+    db.resumes.update_one(
+        {
+            "_id": doc["_id"],
+            "owner_id": owner_id,
+        },
+        {"$set": updates},
+    )
+
+    updated = db.resumes.find_one(
+        {
+            "_id": doc["_id"],
+            "owner_id": owner_id,
+        }
+    )
+
+    return Response(
+        {
+            "resume": _serialize_resume(
+                updated
+            )
+        }
+    )
+
+
+@api_view(["POST"])
+def resume_duplicate(request, resume_id):
+    db = get_db()
+    owner_id = _owner_oid(request)
+    source = _resume_doc(
+        db,
+        owner_id,
+        resume_id,
+    )
+
+    if not source:
+        return Response(
+            {"detail": "Resume not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    now = utcnow()
+    duplicate = {
+        "owner_id": owner_id,
+        **_snapshot_resume(source),
+        "name": (
+            _text(
+                request.data.get("name"),
+                180,
+            )
+            or f"{source.get('name', 'Resume')} Copy"
+        ),
+        "archived": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    result = db.resumes.insert_one(
+        duplicate
+    )
+    duplicate["_id"] = result.inserted_id
+
+    return Response(
+        {
+            "resume": _serialize_resume(
+                duplicate
+            )
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["GET", "POST"])
+def resume_versions(request, resume_id):
+    db = get_db()
+    owner_id = _owner_oid(request)
+    resume = _resume_doc(
+        db,
+        owner_id,
+        resume_id,
+    )
+
+    if not resume:
+        return Response(
+            {"detail": "Resume not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if request.method == "POST":
+        latest = db.resume_versions.find_one(
+            {
+                "owner_id": owner_id,
+                "resume_id": resume["_id"],
+            },
+            sort=[("version", DESCENDING)],
+        )
+
+        version_number = int(
+            latest.get("version", 0)
+            if latest
+            else 0
+        ) + 1
+
+        doc = {
+            "owner_id": owner_id,
+            "resume_id": resume["_id"],
+            "version": version_number,
+            "label": (
+                _text(
+                    request.data.get("label"),
+                    180,
+                )
+                or f"Version {version_number}"
+            ),
+            "snapshot": _snapshot_resume(
+                resume
+            ),
+            "created_at": utcnow(),
+        }
+
+        result = (
+            db.resume_versions.insert_one(
+                doc
+            )
+        )
+        doc["_id"] = result.inserted_id
+
+        return Response(
+            {
+                "version": _serialize_version(
+                    doc
+                )
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    docs = list(
+        db.resume_versions.find(
+            {
+                "owner_id": owner_id,
+                "resume_id": resume["_id"],
+            }
+        ).sort("version", DESCENDING)
+    )
+
+    return Response(
+        {
+            "versions": [
+                _serialize_version(doc)
+                for doc in docs
+            ]
+        }
+    )
+
+
+@api_view(["POST"])
+def resume_restore_version(
+    request,
+    resume_id,
+    version_id,
+):
+    db = get_db()
+    owner_id = _owner_oid(request)
+    resume = _resume_doc(
+        db,
+        owner_id,
+        resume_id,
+    )
+    version_oid = _oid(version_id)
+
+    if not resume or not version_oid:
+        return Response(
+            {"detail": "Version not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    version = db.resume_versions.find_one(
+        {
+            "_id": version_oid,
+            "owner_id": owner_id,
+            "resume_id": resume["_id"],
+        }
+    )
+
+    if not version:
+        return Response(
+            {"detail": "Version not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    snapshot = copy.deepcopy(
+        version.get("snapshot", {})
+    )
+    snapshot.pop("archived", None)
+    snapshot["updated_at"] = utcnow()
+
+    db.resumes.update_one(
+        {
+            "_id": resume["_id"],
+            "owner_id": owner_id,
+        },
+        {"$set": snapshot},
+    )
+
+    updated = db.resumes.find_one(
+        {
+            "_id": resume["_id"],
+            "owner_id": owner_id,
+        }
+    )
+
+    return Response(
+        {
+            "resume": _serialize_resume(
+                updated
+            )
+        }
+    )
+
+
+def _normalize_cover_letter(
+    data,
+    existing=None,
+):
+    existing = existing or {}
+    updates = {}
+
+    text_fields = {
+        "name": 180,
+        "company": 180,
+        "job_title": 220,
+        "recipient_name": 180,
+        "salutation": 300,
+        "body": 20000,
+        "closing": 300,
+    }
+
+    for field, limit in text_fields.items():
+        if field in data:
+            updates[field] = _text(
+                data.get(field),
+                limit,
+            )
+
+    for field in (
+        "resume_id",
+        "application_id",
+    ):
+        if field in data:
+            value = _oid(
+                data.get(field)
+            )
+            updates[field] = value
+
+    if "archived" in data:
+        updates["archived"] = _bool(
+            data.get("archived")
+        )
+
+    name = updates.get(
+        "name",
+        existing.get("name", ""),
+    )
+
+    if not name:
+        raise ValueError(
+            "Cover letter name is required."
+        )
+
+    return updates
+
+
+@api_view(["GET", "POST"])
+def cover_letters(request):
+    db = get_db()
+    owner_id = _owner_oid(request)
+    _ensure_indexes(db)
+
+    if request.method == "POST":
+        now = utcnow()
+        doc = {
+            "owner_id": owner_id,
+            "name": (
+                _text(
+                    request.data.get("name"),
+                    180,
+                )
+                or "Cover Letter"
+            ),
+            "resume_id": None,
+            "application_id": None,
+            "company": "",
+            "job_title": "",
+            "recipient_name": "",
+            "salutation": (
+                "Dear Hiring Manager,"
+            ),
+            "body": "",
+            "closing": "Sincerely,",
+            "archived": False,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        try:
+            updates = (
+                _normalize_cover_letter(
+                    request.data,
+                    existing=doc,
+                )
+            )
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        doc.update(updates)
+
+        result = (
+            db.cover_letters.insert_one(
+                doc
+            )
+        )
+        doc["_id"] = result.inserted_id
+
+        return Response(
+            {
+                "cover_letter": (
+                    _serialize_cover_letter(
+                        doc
+                    )
+                )
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    docs = list(
+        db.cover_letters.find(
+            {
+                "owner_id": owner_id,
+                "archived": {"$ne": True},
+            }
+        ).sort("updated_at", DESCENDING)
+    )
+
+    return Response(
+        {
+            "cover_letters": [
+                _serialize_cover_letter(
+                    doc
+                )
+                for doc in docs
+            ]
+        }
+    )
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+def cover_letter_detail(
+    request,
+    cover_letter_id,
+):
+    db = get_db()
+    owner_id = _owner_oid(request)
+    doc = _cover_letter_doc(
+        db,
+        owner_id,
+        cover_letter_id,
+    )
+
+    if not doc:
+        return Response(
+            {
+                "detail": (
+                    "Cover letter not found."
+                )
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if request.method == "GET":
+        return Response(
+            {
+                "cover_letter": (
+                    _serialize_cover_letter(
+                        doc
+                    )
+                )
+            }
+        )
+
+    if request.method == "DELETE":
+        db.cover_letters.delete_one(
+            {
+                "_id": doc["_id"],
+                "owner_id": owner_id,
+            }
+        )
+        db.job_applications.update_many(
+            {
+                "owner_id": owner_id,
+                "cover_letter_id": doc[
+                    "_id"
+                ],
+            },
+            {
+                "$unset": {
+                    "cover_letter_id": "",
+                }
+            },
+        )
+        return Response(
+            status=status.HTTP_204_NO_CONTENT
+        )
+
+    try:
+        updates = _normalize_cover_letter(
+            request.data,
+            existing=doc,
+        )
+    except ValueError as exc:
+        return Response(
+            {"detail": str(exc)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    updates["updated_at"] = utcnow()
+
+    db.cover_letters.update_one(
+        {
+            "_id": doc["_id"],
+            "owner_id": owner_id,
+        },
+        {"$set": updates},
+    )
+
+    updated = (
+        db.cover_letters.find_one(
+            {
+                "_id": doc["_id"],
+                "owner_id": owner_id,
+            }
+        )
+    )
+
+    return Response(
+        {
+            "cover_letter": (
+                _serialize_cover_letter(
+                    updated
+                )
+            )
+        }
+    )
+
+
+def _resume_text(resume):
+    parts = []
+
+    profile = resume.get(
+        "profile",
+        {},
+    )
+
+    parts.extend(
+        [
+            profile.get("headline", ""),
+            resume.get("summary", ""),
+        ]
+    )
+
+    for item in resume.get(
+        "experience",
+        [],
+    ):
+        parts.extend(
+            [
+                item.get("title", ""),
+                item.get("company", ""),
+                item.get("summary", ""),
+                " ".join(
+                    item.get("bullets", [])
+                ),
+            ]
+        )
+
+    for item in resume.get(
+        "education",
+        [],
+    ):
+        parts.extend(
+            [
+                item.get("degree", ""),
+                item.get("field", ""),
+                item.get("school", ""),
+                item.get("details", ""),
+            ]
+        )
+
+    parts.append(
+        " ".join(
+            resume.get("skills", [])
+        )
+    )
+
+    for item in resume.get(
+        "projects",
+        [],
+    ):
+        parts.extend(
+            [
+                item.get("name", ""),
+                item.get("role", ""),
+                item.get("description", ""),
+                " ".join(
+                    item.get(
+                        "technologies",
+                        [],
+                    )
+                ),
+                " ".join(
+                    item.get("bullets", [])
+                ),
+            ]
+        )
+
+    for item in resume.get(
+        "certifications",
+        [],
+    ):
+        parts.extend(
+            [
+                item.get("name", ""),
+                item.get("issuer", ""),
+            ]
+        )
+
+    for item in resume.get(
+        "languages",
+        [],
+    ):
+        parts.extend(
+            [
+                item.get("language", ""),
+                item.get("level", ""),
+            ]
+        )
+
+    return " ".join(
+        part
+        for part in parts
+        if part
+    )
+
+
+def _tokens(text):
+    return [
+        token
+        for token in re.findall(
+            r"[a-zA-Z][a-zA-Z0-9+#.\-]{1,}",
+            str(text or "").lower(),
+        )
+        if token not in STOP_WORDS
+        and len(token) >= 2
+    ]
+
+
+def _phrases(text):
+    raw = str(text or "").lower()
+    phrases = set()
+
+    known = [
+        "machine learning",
+        "deep learning",
+        "natural language processing",
+        "computer vision",
+        "data analysis",
+        "data science",
+        "project management",
+        "product management",
+        "financial analysis",
+        "quality assurance",
+        "large language model",
+        "large language models",
+        "generative ai",
+        "artificial intelligence",
+        "software engineering",
+        "cloud computing",
+        "business intelligence",
+        "power bi",
+        "microsoft excel",
+        "google cloud",
+        "amazon web services",
+        "rest api",
+        "rest apis",
+        "unit testing",
+        "version control",
+    ]
+
+    for phrase in known:
+        if phrase in raw:
+            phrases.add(phrase)
+
+    return phrases
+
+
+@api_view(["POST"])
+def resume_analyze(request, resume_id):
+    db = get_db()
+    owner_id = _owner_oid(request)
+    resume = _resume_doc(
+        db,
+        owner_id,
+        resume_id,
+    )
+
+    if not resume:
+        return Response(
+            {"detail": "Resume not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    job_description = _text(
+        request.data.get(
+            "job_description"
+        ),
+        40000,
+    )
+
+    if len(job_description) < 50:
+        return Response(
+            {
+                "detail": (
+                    "Paste a fuller job description "
+                    "to run the match analysis."
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    resume_text = _resume_text(resume)
+
+    job_tokens = Counter(
+        _tokens(job_description)
+    )
+    resume_tokens = set(
+        _tokens(resume_text)
+    )
+
+    weighted_keywords = [
+        token
+        for token, _count
+        in job_tokens.most_common(80)
+        if token not in STOP_WORDS
+    ]
+
+    job_phrases = _phrases(
+        job_description
+    )
+    resume_lower = (
+        resume_text.lower()
+    )
+
+    matched_phrases = sorted(
+        phrase
+        for phrase in job_phrases
+        if phrase in resume_lower
+    )
+    missing_phrases = sorted(
+        phrase
+        for phrase in job_phrases
+        if phrase not in resume_lower
+    )
+
+    matched = [
+        keyword
+        for keyword in weighted_keywords
+        if keyword in resume_tokens
+    ]
+    missing = [
+        keyword
+        for keyword in weighted_keywords
+        if keyword not in resume_tokens
+    ]
+
+    keyword_score = round(
+        (
+            len(matched)
+            / max(
+                len(weighted_keywords),
+                1,
+            )
+        )
+        * 100,
+        1,
+    )
+
+    phrase_score = (
+        round(
+            len(matched_phrases)
+            / max(
+                len(job_phrases),
+                1,
+            )
+            * 100,
+            1,
+        )
+        if job_phrases
+        else keyword_score
+    )
+
+    completeness_checks = {
+        "contact": bool(
+            resume.get("profile", {}).get(
+                "email"
+            )
+            and resume.get(
+                "profile",
+                {},
+            ).get("full_name")
+        ),
+        "headline": bool(
+            resume.get("profile", {}).get(
+                "headline"
+            )
+        ),
+        "summary": len(
+            resume.get(
+                "summary",
+                "",
+            )
+        )
+        >= 80,
+        "experience": bool(
+            resume.get("experience")
+        ),
+        "education": bool(
+            resume.get("education")
+        ),
+        "skills": len(
+            resume.get(
+                "skills",
+                [],
+            )
+        )
+        >= 5,
+        "results": any(
+            re.search(
+                r"\b\d+(?:\.\d+)?%|\b\d+[kmb]?\+?\b",
+                " ".join(
+                    item.get(
+                        "bullets",
+                        [],
+                    )
+                ),
+                re.IGNORECASE,
+            )
+            for item in resume.get(
+                "experience",
+                [],
+            )
+        ),
+    }
+
+    completeness_score = round(
+        sum(
+            1
+            for value
+            in completeness_checks.values()
+            if value
+        )
+        / len(completeness_checks)
+        * 100,
+        1,
+    )
+
+    overall = round(
+        keyword_score * 0.55
+        + phrase_score * 0.2
+        + completeness_score * 0.25,
+        1,
+    )
+
+    recommendations = []
+
+    if not completeness_checks[
+        "summary"
+    ]:
+        recommendations.append(
+            "Add a concise professional summary tailored to the target role."
+        )
+
+    if not completeness_checks[
+        "results"
+    ]:
+        recommendations.append(
+            "Add measurable outcomes to experience bullets where they are accurate."
+        )
+
+    if missing_phrases:
+        recommendations.append(
+            (
+                "Review these multi-word job requirements "
+                "and include only the ones you genuinely have: "
+                + ", ".join(
+                    missing_phrases[:8]
+                )
+            )
+        )
+
+    if missing:
+        recommendations.append(
+            (
+                "Review missing keywords for truthful coverage: "
+                + ", ".join(missing[:15])
+            )
+        )
+
+    if len(
+        resume.get("skills", [])
+    ) < 8:
+        recommendations.append(
+            "Expand the skills section with relevant tools and capabilities you actually use."
+        )
+
+    return Response(
+        {
+            "score": overall,
+            "keyword_score": keyword_score,
+            "phrase_score": phrase_score,
+            "completeness_score": (
+                completeness_score
+            ),
+            "matched_keywords": matched[:40],
+            "missing_keywords": missing[:40],
+            "matched_phrases": matched_phrases,
+            "missing_phrases": missing_phrases,
+            "completeness": completeness_checks,
+            "recommendations": recommendations,
+            "disclaimer": (
+                "This is a heuristic keyword and completeness analysis, "
+                "not a prediction of any employer ATS score or hiring outcome."
+            ),
+        }
+    )
+
+
+@api_view(["PATCH"])
+def application_materials(
+    request,
+    application_id,
+):
+    db = get_db()
+    owner_id = _owner_oid(request)
+    application_oid = _oid(
+        application_id
+    )
+
+    if not application_oid:
+        return Response(
+            {
+                "detail": (
+                    "Application not found."
+                )
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    application = (
+        db.job_applications.find_one(
+            {
+                "_id": application_oid,
+                "owner_id": owner_id,
+            }
+        )
+    )
+
+    if not application:
+        return Response(
+            {
+                "detail": (
+                    "Application not found."
+                )
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    updates = {}
+
+    if "resume_id" in request.data:
+        raw_resume_id = (
+            request.data.get("resume_id")
+        )
+
+        if raw_resume_id:
+            resume = _resume_doc(
+                db,
+                owner_id,
+                raw_resume_id,
+            )
+
+            if not resume:
+                return Response(
+                    {
+                        "detail": (
+                            "Selected resume not found."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            updates["resume_id"] = resume[
+                "_id"
+            ]
+        else:
+            updates["resume_id"] = None
+
+    if "cover_letter_id" in request.data:
+        raw_cover_id = request.data.get(
+            "cover_letter_id"
+        )
+
+        if raw_cover_id:
+            cover = _cover_letter_doc(
+                db,
+                owner_id,
+                raw_cover_id,
+            )
+
+            if not cover:
+                return Response(
+                    {
+                        "detail": (
+                            "Selected cover letter not found."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            updates[
+                "cover_letter_id"
+            ] = cover["_id"]
+        else:
+            updates[
+                "cover_letter_id"
+            ] = None
+
+    updates["updated_at"] = utcnow()
+
+    db.job_applications.update_one(
+        {
+            "_id": application_oid,
+            "owner_id": owner_id,
+        },
+        {"$set": updates},
+    )
+
+    return Response(
+        {
+            "resume_id": str(
+                updates.get(
+                    "resume_id",
+                    application.get(
+                        "resume_id",
+                        "",
+                    ),
+                )
+                or ""
+            ),
+            "cover_letter_id": str(
+                updates.get(
+                    "cover_letter_id",
+                    application.get(
+                        "cover_letter_id",
+                        "",
+                    ),
+                )
+                or ""
+            ),
+        }
+    )
