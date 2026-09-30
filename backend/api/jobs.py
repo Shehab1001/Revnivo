@@ -2185,6 +2185,9 @@ def fetch_bulk_public_source(source):
             )
         )
         endpoints.extend(
+            discover_alignerr_openapi_endpoints()
+        )
+        endpoints.extend(
             alignerr_fallback_endpoints()
         )
 
