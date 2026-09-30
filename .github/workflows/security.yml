@@ -26,6 +26,8 @@ jobs:
       AUTH_COOKIE_SECURE: "true"
       SECURE_SSL_REDIRECT: "true"
       MONGODB_URI: "mongodb://127.0.0.1:27017"
+      CLOUDINARY_URL: "cloudinary://ci-key:ci-secret@ci-cloud"
+      CLOUDINARY_FOLDER: "revnivo-ci"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
