@@ -30,7 +30,9 @@ import {
   UserRound,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
+import ApplicationInsights from '../components/ApplicationInsights'
 import Modal from '../components/Modal'
 import api from '../services/api'
 
@@ -483,6 +485,7 @@ function KanbanColumn({
 }
 
 export default function Applications() {
+  const navigate = useNavigate()
   const [applications, setApplications] =
     useState([])
   const [stats, setStats] = useState({
@@ -898,6 +901,10 @@ export default function Applications() {
           icon={CheckCircle2}
         />
       </section>
+
+      {!showArchived && (
+        <ApplicationInsights />
+      )}
 
       <Card
         shadow="none"
@@ -1350,7 +1357,22 @@ export default function Applications() {
             </section>
           )}
 
-          <div className="flex justify-end gap-2 border-t border-divider pt-4">
+          <div className="flex flex-wrap justify-end gap-2 border-t border-divider pt-4">
+            {editing && (
+              <Button
+                type="button"
+                variant="flat"
+                color="primary"
+                onPress={() => {
+                  const id = editing.id
+                  closeModal()
+                  navigate(`/applications/${id}`)
+                }}
+              >
+                Open workspace
+              </Button>
+            )}
+
             <Button
               type="button"
               variant="light"
