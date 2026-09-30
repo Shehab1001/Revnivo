@@ -2204,6 +2204,224 @@ def parse_alignerr_visible_jobs(source, soup):
     return dedupe_jobs(jobs, MAX_JOBS_PER_SOURCE)
 
 
+ALIGNERR_LINKEDIN_COMPANY_ID = "102053983"
+ALIGNERR_LINKEDIN_BATCH_SIZE = 25
+ALIGNERR_LINKEDIN_MAX_START = 7500
+ALIGNERR_LINKEDIN_WORKERS = 10
+
+
+def parse_linkedin_alignerr_jobs(source, html_text):
+    """Parse public LinkedIn guest-search cards for the Alignerr company."""
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return []
+
+    soup = BeautifulSoup(html_text, "html.parser")
+    jobs = []
+    seen = set()
+
+    cards = soup.select(
+        "li, .base-card, .base-search-card, .job-search-card"
+    )
+    for card in cards:
+        link = (
+            card.select_one("a.base-card__full-link[href]")
+            or card.select_one("a[href*=\"/jobs/view/\"]")
+        )
+        if not link:
+            continue
+
+        url = safe_url(
+            "https://www.linkedin.com/",
+            link.get("href"),
+        )
+        if not url:
+            continue
+
+        company_node = (
+            card.select_one(".base-search-card__subtitle")
+            or card.select_one("h4")
+        )
+        company = clean_text(
+            company_node.get_text(" ", strip=True)
+            if company_node
+            else ""
+        )
+        if company and "alignerr" not in company.lower():
+            continue
+
+        title_node = (
+            card.select_one(".base-search-card__title")
+            or card.select_one("h3")
+            or link
+        )
+        title = clean_text(
+            title_node.get_text(" ", strip=True)
+            if title_node
+            else ""
+        )
+        if not title:
+            continue
+
+        location_node = (
+            card.select_one(".job-search-card__location")
+            or card.select_one("[class*=location]")
+        )
+        location = clean_text(
+            location_node.get_text(" ", strip=True)
+            if location_node
+            else ""
+        )
+
+        salary_node = (
+            card.select_one(".job-search-card__salary-info")
+            or card.select_one("[class*=salary]")
+        )
+        salary = clean_text(
+            salary_node.get_text(" ", strip=True)
+            if salary_node
+            else ""
+        )
+
+        card_text = clean_text(
+            card.get_text(" ", strip=True)
+        )
+        job = make_job(
+            source,
+            title,
+            url,
+            card_text,
+            location=location,
+            pay=salary or extract_pay(card_text),
+        )
+        if not job:
+            continue
+
+        # LinkedIn view URLs can contain tracking parameters. The numeric
+        # job id is the stable identity for de-duplication.
+        match = re.search(r"/jobs/view/(?:[^/?-]+-)?(\d+)", url)
+        stable_key = (
+            match.group(1)
+            if match
+            else url.split("?", 1)[0]
+        )
+        if stable_key in seen:
+            continue
+        seen.add(stable_key)
+        jobs.append(job)
+
+    return jobs
+
+
+def fetch_alignerr_linkedin_page(source, start):
+    url = (
+        "https://www.linkedin.com/jobs-guest/jobs/api/"
+        "seeMoreJobPostings/search"
+    )
+    params = {
+        "f_C": ALIGNERR_LINKEDIN_COMPANY_ID,
+        "geoId": "92000000",
+        "start": start,
+    }
+    headers = {
+        **REQUEST_HEADERS,
+        "Referer": (
+            "https://www.linkedin.com/jobs/search/"
+            f"?f_C={ALIGNERR_LINKEDIN_COMPANY_ID}"
+        ),
+    }
+
+    response = requests.get(
+        url,
+        headers=headers,
+        params=params,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    return parse_linkedin_alignerr_jobs(
+        source,
+        response.text,
+    )
+
+
+def fetch_all_alignerr_linkedin_jobs(source, reported_total=0):
+    """Fetch the complete public Alignerr company listing in waves."""
+    jobs = []
+    seen_urls = set()
+    consecutive_empty_pages = 0
+    next_start = 0
+
+    # Fetch in small concurrent waves so 5k+ listings do not take minutes.
+    while next_start <= ALIGNERR_LINKEDIN_MAX_START:
+        starts = list(
+            range(
+                next_start,
+                min(
+                    next_start
+                    + ALIGNERR_LINKEDIN_BATCH_SIZE
+                    * ALIGNERR_LINKEDIN_WORKERS,
+                    ALIGNERR_LINKEDIN_MAX_START + 1,
+                ),
+                ALIGNERR_LINKEDIN_BATCH_SIZE,
+            )
+        )
+        if not starts:
+            break
+
+        page_results = {}
+        with ThreadPoolExecutor(
+            max_workers=ALIGNERR_LINKEDIN_WORKERS
+        ) as executor:
+            futures = {
+                executor.submit(
+                    fetch_alignerr_linkedin_page,
+                    source,
+                    start,
+                ): start
+                for start in starts
+            }
+            for future in as_completed(futures):
+                start = futures[future]
+                try:
+                    page_results[start] = future.result()
+                except requests.RequestException:
+                    page_results[start] = []
+
+        wave_added = 0
+        for start in starts:
+            page_jobs = page_results.get(start, [])
+            if not page_jobs:
+                consecutive_empty_pages += 1
+            else:
+                consecutive_empty_pages = 0
+
+            for job in page_jobs:
+                stable_url = job["url"].split("?", 1)[0]
+                if stable_url in seen_urls:
+                    continue
+                seen_urls.add(stable_url)
+                jobs.append(job)
+                wave_added += 1
+
+        jobs = dedupe_jobs(
+            jobs,
+            MAX_JOBS_PER_SOURCE,
+        )
+
+        if reported_total and len(jobs) >= reported_total:
+            break
+        if consecutive_empty_pages >= 4:
+            break
+        if wave_added == 0:
+            # One whole 10-page wave returned nothing; the board is done or
+            # LinkedIn is rate-limiting the guest endpoint.
+            break
+
+        next_start = starts[-1] + ALIGNERR_LINKEDIN_BATCH_SIZE
+
+    return jobs
+
 def fetch_alignerr_source(source):
     jobs = []
     errors = []
