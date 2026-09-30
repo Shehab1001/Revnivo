@@ -1,12 +1,14 @@
 import copy
 import re
 from collections import Counter
+from io import BytesIO
 from datetime import datetime, timezone
 
 from bson import ObjectId
 from pymongo import ASCENDING, DESCENDING
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, parser_classes
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from .mongo import get_db
@@ -2096,4 +2098,1147 @@ def resume_job_matches(request, resume_id):
                 "resume/job keyword and skill overlap."
             ),
         }
+    )
+
+
+IMPORT_SECTION_ALIASES = {
+    "summary": {
+        "summary",
+        "profile",
+        "professional summary",
+        "professional profile",
+        "career summary",
+        "about",
+        "about me",
+        "objective",
+        "career objective",
+    },
+    "experience": {
+        "experience",
+        "work experience",
+        "professional experience",
+        "employment",
+        "employment history",
+        "career history",
+        "work history",
+    },
+    "education": {
+        "education",
+        "academic background",
+        "academic qualifications",
+        "qualifications",
+    },
+    "skills": {
+        "skills",
+        "technical skills",
+        "core skills",
+        "key skills",
+        "competencies",
+        "core competencies",
+        "technologies",
+        "tools",
+    },
+    "projects": {
+        "projects",
+        "selected projects",
+        "personal projects",
+        "academic projects",
+    },
+    "certifications": {
+        "certifications",
+        "certificates",
+        "licenses",
+        "licenses & certifications",
+        "courses",
+        "training",
+    },
+    "languages": {
+        "languages",
+        "language",
+        "language skills",
+    },
+}
+
+IMPORT_HEADING_TO_SECTION = {
+    alias: key
+    for key, aliases in IMPORT_SECTION_ALIASES.items()
+    for alias in aliases
+}
+
+
+def _import_heading_key(line):
+    cleaned = re.sub(
+        r"[^a-zA-Z0-9& ]+",
+        " ",
+        str(line or "").strip().lower(),
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    if cleaned in IMPORT_HEADING_TO_SECTION:
+        return IMPORT_HEADING_TO_SECTION[cleaned]
+
+    return ""
+
+
+def _extract_resume_upload_text(uploaded):
+    file_name = str(
+        getattr(uploaded, "name", "resume")
+        or "resume"
+    )
+    content_type = str(
+        getattr(uploaded, "content_type", "")
+        or ""
+    ).split(";", 1)[0].lower()
+
+    data = uploaded.read()
+    max_bytes = 12 * 1024 * 1024
+
+    if not data:
+        raise ValueError("The uploaded CV is empty.")
+
+    if len(data) > max_bytes:
+        raise ValueError(
+            "CV file is too large. Maximum size is 12 MB."
+        )
+
+    lower_name = file_name.lower()
+
+    if (
+        content_type == "application/pdf"
+        or lower_name.endswith(".pdf")
+    ):
+        try:
+            from pypdf import PdfReader
+        except ImportError as exc:
+            raise ValueError(
+                "PDF import dependency is not installed. "
+                "Run pip install -r requirements.txt."
+            ) from exc
+
+        try:
+            reader = PdfReader(BytesIO(data))
+            pages = []
+
+            for page in reader.pages[:30]:
+                text = page.extract_text() or ""
+                if text.strip():
+                    pages.append(text)
+
+            extracted = "\n\n".join(pages)
+        except Exception as exc:
+            raise ValueError(
+                "Could not read this PDF CV."
+            ) from exc
+
+    elif (
+        content_type
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        or lower_name.endswith(".docx")
+    ):
+        try:
+            from docx import Document
+        except ImportError as exc:
+            raise ValueError(
+                "DOCX import dependency is not installed. "
+                "Run pip install -r requirements.txt."
+            ) from exc
+
+        try:
+            document = Document(BytesIO(data))
+            chunks = []
+
+            for paragraph in document.paragraphs:
+                text = paragraph.text.strip()
+                if text:
+                    chunks.append(text)
+                else:
+                    chunks.append("")
+
+            for table in document.tables:
+                for row in table.rows:
+                    values = [
+                        cell.text.strip()
+                        for cell in row.cells
+                        if cell.text.strip()
+                    ]
+                    if values:
+                        chunks.append(" | ".join(values))
+
+            extracted = "\n".join(chunks)
+        except Exception as exc:
+            raise ValueError(
+                "Could not read this DOCX CV."
+            ) from exc
+
+    elif (
+        content_type in {
+            "text/plain",
+            "text/markdown",
+        }
+        or lower_name.endswith(".txt")
+        or lower_name.endswith(".md")
+    ):
+        try:
+            extracted = data.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                extracted = data.decode(
+                    "utf-8-sig"
+                )
+            except UnicodeDecodeError as exc:
+                raise ValueError(
+                    "TXT CV must use UTF-8 encoding."
+                ) from exc
+
+    else:
+        raise ValueError(
+            "Unsupported CV format. Upload PDF, DOCX, or TXT."
+        )
+
+    extracted = (
+        extracted.replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .replace("\u00a0", " ")
+    )
+    extracted = re.sub(
+        r"[ \t]+",
+        " ",
+        extracted,
+    )
+    extracted = re.sub(
+        r"\n{4,}",
+        "\n\n\n",
+        extracted,
+    ).strip()
+
+    if len(extracted) < 40:
+        raise ValueError(
+            "Very little text could be extracted from this CV. "
+            "If it is a scanned image PDF, export it as a text-based PDF or DOCX."
+        )
+
+    return extracted, file_name
+
+
+def _split_import_sections(text):
+    sections = {
+        "header": [],
+        "summary": [],
+        "experience": [],
+        "education": [],
+        "skills": [],
+        "projects": [],
+        "certifications": [],
+        "languages": [],
+    }
+
+    current = "header"
+
+    for raw_line in text.split("\n"):
+        line = raw_line.strip()
+
+        if not line:
+            sections[current].append("")
+            continue
+
+        heading = _import_heading_key(line)
+
+        if heading:
+            current = heading
+            continue
+
+        sections[current].append(line)
+
+    return sections
+
+
+def _first_email(text):
+    match = re.search(
+        r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return match.group(0) if match else ""
+
+
+def _first_phone(text):
+    matches = re.findall(
+        r"(?<!\w)(?:\+?\d[\d\s().-]{7,}\d)",
+        text,
+    )
+
+    for match in matches:
+        digits = re.sub(
+            r"\D",
+            "",
+            match,
+        )
+        if 8 <= len(digits) <= 16:
+            return re.sub(
+                r"\s+",
+                " ",
+                match,
+            ).strip()
+
+    return ""
+
+
+def _first_url(text, host_hint=""):
+    pattern = (
+        r"(?:https?://)?(?:www\.)?"
+        r"[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+        r"(?:/[^\s,;]*)?"
+    )
+
+    for match in re.findall(
+        pattern,
+        text,
+        flags=re.IGNORECASE,
+    ):
+        if host_hint and host_hint not in match.lower():
+            continue
+
+        return match.rstrip(").,;")
+
+    return ""
+
+
+def _profile_from_import(sections, full_text):
+    header_lines = [
+        line
+        for line in sections.get(
+            "header",
+            [],
+        )
+        if line
+    ][:14]
+
+    email = _first_email(full_text)
+    phone = _first_phone(full_text)
+    linkedin = _first_url(
+        full_text,
+        "linkedin.",
+    )
+    github = _first_url(
+        full_text,
+        "github.",
+    )
+
+    contact_fragments = {
+        email.lower(),
+        phone.lower(),
+        linkedin.lower(),
+        github.lower(),
+    }
+
+    candidates = []
+
+    for line in header_lines:
+        lower = line.lower()
+
+        if (
+            "@" in line
+            or "linkedin." in lower
+            or "github." in lower
+            or re.search(
+                r"\+?\d[\d\s().-]{7,}",
+                line,
+            )
+        ):
+            continue
+
+        if _import_heading_key(line):
+            continue
+
+        if (
+            len(line) < 2
+            or len(line) > 180
+        ):
+            continue
+
+        if lower in contact_fragments:
+            continue
+
+        candidates.append(line)
+
+    full_name = (
+        candidates[0]
+        if candidates
+        else ""
+    )
+
+    headline = (
+        candidates[1]
+        if len(candidates) > 1
+        else ""
+    )
+
+    website = ""
+
+    for url in re.findall(
+        r"(?:https?://)?(?:www\.)?"
+        r"[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+        r"(?:/[^\s,;]*)?",
+        full_text,
+        flags=re.IGNORECASE,
+    ):
+        lower = url.lower()
+        if (
+            "linkedin." not in lower
+            and "github." not in lower
+            and "@" not in lower
+        ):
+            website = url.rstrip(").,;")
+            break
+
+    location = ""
+
+    for line in header_lines:
+        if line in {
+            full_name,
+            headline,
+        }:
+            continue
+
+        if (
+            email
+            and email.lower()
+            in line.lower()
+        ):
+            continue
+
+        if (
+            phone
+            and re.sub(r"\D", "", phone)
+            in re.sub(r"\D", "", line)
+        ):
+            continue
+
+        lower = line.lower()
+
+        if (
+            "linkedin" in lower
+            or "github" in lower
+            or "http" in lower
+            or "www." in lower
+        ):
+            continue
+
+        if (
+            "," in line
+            and len(line) <= 100
+        ):
+            location = line
+            break
+
+    return {
+        "full_name": full_name,
+        "headline": headline,
+        "email": email,
+        "phone": phone,
+        "location": location,
+        "website": website,
+        "linkedin": linkedin,
+        "github": github,
+    }
+
+
+def _compact_section_text(lines):
+    chunks = []
+    paragraph = []
+
+    for line in lines:
+        if not line:
+            if paragraph:
+                chunks.append(
+                    " ".join(paragraph)
+                )
+                paragraph = []
+            continue
+
+        paragraph.append(line)
+
+    if paragraph:
+        chunks.append(
+            " ".join(paragraph)
+        )
+
+    return "\n".join(chunks).strip()
+
+
+def _parse_import_skills(lines):
+    raw = " ".join(
+        line
+        for line in lines
+        if line
+    )
+    raw = raw.replace("•", ",")
+    raw = raw.replace("|", ",")
+    raw = raw.replace(";", ",")
+
+    values = []
+
+    for item in re.split(
+        r",|\s{2,}",
+        raw,
+    ):
+        item = item.strip(" -–—•\t")
+        if (
+            item
+            and len(item) <= 120
+        ):
+            values.append(item)
+
+    return _clean_list(
+        values,
+        limit=100,
+        item_limit=120,
+    )
+
+
+def _blocks_from_lines(lines):
+    blocks = []
+    current = []
+
+    for line in lines:
+        if not line:
+            if current:
+                blocks.append(current)
+                current = []
+            continue
+
+        current.append(line)
+
+    if current:
+        blocks.append(current)
+
+    if (
+        len(blocks) <= 1
+        and len(
+            [
+                line
+                for line in lines
+                if line
+            ]
+        ) >= 8
+    ):
+        non_empty = [
+            line
+            for line in lines
+            if line
+        ]
+        blocks = [
+            non_empty[index:index + 5]
+            for index in range(
+                0,
+                len(non_empty),
+                5,
+            )
+        ]
+
+    return blocks
+
+
+def _import_bullets(lines):
+    bullets = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        if re.match(
+            r"^[•·▪◦*-]\s+",
+            stripped,
+        ):
+            value = re.sub(
+                r"^[•·▪◦*-]\s+",
+                "",
+                stripped,
+            ).strip()
+            if value:
+                bullets.append(value)
+
+    return bullets
+
+
+def _parse_import_experience(lines):
+    blocks = _blocks_from_lines(lines)
+    output = []
+
+    for index, block in enumerate(
+        blocks[:20]
+    ):
+        clean = [
+            line
+            for line in block
+            if line
+        ]
+
+        if not clean:
+            continue
+
+        bullets = _import_bullets(clean)
+        non_bullets = [
+            line
+            for line in clean
+            if line
+            and line not in bullets
+            and not re.match(
+                r"^[•·▪◦*-]\s+",
+                line,
+            )
+        ]
+
+        title = (
+            non_bullets[0]
+            if non_bullets
+            else "Imported role"
+        )
+        company = (
+            non_bullets[1]
+            if len(non_bullets) > 1
+            else ""
+        )
+
+        date_line = next(
+            (
+                line
+                for line in non_bullets
+                if re.search(
+                    r"\b(?:19|20)\d{2}\b",
+                    line,
+                )
+            ),
+            "",
+        )
+
+        summary_lines = [
+            line
+            for line in non_bullets[2:]
+            if line != date_line
+        ]
+
+        output.append(
+            {
+                "id": (
+                    f"imported-exp-{index + 1}"
+                ),
+                "company": company,
+                "title": title,
+                "location": "",
+                "start_date": date_line,
+                "end_date": "",
+                "current": (
+                    "present"
+                    in date_line.lower()
+                ),
+                "summary": " ".join(
+                    summary_lines
+                ),
+                "bullets": bullets,
+            }
+        )
+
+    return output
+
+
+def _parse_import_education(lines):
+    blocks = _blocks_from_lines(lines)
+    output = []
+
+    for index, block in enumerate(
+        blocks[:15]
+    ):
+        clean = [
+            line
+            for line in block
+            if line
+        ]
+
+        if not clean:
+            continue
+
+        output.append(
+            {
+                "id": (
+                    f"imported-edu-{index + 1}"
+                ),
+                "school": clean[0],
+                "degree": (
+                    clean[1]
+                    if len(clean) > 1
+                    else ""
+                ),
+                "field": "",
+                "location": "",
+                "start_date": "",
+                "end_date": "",
+                "details": " ".join(
+                    clean[2:]
+                ),
+            }
+        )
+
+    return output
+
+
+def _parse_import_projects(lines):
+    blocks = _blocks_from_lines(lines)
+    output = []
+
+    for index, block in enumerate(
+        blocks[:20]
+    ):
+        clean = [
+            line
+            for line in block
+            if line
+        ]
+
+        if not clean:
+            continue
+
+        output.append(
+            {
+                "id": (
+                    f"imported-project-{index + 1}"
+                ),
+                "name": clean[0],
+                "role": "",
+                "url": next(
+                    (
+                        item
+                        for item in clean
+                        if re.search(
+                            r"(?:https?://|www\.)",
+                            item,
+                            re.IGNORECASE,
+                        )
+                    ),
+                    "",
+                ),
+                "description": " ".join(
+                    clean[1:]
+                ),
+                "bullets": _import_bullets(
+                    clean
+                ),
+                "technologies": [],
+            }
+        )
+
+    return output
+
+
+def _parse_import_certifications(lines):
+    output = []
+
+    for index, line in enumerate(
+        [
+            item
+            for item in lines
+            if item
+        ][:40]
+    ):
+        output.append(
+            {
+                "id": (
+                    f"imported-cert-{index + 1}"
+                ),
+                "name": line,
+                "issuer": "",
+                "date": "",
+                "url": "",
+            }
+        )
+
+    return output
+
+
+def _parse_import_languages(lines):
+    output = []
+
+    for index, line in enumerate(
+        [
+            item
+            for item in lines
+            if item
+        ][:30]
+    ):
+        parts = re.split(
+            r"\s*[-–—:|]\s*",
+            line,
+            maxsplit=1,
+        )
+
+        output.append(
+            {
+                "id": (
+                    f"imported-lang-{index + 1}"
+                ),
+                "language": parts[0],
+                "level": (
+                    parts[1]
+                    if len(parts) > 1
+                    else ""
+                ),
+            }
+        )
+
+    return output
+
+
+def _resume_from_imported_text(
+    text,
+    file_name,
+):
+    sections = _split_import_sections(
+        text
+    )
+    profile = _profile_from_import(
+        sections,
+        text,
+    )
+
+    summary = _compact_section_text(
+        sections.get(
+            "summary",
+            [],
+        )
+    )
+
+    if not summary:
+        header_candidates = [
+            line
+            for line in sections.get(
+                "header",
+                [],
+            )
+            if line
+            and line
+            not in {
+                profile.get("full_name"),
+                profile.get("headline"),
+            }
+        ]
+
+        descriptive = [
+            line
+            for line in header_candidates
+            if len(line) >= 70
+        ]
+
+        if descriptive:
+            summary = descriptive[0]
+
+    stem = re.sub(
+        r"\.(pdf|docx|txt|md)$",
+        "",
+        file_name,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    resume = _resume_defaults(
+        stem or "Imported Resume"
+    )
+    resume.update(
+        {
+            "profile": profile,
+            "summary": summary,
+            "experience": (
+                _parse_import_experience(
+                    sections.get(
+                        "experience",
+                        [],
+                    )
+                )
+            ),
+            "education": (
+                _parse_import_education(
+                    sections.get(
+                        "education",
+                        [],
+                    )
+                )
+            ),
+            "skills": _parse_import_skills(
+                sections.get(
+                    "skills",
+                    [],
+                )
+            ),
+            "projects": (
+                _parse_import_projects(
+                    sections.get(
+                        "projects",
+                        [],
+                    )
+                )
+            ),
+            "certifications": (
+                _parse_import_certifications(
+                    sections.get(
+                        "certifications",
+                        [],
+                    )
+                )
+            ),
+            "languages": (
+                _parse_import_languages(
+                    sections.get(
+                        "languages",
+                        [],
+                    )
+                )
+            ),
+        }
+    )
+
+    return resume, sections
+
+
+def _ats_readiness_report(
+    resume,
+    raw_text="",
+):
+    profile = resume.get(
+        "profile",
+        {},
+    )
+
+    experience = resume.get(
+        "experience",
+        [],
+    )
+    education = resume.get(
+        "education",
+        [],
+    )
+    skills = resume.get(
+        "skills",
+        [],
+    )
+
+    experience_text = " ".join(
+        " ".join(
+            [
+                item.get(
+                    "summary",
+                    "",
+                ),
+                " ".join(
+                    item.get(
+                        "bullets",
+                        [],
+                    )
+                ),
+            ]
+        )
+        for item in experience
+    )
+
+    quantified = bool(
+        re.search(
+            r"\b\d+(?:\.\d+)?%|\b\d+[kmb]?\+?\b",
+            experience_text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+    checks = {
+        "name": bool(
+            profile.get("full_name")
+        ),
+        "email": bool(
+            profile.get("email")
+        ),
+        "phone": bool(
+            profile.get("phone")
+        ),
+        "headline": bool(
+            profile.get("headline")
+        ),
+        "summary": len(
+            resume.get(
+                "summary",
+                "",
+            )
+        ) >= 80,
+        "experience": bool(experience),
+        "education": bool(education),
+        "skills": len(skills) >= 5,
+        "quantified_results": quantified,
+        "parseable_text": len(
+            raw_text.strip()
+        ) >= 300,
+    }
+
+    weights = {
+        "name": 5,
+        "email": 8,
+        "phone": 5,
+        "headline": 8,
+        "summary": 12,
+        "experience": 20,
+        "education": 8,
+        "skills": 12,
+        "quantified_results": 12,
+        "parseable_text": 10,
+    }
+
+    score = sum(
+        weights[key]
+        for key, passed in checks.items()
+        if passed
+    )
+
+    warnings = []
+
+    if not checks["email"]:
+        warnings.append(
+            "Add an email address."
+        )
+
+    if not checks["phone"]:
+        warnings.append(
+            "Add a phone number."
+        )
+
+    if not checks["headline"]:
+        warnings.append(
+            "Add a clear professional headline."
+        )
+
+    if not checks["summary"]:
+        warnings.append(
+            "Add a concise professional summary of at least a few sentences."
+        )
+
+    if not checks["experience"]:
+        warnings.append(
+            "Review the imported Experience section; no structured experience was detected."
+        )
+
+    if not checks["skills"]:
+        warnings.append(
+            "Add at least five relevant skills."
+        )
+
+    if not checks[
+        "quantified_results"
+    ]:
+        warnings.append(
+            "Where accurate, add measurable outcomes to experience bullets."
+        )
+
+    return {
+        "score": score,
+        "checks": checks,
+        "warnings": warnings,
+        "disclaimer": (
+            "ATS Readiness is a heuristic formatting/content completeness "
+            "check. It is not an employer ATS score or hiring prediction."
+        ),
+    }
+
+
+@api_view(["POST"])
+@parser_classes(
+    [
+        MultiPartParser,
+        FormParser,
+    ]
+)
+def resume_import(request):
+    db = get_db()
+    owner_id = _owner_oid(request)
+    _ensure_indexes(db)
+
+    uploaded = request.FILES.get(
+        "file"
+    )
+
+    if not uploaded:
+        return Response(
+            {
+                "detail": (
+                    "Choose a PDF, DOCX, or TXT CV to upload."
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        text, file_name = (
+            _extract_resume_upload_text(
+                uploaded
+            )
+        )
+        parsed_resume, sections = (
+            _resume_from_imported_text(
+                text,
+                file_name,
+            )
+        )
+    except ValueError as exc:
+        return Response(
+            {"detail": str(exc)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    requested_name = _text(
+        request.data.get("name"),
+        180,
+    )
+
+    if requested_name:
+        parsed_resume[
+            "name"
+        ] = requested_name
+
+    now = utcnow()
+    doc = {
+        "owner_id": owner_id,
+        **parsed_resume,
+        "import_source_name": file_name,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    result = db.resumes.insert_one(doc)
+    doc["_id"] = result.inserted_id
+
+    report = _ats_readiness_report(
+        doc,
+        raw_text=text,
+    )
+
+    detected_sections = [
+        key
+        for key in SECTION_KEYS
+        if sections.get(key)
+    ]
+
+    return Response(
+        {
+            "resume": _serialize_resume(
+                doc
+            ),
+            "import": {
+                "file_name": file_name,
+                "characters_extracted": len(
+                    text
+                ),
+                "words_extracted": len(
+                    re.findall(
+                        r"\S+",
+                        text,
+                    )
+                ),
+                "detected_sections": (
+                    detected_sections
+                ),
+                "readiness": report,
+            },
+        },
+        status=status.HTTP_201_CREATED,
     )
