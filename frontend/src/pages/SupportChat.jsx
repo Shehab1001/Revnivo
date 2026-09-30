@@ -1172,7 +1172,7 @@ export default function SupportChat() {
             Delete for me
           </button>
 
-          {(user?.role === 'admin' || contextMenu.sender === ownSender) && (
+          {(contextMenu.isMine ?? (contextMenu.sender === ownSender)) && (
             <button
               className="block w-full rounded-lg px-3 py-2 text-left text-xs text-danger transition-colors hover:bg-danger/10"
               onClick={() => {
@@ -1543,6 +1543,7 @@ export default function SupportChat() {
                                   {
                                     id: message.id,
                                     sender: message.sender,
+                                    isMine: own,
                                     x: event.clientX,
                                     y: event.clientY,
                                   }
