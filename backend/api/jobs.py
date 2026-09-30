@@ -2506,6 +2506,33 @@ def fetch_alignerr_source(source):
         if reported_total and len(jobs) >= reported_total:
             break
 
+    # Alignerr's own jobs page only server-renders the first batch. If the
+    # private/public feed discovery above did not reach the advertised total,
+    # fall back to LinkedIn's public guest feed scoped to Alignerr's company
+    # id. This exposes the thousands of active Alignerr postings without
+    # requiring a LinkedIn login.
+    if not (
+        reported_total
+        and len(jobs) >= reported_total
+    ):
+        linkedin_jobs = fetch_all_alignerr_linkedin_jobs(
+            source,
+            reported_total=reported_total,
+        )
+        if len(linkedin_jobs) > len(jobs):
+            jobs = linkedin_jobs
+        elif linkedin_jobs:
+            jobs.extend(linkedin_jobs)
+            jobs = dedupe_jobs(
+                jobs,
+                MAX_JOBS_PER_SOURCE,
+            )
+
+        reported_total = max(
+            reported_total,
+            len(linkedin_jobs),
+        )
+
     complete = bool(
         reported_total
         and len(jobs) >= reported_total
