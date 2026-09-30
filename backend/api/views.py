@@ -2153,7 +2153,10 @@ def support_chat_attachment(request, message_id):
     if not message or not message.get("attachment") or message.get("deleted"):
         return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    if not is_admin_doc(viewer) and message.get("user_id") != owner:
+    if message.get("conversation_key"):
+        if not is_admin_doc(viewer) or str(owner) not in set(message.get("participant_ids") or []):
+            return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+    elif not is_admin_doc(viewer) and message.get("user_id") != owner:
         return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
 
     if owner in message.get("deleted_for", []):
@@ -2232,12 +2235,11 @@ def chat_presence(request):
 
     db.users.update_one({"_id": owner}, {"$set": {"last_seen": utcnow()}})
     viewer = db.users.find_one({"_id": owner})
-    if not is_admin_doc(viewer):
-        query = {"role": "admin"}
-    elif is_superadmin_doc(viewer):
-        query = {"_id": {"$ne": owner}}
-    else:
-        query = {"role": {"$ne": "admin"}}
+    query = (
+        {"role": "admin"}
+        if not is_admin_doc(viewer)
+        else {"_id": {"$ne": owner}}
+    )
     people = []
 
     for person in db.users.find(query).sort("created_at", DESCENDING):
@@ -2261,12 +2263,12 @@ def chat_presence(request):
         is_typing = bool(
             typing_until
             and utcnow() < typing_until
-            and (is_admin_doc(viewer) or typing_for in viewer_target)
+            and typing_for in viewer_target
         )
         is_recording = bool(
             recording_until
             and utcnow() < recording_until
-            and (is_admin_doc(viewer) or recording_for in viewer_target)
+            and recording_for in viewer_target
         )
 
         people.append({
