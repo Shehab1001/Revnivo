@@ -1,4 +1,6 @@
 import hashlib
+import html
+import json
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -11,8 +13,9 @@ from rest_framework.response import Response
 
 
 CACHE_TTL_SECONDS = 15 * 60
-REQUEST_TIMEOUT_SECONDS = 9
-MAX_JOBS_PER_SOURCE = 150
+REQUEST_TIMEOUT_SECONDS = 12
+MAX_JOBS_PER_SOURCE = 500
+MAX_TELUS_PAGES = 12
 
 _cache = {"expires_at": 0.0, "payload": None}
 _cache_lock = threading.Lock()
@@ -21,9 +24,11 @@ REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/154.0 Safari/537.36 RevnivoJobs/1.0"
+        "Chrome/154.0 Safari/537.36 RevnivoJobs/2.0"
     ),
+    "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
 }
 
 JOB_SOURCES = [
@@ -32,76 +37,76 @@ JOB_SOURCES = [
         "name": "Alignerr",
         "listing_url": "https://www.alignerr.com/jobs",
         "browse_url": "https://www.alignerr.com/jobs",
-        "host": "alignerr.com",
-        "mode": "anchors",
-        "href_contains": ["/jobs/"],
-        "exclude_paths": ["/jobs", "/jobs/"],
-        "description": "Expert and general AI training roles from Alignerr.",
+        "mode": "public_page",
+        "detail_url_template": "https://www.alignerr.com/jobs/{id}",
+        "description": "Public expert and AI training roles from Alignerr.",
     },
     {
         "key": "outlier",
         "name": "Outlier",
         "listing_url": "https://app.outlier.ai/opportunities",
         "browse_url": "https://app.outlier.ai/opportunities",
-        "host": "outlier.ai",
-        "mode": "anchors",
-        "href_contains": ["/opportunities/", "/experts/"],
-        "exclude_paths": ["/opportunities", "/opportunities/"],
-        "description": "Remote AI evaluation, coding, language, and specialist work.",
+        "mode": "public_page",
+        "detail_url_template": "https://app.outlier.ai/opportunities/{id}",
+        "description": "Public remote AI evaluation, coding, language, and specialist opportunities.",
     },
     {
-        "key": "afterquery",
+        "key": "afterquery_experts",
         "name": "AfterQuery Experts",
         "listing_url": "https://experts.afterquery.com/apply",
         "browse_url": "https://experts.afterquery.com/apply",
-        "host": "afterquery.com",
-        "mode": "anchors",
-        "href_contains": ["/apply/"],
-        "exclude_paths": ["/apply", "/apply/"],
-        "description": "Remote expert work creating and evaluating frontier AI training data.",
+        "mode": "public_page",
+        "detail_url_template": "https://experts.afterquery.com/apply/{id}",
+        "description": "Public expert opportunities exposed by the AfterQuery Experts application site.",
+    },
+    {
+        "key": "afterquery_careers",
+        "name": "AfterQuery Careers",
+        "listing_url": "https://www.afterquery.com/careers",
+        "browse_url": "https://www.afterquery.com/careers",
+        "mode": "ashby",
+        "api_url": "https://api.ashbyhq.com/posting-api/job-board/AfterQuery",
+        "description": "Open engineering, research, operations, and business roles at AfterQuery.",
     },
     {
         "key": "dataannotation",
         "name": "DataAnnotation",
         "listing_url": "https://www.dataannotation.tech/",
         "browse_url": "https://www.dataannotation.tech/",
-        "host": "dataannotation.tech",
-        "mode": "salary_anchors",
-        "href_contains": ["/"],
-        "exclude_paths": ["/"],
-        "description": "Remote generalist, coding, language, and domain-expert AI training roles.",
+        "mode": "public_page",
+        "description": "Public generalist, coding, language, and domain-expert AI training roles.",
     },
     {
         "key": "mindrift",
         "name": "Mindrift",
         "listing_url": "https://mindrift.ai/apply",
         "browse_url": "https://mindrift.ai/apply",
-        "host": "mindrift.ai",
-        "mode": "opportunity_text",
-        "href_contains": ["/apply", "/project/", "/opportunities"],
-        "exclude_paths": ["/apply"],
-        "description": "Project-based AI training opportunities across many expert domains.",
+        "mode": "public_page",
+        "description": "Public project-based AI training opportunities across expert domains.",
     },
     {
         "key": "crowdgen",
         "name": "CrowdGen by Appen",
         "listing_url": "https://crowdgen.com/home/",
+        "extra_urls": [
+            "https://crowdgen.com/experts/",
+        ],
         "browse_url": "https://crowdgen.com/",
-        "host": "crowdgen.com",
-        "mode": "project_anchors",
-        "href_contains": ["/"],
-        "exclude_paths": ["/", "/home/"],
-        "description": "AI data, evaluation, annotation, language, and expert projects.",
+        "mode": "public_page",
+        "description": "Public AI data, evaluation, annotation, language, and expert projects.",
     },
     {
         "key": "telus",
-        "name": "TELUS Digital AI Community",
-        "listing_url": "https://jobs.telusdigital.com/search/jobs",
-        "browse_url": "https://jobs.telusdigital.com/search/jobs",
-        "host": "jobs.telusdigital.com",
+        "name": "TELUS Digital AI",
+        "listing_url": (
+            "https://jobs.telusdigital.com/search/jobs"
+            "?cfm5=AI%20Community&ns_category=ai-community"
+        ),
+        "browse_url": (
+            "https://jobs.telusdigital.com/search/jobs"
+            "?cfm5=AI%20Community&ns_category=ai-community"
+        ),
         "mode": "telus",
-        "href_contains": ["/job/", "/jobs/"],
-        "exclude_paths": ["/search/jobs", "/jobs/search"],
         "description": "AI Community and artificial-intelligence openings from TELUS Digital.",
     },
     {
@@ -109,70 +114,124 @@ JOB_SOURCES = [
         "name": "Stellar AI",
         "listing_url": "https://joinstellar.ai/apply/",
         "browse_url": "https://joinstellar.ai/apply/",
-        "host": "joinstellar.ai",
-        "mode": "anchors",
-        "href_contains": ["/apply/"],
-        "exclude_paths": ["/apply", "/apply/"],
-        "description": "Flexible AI training and coding-agent evaluation contracts.",
+        "mode": "public_page",
+        "description": "Public flexible AI training and software evaluation contracts.",
     },
     {
         "key": "oneforma",
         "name": "OneForma",
         "listing_url": "",
         "browse_url": "https://www.oneforma.com/jobs/",
-        "host": "oneforma.com",
-        "mode": "directory",
-        "href_contains": [],
-        "exclude_paths": [],
-        "description": "Profile-matched AI data, language, annotation, and evaluation projects.",
+        "mode": "account_only",
+        "description": "Jobs are matched after sign-in using profile, country, language, and qualifications.",
     },
     {
         "key": "prolific",
         "name": "Prolific Expert Network",
-        "listing_url": "",
+        "listing_url": "https://www.prolific.com/expert-network",
         "browse_url": "https://www.prolific.com/expert-network",
-        "host": "prolific.com",
-        "mode": "directory",
-        "href_contains": [],
-        "exclude_paths": [],
-        "description": "Expert and AI-tasker studies matched inside a verified participant account.",
+        "mode": "public_page",
+        "description": "Public example expert roles plus account-matched AI studies and tasks.",
     },
     {
         "key": "lxt",
         "name": "LXT",
-        "listing_url": "",
+        "listing_url": "https://www.lxt.ai/jobs/",
         "browse_url": "https://www.lxt.ai/jobs/",
-        "host": "lxt.ai",
-        "mode": "directory",
-        "href_contains": [],
-        "exclude_paths": [],
-        "description": "Flexible AI data collection, labeling, and transcription opportunities.",
+        "mode": "public_page",
+        "description": "AI data careers and contributor opportunities, including crowd work through partners.",
     },
 ]
 
 SALARY_RE = re.compile(
-    r"(?:up to\s*)?\$\s?[\d,.]+(?:\s*(?:-|–|to)\s*\$?\s?[\d,.]+)?\+?"
-    r"(?:\s*(?:USD)?\s*/\s*(?:hr|hour))?",
-    re.IGNORECASE,
-)
-HOURLY_RE = re.compile(
-    r"\$\s?[\d,.]+(?:\s*(?:-|–|to)\s*\$?\s?[\d,.]+)?\+?\s*/\s*(?:hr|hour)",
+    r"(?:up\s+to\s*)?"
+    r"(?:USD\s*)?[\$£€]\s?[\d,.]+"
+    r"(?:\s*(?:-|–|—|to)\s*(?:USD\s*)?[\$£€]?\s?[\d,.]+)?"
+    r"\+?"
+    r"(?:\s*(?:USD)?\s*/?\s*(?:hr|hour|day|task|project))?",
     re.IGNORECASE,
 )
 EMPLOYMENT_RE = re.compile(
-    r"\b(full[- ]?time|part[- ]?time|contract|freelance|intern(?:ship)?|temporary)\b",
+    r"\b(full[- ]?time|part[- ]?time|contract|contractor|freelance|"
+    r"intern(?:ship)?|temporary|project[- ]?based|hourly)\b",
     re.IGNORECASE,
 )
+JOB_PATH_RE = re.compile(
+    r"/(?:jobs?|opportunities|positions?|careers?|apply)/[^/?#]+",
+    re.IGNORECASE,
+)
+ID_RE = re.compile(r"^[0-9a-f-]{8,}$", re.IGNORECASE)
+
+JOB_WORDS = {
+    "accountant",
+    "analyst",
+    "annotator",
+    "architect",
+    "attorney",
+    "auditor",
+    "biologist",
+    "chemist",
+    "coder",
+    "coding",
+    "consultant",
+    "contractor",
+    "designer",
+    "developer",
+    "doctor",
+    "editor",
+    "educator",
+    "engineer",
+    "evaluator",
+    "expert",
+    "generalist",
+    "intern",
+    "lawyer",
+    "linguist",
+    "manager",
+    "mathematician",
+    "nurse",
+    "physician",
+    "rater",
+    "researcher",
+    "reviewer",
+    "scientist",
+    "specialist",
+    "trainer",
+    "transcriptionist",
+    "translator",
+    "writer",
+}
+
+NEGATIVE_TITLE_WORDS = {
+    "about",
+    "blog",
+    "cookie",
+    "faq",
+    "home",
+    "learn more",
+    "login",
+    "log in",
+    "privacy",
+    "sign in",
+    "terms",
+    "view all",
+}
 
 
 def clean_text(value):
-    return re.sub(r"\s+", " ", str(value or "")).strip()
+    value = html.unescape(str(value or ""))
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def strip_html(value):
+    return clean_text(re.sub(r"<[^>]+>", " ", str(value or "")))
 
 
 def safe_url(base_url, href):
     value = clean_text(href)
-    if not value or value.startswith(("javascript:", "mailto:", "#")):
+    if not value or value.startswith(("javascript:", "mailto:", "tel:", "#")):
         return ""
+
     result = urljoin(base_url, value)
     parsed = urlparse(result)
     if parsed.scheme not in {"http", "https"}:
@@ -186,245 +245,932 @@ def job_id(source_key, title, url):
 
 
 def extract_pay(text):
-    match = HOURLY_RE.search(text) or SALARY_RE.search(text)
+    match = SALARY_RE.search(clean_text(text))
     return clean_text(match.group(0)) if match else ""
 
 
 def detect_remote(text):
-    lowered = text.lower()
-    return "remote" in lowered or "work from home" in lowered
+    lowered = clean_text(text).lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "remote",
+            "work from home",
+            "work from anywhere",
+            "fully remote",
+        )
+    )
 
 
 def detect_employment(text):
-    match = EMPLOYMENT_RE.search(text)
+    match = EMPLOYMENT_RE.search(clean_text(text))
     if not match:
         return ""
+
     value = match.group(1).lower().replace("-", " ")
     if value.startswith("intern"):
         return "Internship"
+    if value == "contractor":
+        return "Contract"
+    if value == "project based":
+        return "Project-based"
     return value.title()
 
 
 def detect_category(title):
-    lowered = title.lower()
+    lowered = clean_text(title).lower()
     categories = [
-        ("Coding", ["software", "developer", "engineer", "coding", "python", "javascript", "programmer"]),
-        ("Languages", ["language", "linguist", "bilingual", "translator", "translation", "localization", "arabic", "english", "french", "spanish", "german", "chinese", "japanese", "korean"]),
-        ("STEM", ["math", "physics", "chem", "biology", "scientist", "research", "statistics", "medical", "physician", "doctor"]),
-        ("Finance", ["finance", "account", "audit", "bank", "investment", "insurance", "tax"]),
-        ("Legal", ["legal", "law", "attorney", "compliance"]),
-        ("Creative", ["design", "writer", "editor", "content", "video", "marketing"]),
-        ("AI Training", ["ai trainer", "annotat", "evaluator", "reviewer", "labeler", "rater"]),
+        (
+            "Coding",
+            [
+                "software",
+                "developer",
+                "engineer",
+                "coding",
+                "python",
+                "javascript",
+                "programmer",
+                "devops",
+                "frontend",
+                "backend",
+                "machine learning",
+            ],
+        ),
+        (
+            "Languages",
+            [
+                "language",
+                "linguist",
+                "bilingual",
+                "translator",
+                "translation",
+                "localization",
+                "transcription",
+                "arabic",
+                "english",
+                "french",
+                "spanish",
+                "german",
+                "chinese",
+                "japanese",
+                "korean",
+                "hindi",
+                "portuguese",
+            ],
+        ),
+        (
+            "STEM",
+            [
+                "math",
+                "physics",
+                "chem",
+                "biology",
+                "scientist",
+                "research",
+                "statistics",
+                "medical",
+                "physician",
+                "doctor",
+                "nurse",
+            ],
+        ),
+        (
+            "Finance",
+            [
+                "finance",
+                "account",
+                "audit",
+                "bank",
+                "investment",
+                "insurance",
+                "tax",
+                "trader",
+                "equity",
+                "portfolio",
+            ],
+        ),
+        (
+            "Legal",
+            [
+                "legal",
+                "law",
+                "attorney",
+                "compliance",
+                "paralegal",
+                "counsel",
+            ],
+        ),
+        (
+            "Creative",
+            [
+                "design",
+                "writer",
+                "editor",
+                "content",
+                "video",
+                "marketing",
+            ],
+        ),
+        (
+            "AI Training",
+            [
+                "ai trainer",
+                "annotat",
+                "evaluator",
+                "reviewer",
+                "labeler",
+                "rater",
+                "data analyst",
+                "internet assessor",
+            ],
+        ),
     ]
+
     for category, keywords in categories:
         if any(keyword in lowered for keyword in keywords):
             return category
     return "Other"
 
 
-def looks_like_job_text(text):
-    lowered = text.lower()
-    if len(text) < 8 or len(text) > 650:
-        return False
-
-    negative = [
-        "privacy policy",
-        "terms of",
-        "cookie",
-        "sign in",
-        "log in",
-        "learn more",
-        "view all",
-        "about us",
-        "contact us",
-        "frequently asked",
-    ]
-    if any(term in lowered for term in negative):
-        return False
-
-    positive = [
-        "expert",
-        "engineer",
-        "trainer",
-        "evaluator",
-        "specialist",
-        "annotator",
-        "reviewer",
-        "research",
-        "developer",
-        "writer",
-        "designer",
-        "analyst",
-        "scientist",
-        "linguist",
-        "transcription",
-        "project",
-    ]
-    return any(term in lowered for term in positive)
-
-
-def title_from_text(text):
+def looks_like_title(text):
     value = clean_text(text)
-    value = re.sub(r"\bApply(?: now)?\b.*$", "", value, flags=re.IGNORECASE).strip(" -–|")
-    pay = extract_pay(value)
+    lowered = value.lower()
+
+    if len(value) < 4 or len(value) > 180:
+        return False
+    if lowered in NEGATIVE_TITLE_WORDS:
+        return False
+    if any(lowered.startswith(prefix) for prefix in ("copyright", "©", "http")):
+        return False
+
+    words = set(re.findall(r"[a-z]+", lowered))
+    return bool(words & JOB_WORDS)
+
+
+def normalize_title(value):
+    title = clean_text(value)
+    if not title:
+        return ""
+
+    pay = extract_pay(title)
     if pay:
-        value = value.replace(pay, " ").strip()
-    value = re.sub(
-        r"\b(Remote|Contract|Freelance|Full[- ]?time|Part[- ]?time|Intern(?:ship)?)\b.*$",
+        title = clean_text(title.replace(pay, " "))
+
+    title = re.sub(
+        r"\b(?:Apply(?: now)?|View details?|View role|Learn more)\b.*$",
         "",
-        value,
+        title,
         flags=re.IGNORECASE,
-    ).strip(" -–|")
-    if len(value) > 160:
-        value = value[:157].rstrip() + "..."
-    return value
+    )
+    title = re.sub(
+        r"\b(?:Remote|Full[- ]?time|Part[- ]?time|Freelance|Contract)\b\s*$",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    )
+    title = title.strip(" -–—|•·")
+    return title[:180]
 
 
-def make_job(source, title, url, raw_text="", location="", pay="", employment_type=""):
-    title = clean_text(title)
+def make_job(
+    source,
+    title,
+    url,
+    raw_text="",
+    location="",
+    pay="",
+    employment_type="",
+    category="",
+):
+    title = normalize_title(title)
     raw_text = clean_text(raw_text)
+
     if not title:
         return None
 
+    resolved_url = safe_url(
+        source.get("listing_url") or source["browse_url"],
+        url,
+    ) or source["browse_url"]
+
+    location = clean_text(location)
+    remote = detect_remote(
+        " ".join([title, raw_text, location])
+    )
+
+    if not location and remote:
+        location = "Remote"
+
     return {
-        "id": job_id(source["key"], title, url),
+        "id": job_id(source["key"], title, resolved_url),
         "platform": source["name"],
         "platform_key": source["key"],
         "title": title,
-        "url": url or source["browse_url"],
-        "location": clean_text(location) or ("Remote" if detect_remote(raw_text) else ""),
-        "remote": detect_remote(raw_text) or clean_text(location).lower() == "remote",
+        "url": resolved_url,
+        "location": location,
+        "remote": remote,
         "pay": clean_text(pay) or extract_pay(raw_text),
-        "employment_type": clean_text(employment_type) or detect_employment(raw_text),
-        "category": detect_category(title),
-        "summary": raw_text[:320],
+        "employment_type": (
+            clean_text(employment_type)
+            or detect_employment(raw_text)
+        ),
+        "category": clean_text(category) or detect_category(title),
+        "summary": raw_text[:420],
     }
 
 
-def parse_anchor_jobs(source, soup):
+def flatten_json(value):
+    if isinstance(value, dict):
+        yield value
+        for nested in value.values():
+            yield from flatten_json(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            yield from flatten_json(nested)
+
+
+def parse_jobposting_json(source, soup):
     jobs = []
-    seen = set()
+
+    for script in soup.select('script[type="application/ld+json"]'):
+        raw = script.string or script.get_text() or ""
+        if not raw.strip():
+            continue
+
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+
+        for item in flatten_json(payload):
+            raw_type = item.get("@type")
+            types = (
+                raw_type
+                if isinstance(raw_type, list)
+                else [raw_type]
+            )
+            if "JobPosting" not in types:
+                continue
+
+            location = ""
+            job_location = item.get("jobLocation")
+            if isinstance(job_location, list):
+                job_location = job_location[0] if job_location else None
+            if isinstance(job_location, dict):
+                address = job_location.get("address") or {}
+                if isinstance(address, dict):
+                    location = ", ".join(
+                        clean_text(address.get(key))
+                        for key in (
+                            "addressLocality",
+                            "addressRegion",
+                            "addressCountry",
+                        )
+                        if clean_text(address.get(key))
+                    )
+
+            description = strip_html(
+                item.get("description")
+                or item.get("qualifications")
+                or ""
+            )
+            pay = ""
+            salary = item.get("baseSalary")
+            if isinstance(salary, dict):
+                value = salary.get("value")
+                if isinstance(value, dict):
+                    minimum = value.get("minValue")
+                    maximum = value.get("maxValue")
+                    unit = value.get("unitText")
+                    currency = salary.get("currency") or "USD"
+                    if minimum is not None or maximum is not None:
+                        bounds = (
+                            f"{minimum}-{maximum}"
+                            if minimum is not None and maximum is not None
+                            else str(minimum if minimum is not None else maximum)
+                        )
+                        pay = f"{currency} {bounds}"
+                        if unit:
+                            pay += f"/{clean_text(unit).lower()}"
+
+            job = make_job(
+                source,
+                item.get("title") or item.get("name"),
+                item.get("url") or source["browse_url"],
+                description,
+                location=location,
+                pay=pay,
+                employment_type=item.get("employmentType") or "",
+            )
+            if job:
+                jobs.append(job)
+
+    return jobs
+
+
+def object_title(item):
+    for key in (
+        "jobTitle",
+        "title",
+        "positionTitle",
+        "roleTitle",
+        "displayName",
+        "name",
+    ):
+        value = item.get(key)
+        if isinstance(value, str) and looks_like_title(value):
+            return value
+    return ""
+
+
+def object_identifier(item):
+    for key in (
+        "opportunityId",
+        "jobId",
+        "postingId",
+        "positionId",
+        "uuid",
+        "id",
+    ):
+        value = item.get(key)
+        if isinstance(value, (str, int)):
+            value = clean_text(value)
+            if value and len(value) >= 4:
+                return value
+    return ""
+
+
+def object_url(source, item):
+    for key in (
+        "applyUrl",
+        "applicationUrl",
+        "jobUrl",
+        "externalUrl",
+        "url",
+        "href",
+    ):
+        value = item.get(key)
+        if isinstance(value, str):
+            resolved = safe_url(
+                source.get("listing_url") or source["browse_url"],
+                value,
+            )
+            if resolved:
+                return resolved
+
+    identifier = object_identifier(item)
+    template = source.get("detail_url_template")
+    if identifier and template:
+        return template.format(id=identifier)
+
+    return source["browse_url"]
+
+
+def object_blob(item):
+    pieces = []
+
+    for key in (
+        "description",
+        "descriptionPlain",
+        "summary",
+        "subtitle",
+        "location",
+        "locationName",
+        "workplace",
+        "skill",
+        "category",
+        "employmentType",
+        "compensation",
+        "pay",
+        "rate",
+    ):
+        value = item.get(key)
+        if isinstance(value, str):
+            pieces.append(strip_html(value))
+        elif isinstance(value, (int, float)):
+            pieces.append(str(value))
+
+    return clean_text(" ".join(pieces))
+
+
+def parse_embedded_json(source, soup):
+    jobs = []
+    seen_objects = set()
+
+    scripts = soup.select(
+        'script#__NEXT_DATA__, '
+        'script[type="application/json"], '
+        'script[data-hypernova-key], '
+        'script[data-state]'
+    )
+
+    for script in scripts:
+        raw = script.string or script.get_text() or ""
+        raw = raw.strip()
+        if not raw or len(raw) > 20_000_000:
+            continue
+
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+
+        for item in flatten_json(payload):
+            title = object_title(item)
+            if not title:
+                continue
+
+            fingerprint = (
+                title.lower(),
+                object_identifier(item),
+            )
+            if fingerprint in seen_objects:
+                continue
+
+            blob = object_blob(item)
+            key_text = " ".join(
+                str(key).lower()
+                for key in item.keys()
+            )
+            looks_job_object = any(
+                marker in key_text
+                for marker in (
+                    "job",
+                    "opportun",
+                    "position",
+                    "role",
+                    "opening",
+                    "compensation",
+                    "salary",
+                    "location",
+                )
+            )
+            if not looks_job_object and not extract_pay(blob):
+                continue
+
+            seen_objects.add(fingerprint)
+
+            location = clean_text(
+                item.get("location")
+                or item.get("locationName")
+                or item.get("workplace")
+                or ""
+            )
+            if isinstance(item.get("location"), dict):
+                location = clean_text(
+                    item["location"].get("name")
+                    or item["location"].get("displayName")
+                    or ""
+                )
+
+            pay = clean_text(
+                item.get("pay")
+                or item.get("rate")
+                or item.get("compensation")
+                or ""
+            )
+            if isinstance(
+                item.get("compensation"),
+                dict,
+            ):
+                pay = object_blob(
+                    item["compensation"]
+                )
+
+            job = make_job(
+                source,
+                title,
+                object_url(source, item),
+                blob,
+                location=location,
+                pay=pay,
+                employment_type=(
+                    item.get("employmentType")
+                    or item.get("type")
+                    or ""
+                ),
+                category=(
+                    item.get("category")
+                    or item.get("skill")
+                    or ""
+                ),
+            )
+            if job:
+                jobs.append(job)
+
+    return jobs
+
+
+def element_url(source, element):
+    anchor = (
+        element
+        if getattr(element, "name", None) == "a"
+        else element.find("a", href=True)
+    )
+    if anchor and anchor.get("href"):
+        return safe_url(
+            source.get("listing_url") or source["browse_url"],
+            anchor.get("href"),
+        )
+
+    return source["browse_url"]
+
+
+def title_from_element(element):
+    selectors = [
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        '[class*="title"]',
+        '[class*="name"]',
+        "strong",
+        "b",
+    ]
+
+    for selector in selectors:
+        candidate = element.select_one(selector)
+        if candidate:
+            value = normalize_title(
+                candidate.get_text(" ", strip=True)
+            )
+            if looks_like_title(value):
+                return value
+
+    if getattr(element, "name", None) == "a":
+        value = normalize_title(
+            element.get_text(" ", strip=True)
+        )
+        if looks_like_title(value):
+            return value
+
+    return ""
+
+
+def infer_location(text):
+    value = clean_text(text)
+
+    if detect_remote(value):
+        remote_match = re.search(
+            r"Remote(?:\s*[-–—]\s*)?([^|•·$]{0,120})",
+            value,
+            flags=re.IGNORECASE,
+        )
+        if remote_match:
+            tail = clean_text(remote_match.group(1))
+            if tail and not extract_pay(tail):
+                return f"Remote - {tail[:100]}"
+        return "Remote"
+
+    location_match = re.search(
+        r"\b(?:Location|Based in)\s*[:\-]\s*([^|•·$]{2,100})",
+        value,
+        flags=re.IGNORECASE,
+    )
+    return (
+        clean_text(location_match.group(1))
+        if location_match
+        else ""
+    )
+
+
+def parse_dom_cards(source, soup):
+    jobs = []
+    seen_nodes = set()
+
+    selectors = [
+        "article",
+        "li",
+        '[class*="job"]',
+        '[class*="role"]',
+        '[class*="position"]',
+        '[class*="opening"]',
+        '[class*="opportun"]',
+        '[class*="project"]',
+        '[class*="card"]',
+    ]
+
+    for element in soup.select(", ".join(selectors)):
+        marker = id(element)
+        if marker in seen_nodes:
+            continue
+        seen_nodes.add(marker)
+
+        text = clean_text(
+            element.get_text(" ", strip=True)
+        )
+        if len(text) < 8 or len(text) > 1200:
+            continue
+
+        title = title_from_element(element)
+        pay = extract_pay(text)
+
+        if not title:
+            continue
+
+        has_job_signal = (
+            pay
+            or detect_remote(text)
+            or detect_employment(text)
+            or "apply" in text.lower()
+            or "view details" in text.lower()
+        )
+        if not has_job_signal:
+            continue
+
+        job = make_job(
+            source,
+            title,
+            element_url(source, element),
+            text,
+            location=infer_location(text),
+            pay=pay,
+        )
+        if job:
+            jobs.append(job)
+
+    return jobs
+
+
+def parse_anchor_roles(source, soup):
+    jobs = []
 
     for anchor in soup.find_all("a", href=True):
+        text = clean_text(
+            anchor.get_text(" ", strip=True)
+        )
+        if len(text) < 4 or len(text) > 600:
+            continue
+
         href = str(anchor.get("href") or "")
-        url = safe_url(source["listing_url"], href)
+        url = safe_url(
+            source.get("listing_url") or source["browse_url"],
+            href,
+        )
         if not url:
             continue
 
-        parsed = urlparse(url)
-        path = parsed.path or "/"
-        if path in source.get("exclude_paths", []):
-            continue
+        parent = anchor.parent
+        parent_text = clean_text(
+            parent.get_text(" ", strip=True)
+            if parent
+            else text
+        )
+        pay = extract_pay(parent_text)
+        title = normalize_title(text)
 
-        if source["href_contains"] and not any(
-            token in href or token in path
-            for token in source["href_contains"]
+        path_signal = bool(
+            JOB_PATH_RE.search(
+                urlparse(url).path or ""
+            )
+        )
+
+        if not looks_like_title(title):
+            if pay:
+                title = normalize_title(
+                    re.split(
+                        SALARY_RE,
+                        parent_text,
+                        maxsplit=1,
+                    )[0]
+                )
+            if not looks_like_title(title):
+                continue
+
+        if not (
+            path_signal
+            or pay
+            or "apply" in parent_text.lower()
+            or "remote" in parent_text.lower()
         ):
             continue
 
-        text = clean_text(anchor.get_text(" ", strip=True))
-        parent_text = clean_text(
-            anchor.parent.get_text(" ", strip=True)
-            if anchor.parent
-            else text
+        job = make_job(
+            source,
+            title,
+            url,
+            parent_text,
+            location=infer_location(parent_text),
+            pay=pay,
         )
-        candidate_text = parent_text if len(parent_text) <= 650 else text
+        if job:
+            jobs.append(job)
 
-        if source["mode"] == "salary_anchors":
-            if not extract_pay(candidate_text) and not looks_like_job_text(text):
-                continue
-        elif source["mode"] == "project_anchors":
-            if "project" not in candidate_text.lower() and not looks_like_job_text(text):
-                continue
-        elif source["mode"] == "telus":
-            if not looks_like_job_text(text):
-                continue
-        elif not looks_like_job_text(text):
+    return jobs
+
+
+def parse_text_salary_roles(source, soup):
+    jobs = []
+
+    for element in soup.find_all(
+        ["article", "li", "div", "section"]
+    ):
+        text = clean_text(
+            element.get_text(" ", strip=True)
+        )
+        if (
+            len(text) < 12
+            or len(text) > 700
+            or not extract_pay(text)
+        ):
             continue
 
-        title = title_from_text(text or candidate_text)
-        if not title or len(title) < 5:
+        heading = title_from_element(element)
+        if not heading:
+            before_pay = SALARY_RE.split(
+                text,
+                maxsplit=1,
+            )[0]
+            words = before_pay.split()
+            heading = normalize_title(
+                " ".join(words[-12:])
+            )
+
+        if not looks_like_title(heading):
             continue
 
-        key = (title.lower(), url)
+        job = make_job(
+            source,
+            heading,
+            element_url(source, element),
+            text,
+            location=infer_location(text),
+        )
+        if job:
+            jobs.append(job)
+
+    return jobs
+
+
+def dedupe_jobs(jobs):
+    result = []
+    seen = set()
+
+    for job in jobs:
+        title_key = re.sub(
+            r"[^a-z0-9]+",
+            " ",
+            job["title"].lower(),
+        ).strip()
+        key = (
+            job["platform_key"],
+            title_key,
+            job["url"],
+        )
+
         if key in seen:
             continue
         seen.add(key)
+        result.append(job)
 
-        item = make_job(source, title, url, candidate_text)
-        if item:
-            jobs.append(item)
-
-        if len(jobs) >= MAX_JOBS_PER_SOURCE:
+        if len(result) >= MAX_JOBS_PER_SOURCE:
             break
 
-    return jobs
+    return result
 
 
-def parse_text_opportunities(source, soup):
-    jobs = parse_anchor_jobs(source, soup)
-    if jobs:
-        return jobs
-
-    # Some project boards render role text with the Apply button separated from
-    # the title. Look for compact text blocks containing a pay rate and an
-    # opportunity-shaped title. These fall back to the platform browse URL.
-    seen = set()
-    for tag in soup.find_all(["article", "li", "div"]):
-        text = clean_text(tag.get_text(" ", strip=True))
-        if len(text) < 12 or len(text) > 420:
-            continue
-        if not extract_pay(text) or not looks_like_job_text(text):
-            continue
-
-        title = title_from_text(text)
-        if not title or title.lower() in seen:
-            continue
-
-        seen.add(title.lower())
-        item = make_job(source, title, source["browse_url"], text)
-        if item:
-            jobs.append(item)
-        if len(jobs) >= MAX_JOBS_PER_SOURCE:
-            break
-
-    return jobs
+def request_url(url, expect_json=False):
+    response = requests.get(
+        url,
+        headers={
+            **REQUEST_HEADERS,
+            **(
+                {"Accept": "application/json"}
+                if expect_json
+                else {}
+            ),
+        },
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    return response
 
 
-def fetch_source(source):
-    if source["mode"] == "directory":
-        return {
-            **source,
-            "status": "directory",
-            "jobs": [],
-            "error": "",
-        }
+def parse_public_page(source, url):
+    from bs4 import BeautifulSoup
 
+    response = request_url(url)
+    soup = BeautifulSoup(
+        response.text,
+        "html.parser",
+    )
+
+    jobs = []
+    jobs.extend(
+        parse_jobposting_json(source, soup)
+    )
+    jobs.extend(
+        parse_embedded_json(source, soup)
+    )
+    jobs.extend(
+        parse_dom_cards(source, soup)
+    )
+    jobs.extend(
+        parse_anchor_roles(source, soup)
+    )
+    jobs.extend(
+        parse_text_salary_roles(source, soup)
+    )
+
+    return dedupe_jobs(jobs)
+
+
+def fetch_public_source(source):
+    urls = [
+        source["listing_url"],
+        *source.get("extra_urls", []),
+    ]
+    jobs = []
+    errors = []
+
+    for url in urls:
+        try:
+            jobs.extend(
+                parse_public_page(source, url)
+            )
+        except (
+            requests.RequestException,
+            ImportError,
+            ValueError,
+        ) as exc:
+            errors.append(
+                f"{urlparse(url).netloc}: {exc.__class__.__name__}"
+            )
+
+    jobs = dedupe_jobs(jobs)
+
+    return {
+        **source,
+        "status": (
+            "live"
+            if jobs
+            else (
+                "unavailable"
+                if errors and len(errors) == len(urls)
+                else "browse"
+            )
+        ),
+        "jobs": jobs,
+        "error": "; ".join(errors),
+    }
+
+
+def fetch_ashby_source(source):
     try:
-        # Keep the rest of Revnivo bootable even before a local developer has
-        # refreshed requirements after pulling the Jobs feature.
-        from bs4 import BeautifulSoup
-
-        response = requests.get(
-            source["listing_url"],
-            headers=REQUEST_HEADERS,
-            timeout=REQUEST_TIMEOUT_SECONDS,
+        response = request_url(
+            source["api_url"],
+            expect_json=True,
         )
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
+        payload = response.json()
+        jobs = []
 
-        if source["mode"] == "opportunity_text":
-            jobs = parse_text_opportunities(source, soup)
-        else:
-            jobs = parse_anchor_jobs(source, soup)
+        for item in payload.get("jobs", []):
+            if item.get("isListed") is False:
+                continue
+
+            location = clean_text(
+                item.get("location") or ""
+            )
+            description = strip_html(
+                item.get("descriptionPlain")
+                or item.get("descriptionHtml")
+                or ""
+            )
+            category = clean_text(
+                item.get("department")
+                or item.get("team")
+                or ""
+            )
+
+            job = make_job(
+                source,
+                item.get("title"),
+                item.get("jobUrl")
+                or item.get("applyUrl")
+                or source["browse_url"],
+                description,
+                location=location,
+                employment_type=(
+                    item.get("employmentType")
+                    or ""
+                ),
+                category=category,
+            )
+            if job:
+                jobs.append(job)
 
         return {
             **source,
             "status": "live" if jobs else "browse",
-            "jobs": jobs,
+            "jobs": dedupe_jobs(jobs),
             "error": "",
         }
-    except (requests.RequestException, ImportError) as exc:
+    except (
+        requests.RequestException,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
         return {
             **source,
             "status": "unavailable",
@@ -433,16 +1179,125 @@ def fetch_source(source):
         }
 
 
+def telus_urls():
+    bases = [
+        (
+            "https://jobs.telusdigital.com/search/jobs"
+            "?cfm5=AI%20Community&ns_category=ai-community"
+        ),
+        (
+            "https://jobs.telusdigital.com/search/jobs"
+            "?ns_category=artificial-intelligence"
+        ),
+    ]
+
+    urls = []
+    for base in bases:
+        urls.append(base)
+        for page in range(2, MAX_TELUS_PAGES + 1):
+            urls.append(f"{base}&page={page}")
+    return urls
+
+
+def fetch_telus_source(source):
+    jobs = []
+    errors = []
+    empty_pages = 0
+
+    for url in telus_urls():
+        try:
+            page_jobs = parse_public_page(
+                source,
+                url,
+            )
+            before = len(jobs)
+            jobs.extend(page_jobs)
+            jobs = dedupe_jobs(jobs)
+
+            if len(jobs) == before:
+                empty_pages += 1
+            else:
+                empty_pages = 0
+
+            if empty_pages >= 3:
+                # A category has likely run out of pagination results.
+                # Continue scanning because the URL list also contains the
+                # second AI category.
+                empty_pages = 0
+        except (
+            requests.RequestException,
+            ImportError,
+            ValueError,
+        ) as exc:
+            errors.append(
+                f"{url}: {exc.__class__.__name__}"
+            )
+
+    jobs = dedupe_jobs(jobs)
+
+    return {
+        **source,
+        "status": (
+            "live"
+            if jobs
+            else (
+                "unavailable"
+                if errors
+                else "browse"
+            )
+        ),
+        "jobs": jobs,
+        "error": "; ".join(errors[:3]),
+    }
+
+
+def fetch_source(source):
+    mode = source["mode"]
+
+    if mode == "account_only":
+        return {
+            **source,
+            "status": "account_only",
+            "jobs": [],
+            "error": "",
+        }
+
+    if mode == "ashby":
+        return fetch_ashby_source(source)
+
+    if mode == "telus":
+        return fetch_telus_source(source)
+
+    return fetch_public_source(source)
+
+
 def build_jobs_payload():
     source_results = []
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {
-            executor.submit(fetch_source, source): source
+            executor.submit(
+                fetch_source,
+                source,
+            ): source
             for source in JOB_SOURCES
         }
+
         for future in as_completed(futures):
-            source_results.append(future.result())
+            source = futures[future]
+            try:
+                source_results.append(
+                    future.result()
+                )
+            except Exception as exc:
+                source_results.append(
+                    {
+                        **source,
+                        "status": "unavailable",
+                        "jobs": [],
+                        "error": exc.__class__.__name__,
+                    }
+                )
 
     source_order = {
         source["key"]: index
@@ -454,20 +1309,9 @@ def build_jobs_payload():
 
     jobs = []
     sources = []
-    seen = set()
 
     for source in source_results:
-        for item in source["jobs"]:
-            duplicate_key = (
-                item["platform_key"],
-                item["title"].lower(),
-                item["url"],
-            )
-            if duplicate_key in seen:
-                continue
-            seen.add(duplicate_key)
-            jobs.append(item)
-
+        jobs.extend(source["jobs"])
         sources.append(
             {
                 "key": source["key"],
@@ -480,6 +1324,7 @@ def build_jobs_payload():
             }
         )
 
+    jobs = dedupe_jobs(jobs)
     jobs.sort(
         key=lambda item: (
             item["platform"].lower(),
@@ -496,6 +1341,11 @@ def build_jobs_payload():
             for source in sources
             if source["status"] == "live"
         ),
+        "account_only_sources": sum(
+            1
+            for source in sources
+            if source["status"] == "account_only"
+        ),
         "cache_ttl_seconds": CACHE_TTL_SECONDS,
     }
 
@@ -503,8 +1353,15 @@ def build_jobs_payload():
 @api_view(["GET"])
 def jobs_feed(request):
     force_refresh = str(
-        request.query_params.get("refresh", "")
-    ).lower() in {"1", "true", "yes"}
+        request.query_params.get(
+            "refresh",
+            "",
+        )
+    ).lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
     now = monotonic()
     with _cache_lock:
@@ -524,7 +1381,10 @@ def jobs_feed(request):
 
     with _cache_lock:
         _cache["payload"] = payload
-        _cache["expires_at"] = monotonic() + CACHE_TTL_SECONDS
+        _cache["expires_at"] = (
+            monotonic()
+            + CACHE_TTL_SECONDS
+        )
 
     return Response(
         {
