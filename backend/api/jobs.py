@@ -38,10 +38,10 @@ JOB_SOURCES = [
     {
         "key": "alignerr",
         "name": "Alignerr",
-        "listing_url": "https://www.alignerr.com/jobs",
-        "browse_url": "https://www.alignerr.com/jobs",
-        "mode": "bulk_public",
-        "detail_url_template": "https://www.alignerr.com/jobs/{id}",
+        "listing_url": "https://www.alignerr.com/en/jobs",
+        "browse_url": "https://www.alignerr.com/en/jobs",
+        "mode": "alignerr",
+        "detail_url_template": "https://www.alignerr.com/en/jobs/{id}",
         "description": "All public expert and AI training roles Revnivo can retrieve from Alignerr.",
     },
     {
@@ -2126,6 +2126,186 @@ def parse_alignerr_embedded_jobs(source, raw_html):
         MAX_JOBS_PER_SOURCE,
     )
 
+def parse_alignerr_visible_jobs(source, soup):
+    """Parse Alignerr cards directly; this guarantees the visible batch."""
+    jobs = []
+    seen = set()
+    pattern = re.compile(
+        r"/(?:en/)?jobs/([0-9a-f]{8}-[0-9a-f-]{20,})",
+        flags=re.IGNORECASE,
+    )
+
+    for anchor in soup.find_all("a", href=True):
+        href = clean_text(anchor.get("href"))
+        match = pattern.search(href)
+        if not match:
+            continue
+
+        identifier = match.group(1).lower()
+        if identifier in seen:
+            continue
+
+        url = f"https://www.alignerr.com/en/jobs/{identifier}"
+
+        # Alignerr cards may put title and metadata on nested elements or on
+        # the entire link. Walk up a few levels to capture pay/remote text.
+        candidates = []
+        node = anchor
+        for _ in range(4):
+            if node is None:
+                break
+            text_value = clean_text(
+                node.get_text(" ", strip=True)
+            )
+            if text_value:
+                candidates.append(text_value)
+            node = getattr(node, "parent", None)
+
+        anchor_text = clean_text(
+            anchor.get_text(" ", strip=True)
+        )
+        card_text = min(
+            (text for text in candidates if len(text) >= len(anchor_text)),
+            key=len,
+            default=anchor_text,
+        )
+
+        title = ""
+        for selector in ("h1", "h2", "h3", "h4", "h5", "strong", "b"):
+            heading = anchor.select_one(selector)
+            if heading:
+                title = normalize_title(
+                    heading.get_text(" ", strip=True)
+                )
+                if title:
+                    break
+
+        if not title:
+            # On Alignerr the link text commonly starts with the role title.
+            title = normalize_title(anchor_text)
+
+        if not title:
+            continue
+
+        pay = extract_pay(card_text)
+        location = infer_location(card_text)
+        job = make_job(
+            source,
+            title,
+            url,
+            card_text,
+            location=location,
+            pay=pay,
+        )
+        if job:
+            jobs.append(job)
+            seen.add(identifier)
+
+    return dedupe_jobs(jobs, MAX_JOBS_PER_SOURCE)
+
+
+def fetch_alignerr_source(source):
+    jobs = []
+    errors = []
+    reported_total = 0
+    soup = None
+    raw_html = ""
+
+    try:
+        response = request_url(source["listing_url"])
+        raw_html = response.text
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(raw_html, "html.parser")
+
+        jobs.extend(
+            parse_alignerr_visible_jobs(source, soup)
+        )
+        jobs.extend(
+            parse_alignerr_embedded_jobs(source, raw_html)
+        )
+        jobs = dedupe_jobs(
+            jobs,
+            MAX_JOBS_PER_SOURCE,
+        )
+
+        reported_total = max(
+            extract_reported_total(
+                soup.get_text(" ", strip=True)
+            ),
+            extract_reported_total(raw_html),
+        )
+    except (
+        requests.RequestException,
+        ImportError,
+        ValueError,
+    ) as exc:
+        errors.append(
+            f"page: {exc.__class__.__name__}"
+        )
+
+    endpoints = []
+    endpoints.extend(
+        discover_job_json_endpoints(
+            source["listing_url"],
+            raw_html,
+        )
+    )
+    if soup is not None:
+        endpoints.extend(
+            discover_script_job_endpoints(
+                source["listing_url"],
+                soup,
+            )
+        )
+    endpoints.extend(
+        discover_alignerr_openapi_endpoints()
+    )
+    endpoints.extend(
+        alignerr_fallback_endpoints()
+    )
+
+    seen_endpoints = set()
+    for endpoint in endpoints:
+        endpoint = clean_text(endpoint)
+        if not endpoint or endpoint in seen_endpoints:
+            continue
+        seen_endpoints.add(endpoint)
+
+        endpoint_jobs, endpoint_total = fetch_json_endpoint_pages(
+            source,
+            endpoint,
+        )
+        jobs.extend(endpoint_jobs)
+        jobs = dedupe_jobs(
+            jobs,
+            MAX_JOBS_PER_SOURCE,
+        )
+        reported_total = max(
+            reported_total,
+            endpoint_total,
+        )
+
+        if reported_total and len(jobs) >= reported_total:
+            break
+
+    complete = bool(
+        reported_total
+        and len(jobs) >= reported_total
+    )
+
+    return {
+        **source,
+        "status": (
+            "live"
+            if jobs and (complete or not reported_total)
+            else ("partial" if jobs else "unavailable")
+        ),
+        "jobs": jobs,
+        "reported_total": reported_total,
+        "complete": complete,
+        "error": "; ".join(errors[:3]),
+    }
+
 def fetch_bulk_public_source(source):
     jobs = []
     errors = []
@@ -2751,6 +2931,9 @@ def fetch_source(source):
 
     if mode == "telus":
         return fetch_telus_source(source)
+
+    if mode == "alignerr":
+        return fetch_alignerr_source(source)
 
     if mode == "bulk_public":
         return fetch_bulk_public_source(source)
