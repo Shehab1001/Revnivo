@@ -1,6 +1,6 @@
-import { Bell, BarChart3, BriefcaseBusiness, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, CreditCard, DollarSign, FileText, LogOut, Menu, MessageCircle, Moon, PanelLeft, PanelsTopLeft, Settings as SettingsIcon, Sun, Trash2, Users, WalletCards } from 'lucide-react'
+import { Bell, BarChart3, BriefcaseBusiness, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, CreditCard, DollarSign, FileText, FileUser, LogOut, Menu, MessageCircle, Moon, PanelLeft, PanelsTopLeft, Settings as SettingsIcon, Sun, Trash2, Users, WalletCards } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
 import api from '../services/api'
@@ -11,9 +11,13 @@ const baseNav = [
   { to: '/platforms', label: 'Platforms', icon: PanelsTopLeft },
   { to: '/earnings', label: 'Earnings', icon: WalletCards },
   { to: '/notes', label: 'Notes', icon: FileText },
-  { to: '/jobs', label: 'Jobs', icon: BriefcaseBusiness },
-  { to: '/applications', label: 'Applications', icon: ClipboardList },
   { to: '/support-chat', label: 'Chat', icon: MessageCircle },
+]
+
+const jobsNav = [
+  { to: '/jobs', label: 'Job Board', icon: BriefcaseBusiness, end: true },
+  { to: '/jobs/applications', label: 'Applications', icon: ClipboardList },
+  { to: '/jobs/resume-studio', label: 'Resume Studio', icon: FileUser },
 ]
 
 const userOnlyNav = [
@@ -36,9 +40,11 @@ export default function AppShell() {
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
+  const location = useLocation()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [dashboardOpen, setDashboardOpen] = useState(true)
+  const [jobsOpen, setJobsOpen] = useState(true)
   const [notifications, setNotifications] = useState([])
   const [noticeOpen, setNoticeOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
@@ -171,6 +177,46 @@ export default function AppShell() {
           <button onClick={() => { setDashboardOpen(!dashboardOpen); if (collapsed) setCollapsed(false) }} className={`${linkClass({ isActive: false })} w-full ${collapsed ? 'justify-center' : ''}`} title="Dashboard"><BarChart3 size={18} />{!collapsed && <><span className="flex-1 text-left">Dashboard</span><ChevronDown size={16} className={dashboardOpen ? '' : '-rotate-90'} /></>}</button>
           {dashboardOpen && <div className={collapsed ? 'mt-1 flex flex-col items-center gap-1' : 'ml-3 border-l border-slate-200 pl-3 dark:border-white/8'}><NavLink to="/dashboard" end className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`} title="Income"><DollarSign size={18} />{!collapsed && 'Income'}</NavLink><NavLink to="/admin/users" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`} title="Users"><Users size={18} />{!collapsed && 'Users'}</NavLink></div>}
         </div> : <NavLink to="/dashboard" end className={linkClass}><BarChart3 size={18} />{!collapsed && 'Dashboard'}</NavLink>}
+        <div>
+          <button
+            onClick={() => {
+              if (collapsed) setCollapsed(false)
+              setJobsOpen((open) => !open)
+            }}
+            className={`${linkClass({ isActive: location.pathname.startsWith('/jobs') })} w-full ${collapsed ? 'justify-center' : ''}`}
+            title="Jobs"
+          >
+            <BriefcaseBusiness size={18} />
+            {!collapsed && (
+              <>
+                <span className="flex-1 text-left">Jobs</span>
+                <ChevronDown
+                  size={16}
+                  className={jobsOpen ? '' : '-rotate-90'}
+                />
+              </>
+            )}
+          </button>
+
+          {jobsOpen && (
+            <div className={collapsed ? 'mt-1 flex flex-col items-center gap-1' : 'ml-3 border-l border-slate-200 pl-3 dark:border-white/8'}>
+              {jobsNav.map(({ to, label, icon: Icon, end }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={Boolean(end)}
+                  onClick={() => setMobileOpen(false)}
+                  className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`}
+                  title={label}
+                >
+                  <Icon size={17} />
+                  {!collapsed && label}
+                </NavLink>
+              ))}
+            </div>
+          )}
+        </div>
+
         {baseNav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} onClick={() => setMobileOpen(false)} className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title={label}><span className="relative"><Icon size={18} />{label === 'Chat' && unreadChat > 0 && <span className="absolute -right-2 -top-2 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-0.5 text-[9px] font-bold text-white">{unreadChat}</span>}</span>{!collapsed && label}</NavLink>)}
         {!isAdmin && userOnlyNav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} onClick={() => setMobileOpen(false)} className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title={label}><Icon size={18} />{!collapsed && label}</NavLink>)}
         {isAdmin && <>{!collapsed && <p className="mb-2 mt-7 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-[#62656e]">Administration</p>}<NavLink to="/admin/subscriptions" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title="Subscriptions"><WalletCards size={18} />{!collapsed && 'Subscriptions'}</NavLink></>}
