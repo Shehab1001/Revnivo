@@ -600,6 +600,8 @@ def parse_jobposting_json(source, soup):
 def object_title(item):
     for key in (
         "jobTitle",
+        "job_title",
+        "listingTitle",
         "title",
         "positionTitle",
         "roleTitle",
@@ -615,7 +617,9 @@ def object_title(item):
 def object_identifier(item):
     for key in (
         "opportunityId",
+        "listingId",
         "jobId",
+        "job_id",
         "postingId",
         "positionId",
         "uuid",
@@ -634,6 +638,8 @@ def object_url(source, item):
         "applyUrl",
         "applicationUrl",
         "jobUrl",
+        "job_apply_url",
+        "listingUrl",
         "externalUrl",
         "url",
         "href",
@@ -660,6 +666,7 @@ def object_blob(item):
 
     for key in (
         "description",
+        "job_description",
         "descriptionPlain",
         "summary",
         "subtitle",
@@ -668,10 +675,15 @@ def object_blob(item):
         "workplace",
         "skill",
         "category",
+        "listingDomain",
+        "commitment",
         "employmentType",
         "compensation",
         "pay",
         "rate",
+        "rateMin",
+        "rateMax",
+        "payRateFrequency",
     ):
         value = item.get(key)
         if isinstance(value, str):
