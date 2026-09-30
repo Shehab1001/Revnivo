@@ -1256,7 +1256,9 @@ export default function SupportChat() {
                     <Avatar
                       user={contact}
                       isAdmin={
-                        contact.id === 'support'
+                        contact.id === 'support' ||
+                        contact.role === 'admin' ||
+                        contact.is_superadmin
                       }
                     />
 
@@ -1387,7 +1389,9 @@ export default function SupportChat() {
                   <Avatar
                     user={active}
                     isAdmin={
-                      active.id === 'support'
+                      active.id === 'support' ||
+                      active.role === 'admin' ||
+                      active.is_superadmin
                     }
                   />
 
@@ -1455,8 +1459,9 @@ export default function SupportChat() {
                         index
                       ) => {
                         const own =
-                          message.sender ===
-                          ownSender
+                          typeof message.is_mine === 'boolean'
+                            ? message.is_mine
+                            : message.sender === ownSender
 
                         const previous =
                           messages[
@@ -1467,6 +1472,20 @@ export default function SupportChat() {
                           messages[
                             index + 1
                           ]
+
+                        const previousOwn =
+                          previous
+                            ? typeof previous.is_mine === 'boolean'
+                              ? previous.is_mine
+                              : previous.sender === ownSender
+                            : null
+
+                        const nextOwn =
+                          next
+                            ? typeof next.is_mine === 'boolean'
+                              ? next.is_mine
+                              : next.sender === ownSender
+                            : null
 
                         const sameDayAsPrevious =
                           previous &&
@@ -1483,13 +1502,13 @@ export default function SupportChat() {
                           )
 
                         const previousSameSender =
-                          previous?.sender ===
-                            message.sender &&
+                          Boolean(previous) &&
+                          previousOwn === own &&
                           sameDayAsPrevious
 
                         const nextSameSender =
-                          next?.sender ===
-                            message.sender &&
+                          Boolean(next) &&
+                          nextOwn === own &&
                           sameDayAsNext
 
                         const showDateLabel =
@@ -1555,8 +1574,12 @@ export default function SupportChat() {
                                     : active
                                 }
                                 isAdmin={
-                                  message.sender ===
-                                  'admin'
+                                  own
+                                    ? user?.role === 'admin'
+                                    : active?.id === 'support' ||
+                                      active?.role === 'admin' ||
+                                      active?.is_superadmin ||
+                                      message.sender === 'admin'
                                 }
                               />
                             ) : (
