@@ -90,44 +90,108 @@ def can_admin_chat_with(viewer, target):
     )
 
 
-def admin_direct_chat_key(first_id, second_id):
+def direct_chat_key(first_id, second_id):
+    first, second = sorted((str(first_id), str(second_id)))
+    return f"direct:{first}:{second}"
+
+
+def legacy_admin_direct_chat_key(first_id, second_id):
+    # Compatibility with direct admin chats created before pairwise support
+    # conversations were introduced.
     first, second = sorted((str(first_id), str(second_id)))
     return f"admin:{first}:{second}"
 
 
-def admin_contact_message_query(owner, contact):
-    """
-    Admin-to-user conversations keep the legacy support-thread model.
-    Admin-to-admin conversations use a private pair key, while also including
-    the contact's legacy support history so promoting a user never hides their
-    existing chat.
-    """
-    contact_id = contact["_id"]
-    if not is_admin_doc(contact):
-        return {"user_id": contact_id}
+def _support_admin_from_user(db, user_doc):
+    support_admin_id = user_doc.get("support_admin_id") if user_doc else None
+    if support_admin_id:
+        admin = db.users.find_one(
+            {"_id": support_admin_id, "role": "admin"}
+        )
+        if admin:
+            return admin
 
-    return {
-        "$or": [
-            {"conversation_key": admin_direct_chat_key(owner, contact_id)},
+    admin = None
+    if SUPERADMIN_EMAIL:
+        admin = db.users.find_one(
+            {
+                "role": "admin",
+                "email": SUPERADMIN_EMAIL,
+            }
+        )
+
+    if not admin:
+        admin = db.users.find_one(
+            {"role": "admin"},
+            sort=[("created_at", ASCENDING)],
+        )
+
+    if admin and user_doc:
+        db.users.update_one(
+            {"_id": user_doc["_id"]},
+            {
+                "$set": {
+                    "support_admin_id": admin["_id"],
+                    "updated_at": utcnow(),
+                }
+            },
+        )
+        user_doc["support_admin_id"] = admin["_id"]
+
+    return admin
+
+
+def admin_contact_message_query(db, viewer, contact):
+    """
+    Every administrator gets a private pairwise conversation with each
+    contact. For users, legacy support messages are visible only to the admin
+    currently assigned to that user (or to the super admin while no assignment
+    exists yet), so old history is preserved without remaining shared.
+    """
+    owner = viewer["_id"]
+    contact_id = contact["_id"]
+    direct_keys = [direct_chat_key(owner, contact_id)]
+
+    if is_admin_doc(contact):
+        direct_keys.append(
+            legacy_admin_direct_chat_key(owner, contact_id)
+        )
+
+    clauses = [
+        {"conversation_key": {"$in": direct_keys}},
+    ]
+
+    support_admin_id = contact.get("support_admin_id")
+    owns_legacy_support = (
+        support_admin_id == owner
+        or (
+            not support_admin_id
+            and is_superadmin_doc(viewer)
+        )
+    )
+
+    if owns_legacy_support:
+        clauses.append(
             {
                 "user_id": contact_id,
                 "conversation_key": {"$exists": False},
-            },
-        ]
-    }
+            }
+        )
+
+    return clauses[0] if len(clauses) == 1 else {"$or": clauses}
 
 
-def message_visible_to_admin(message, viewer, target=None):
+def message_visible_to_admin(message, viewer):
     if not is_admin_doc(viewer):
         return False
 
-    conversation_key = message.get("conversation_key")
-    if conversation_key:
-        return str(viewer["_id"]) in set(message.get("participant_ids") or [])
+    if message.get("conversation_key"):
+        return str(viewer["_id"]) in set(
+            message.get("participant_ids") or []
+        )
 
-    if target is not None:
-        return message.get("user_id") == target.get("_id")
-
+    # Legacy support messages are protected by the caller's selected contact
+    # query. They are not globally visible to every administrator anymore.
     return bool(message.get("user_id"))
 
 
