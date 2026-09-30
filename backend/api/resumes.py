@@ -3242,3 +3242,31 @@ def resume_import(request):
         },
         status=status.HTTP_201_CREATED,
     )
+
+
+@api_view(["GET"])
+def resume_readiness(request, resume_id):
+    db = get_db()
+    owner_id = _owner_oid(request)
+    resume = _resume_doc(
+        db,
+        owner_id,
+        resume_id,
+    )
+
+    if not resume:
+        return Response(
+            {"detail": "Resume not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    return Response(
+        {
+            "readiness": _ats_readiness_report(
+                resume,
+                raw_text=_resume_text(
+                    resume
+                ),
+            )
+        }
+    )
