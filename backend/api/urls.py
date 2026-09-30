@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from . import jobs as job_views
 
 urlpatterns = [
     path("health/", views.health),
@@ -23,6 +24,7 @@ urlpatterns = [
     path("support-chat/", views.support_chat),
     path("support-chat/<str:message_id>/attachment/", views.support_chat_attachment),
     path("chat-presence/", views.chat_presence),
+    path("jobs/", job_views.jobs_feed),
     path("notes/", views.notes),
     path("notes/<str:note_id>/attachments/", views.note_attachments),
     path("notes/<str:note_id>/attachments/<str:attachment_id>/", views.note_attachment),
