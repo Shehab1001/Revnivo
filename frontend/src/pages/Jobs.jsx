@@ -63,6 +63,28 @@ function domainLogo(domain) {
   )
 }
 
+const statusLabel = {
+  live: 'Live listings',
+  browse: 'Browse official site',
+  directory: 'Account-matched roles',
+  account_only: 'Sign in to view matched jobs',
+  api_key_needed: 'API key needed for full sync',
+  partial: 'Partial public sync',
+  syncing: 'Syncing roles...',
+  unavailable: 'Temporarily unavailable',
+}
+
+const statusColor = {
+  live: 'success',
+  browse: 'primary',
+  directory: 'secondary',
+  account_only: 'secondary',
+  api_key_needed: 'warning',
+  partial: 'warning',
+  syncing: 'primary',
+  unavailable: 'warning',
+}
+
 
 function getJobLogo(name) {
   const normalized = String(name || '')
