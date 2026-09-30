@@ -81,13 +81,54 @@ def is_superadmin_doc(doc):
 
 
 def can_admin_chat_with(viewer, target):
-    if not is_admin_doc(viewer) or not target:
+    # Every administrator, including the super admin, can message every
+    # other account. An admin's own account is the only excluded contact.
+    return bool(
+        is_admin_doc(viewer)
+        and target
+        and viewer.get("_id") != target.get("_id")
+    )
+
+
+def admin_direct_chat_key(first_id, second_id):
+    first, second = sorted((str(first_id), str(second_id)))
+    return f"admin:{first}:{second}"
+
+
+def admin_contact_message_query(owner, contact):
+    """
+    Admin-to-user conversations keep the legacy support-thread model.
+    Admin-to-admin conversations use a private pair key, while also including
+    the contact's legacy support history so promoting a user never hides their
+    existing chat.
+    """
+    contact_id = contact["_id"]
+    if not is_admin_doc(contact):
+        return {"user_id": contact_id}
+
+    return {
+        "$or": [
+            {"conversation_key": admin_direct_chat_key(owner, contact_id)},
+            {
+                "user_id": contact_id,
+                "conversation_key": {"$exists": False},
+            },
+        ]
+    }
+
+
+def message_visible_to_admin(message, viewer, target=None):
+    if not is_admin_doc(viewer):
         return False
-    if viewer.get("_id") == target.get("_id"):
-        return False
-    if is_superadmin_doc(viewer):
-        return True
-    return not is_admin_doc(target)
+
+    conversation_key = message.get("conversation_key")
+    if conversation_key:
+        return str(viewer["_id"]) in set(message.get("participant_ids") or [])
+
+    if target is not None:
+        return message.get("user_id") == target.get("_id")
+
+    return bool(message.get("user_id"))
 
 
 def serialize_user(doc, request):
