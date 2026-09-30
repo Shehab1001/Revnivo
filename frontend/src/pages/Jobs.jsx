@@ -290,16 +290,13 @@ export default function Jobs() {
   useEffect(() => {
     if (!payload.refreshing) return undefined
 
-    const timer = window.setTimeout(
+    const interval = window.setInterval(
       () => loadJobs(false, true),
       3000
     )
 
-    return () => window.clearTimeout(timer)
-  }, [
-    payload.refreshing,
-    payload.sync_completed_sources,
-  ])
+    return () => window.clearInterval(interval)
+  }, [payload.refreshing])
 
   const categories = useMemo(
     () =>
