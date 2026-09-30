@@ -1648,7 +1648,10 @@ def discover_script_job_endpoints(base_url, soup):
         if not value.startswith(("http://", "https://")):
             return
         lowered = value.lower()
-        if not any(word in lowered for word in ("job", "role", "opportun", "listing", "position")):
+        if not any(
+            word in lowered
+            for word in ("job", "role", "opportun", "listing", "position")
+        ):
             return
         if value in seen:
             return
@@ -1669,7 +1672,12 @@ def discover_script_job_endpoints(base_url, soup):
         if len(response.content) > 8_000_000:
             continue
 
-        normalized = response.text.replace("\\u002F", "/").replace("\\/", "/")
+        normalized = (
+            response.text
+            .replace("\\u002F", "/")
+            .replace("\\/", "/")
+        )
+
         api_hosts = set(
             match.group(0).rstrip("/")
             for match in re.finditer(
@@ -1678,33 +1686,39 @@ def discover_script_job_endpoints(base_url, soup):
             )
         )
 
-        for match in re.finditer(
-            r"https?://[^\\"\'<>\\\\\s]+",
-            normalized,
+        absolute_url_pattern = re.compile(
+            r"""https?://[^"\'<>\s]+""",
             flags=re.IGNORECASE,
-        ):
-            add_endpoint(match.group(0).rstrip("),;}"))
+        )
+        for match in absolute_url_pattern.finditer(normalized):
+            add_endpoint(
+                match.group(0).rstrip("),;}")
+            )
 
-        relative_patterns = [
-            r'["\\\']((?:/api/|/v\\d+/|/public/|/jobs?|/roles?|/opportunities?)[^"\\\']*)["\\\']',
-        ]
-        relative_paths = set()
-        for pattern in relative_patterns:
-            for match in re.finditer(pattern, normalized, flags=re.IGNORECASE):
-                path = match.group(1)
-                if any(word in path.lower() for word in ("job", "role", "opportun", "listing", "position")):
-                    relative_paths.add(path)
+        relative_pattern = re.compile(
+            r"""["\']((?:/api/|/v\d+/|/public/|/jobs?|/roles?|/opportunities?)[^"\']*)["\']""",
+            flags=re.IGNORECASE,
+        )
+        relative_paths = set(
+            match.group(1)
+            for match in relative_pattern.finditer(normalized)
+            if any(
+                word in match.group(1).lower()
+                for word in ("job", "role", "opportun", "listing", "position")
+            )
+        )
 
         for path in relative_paths:
             add_endpoint(urljoin(base_url, path))
             for host in api_hosts:
-                add_endpoint(urljoin(host + "/", path.lstrip("/")))
+                add_endpoint(
+                    urljoin(host + "/", path.lstrip("/"))
+                )
 
         if len(endpoints) >= 40:
             break
 
     return endpoints[:40]
-
 
 def payload_next_cursor(payload):
     cursor_keys = {
