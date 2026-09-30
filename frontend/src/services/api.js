@@ -15,19 +15,11 @@ function getCookie(name) {
 }
 
 function getApiBaseUrl() {
-  const configured = import.meta.env.VITE_API_URL?.trim()
-  const hostname = window.location.hostname
-
-  // In local development always use Vite's same-origin proxy. This avoids
-  // localhost/127.0.0.1 cookie mismatches while keeping the JWT HttpOnly.
-  if (
-    hostname === 'localhost' ||
-    hostname === '127.0.0.1'
-  ) {
-    return '/api'
-  }
-
-  return configured || '/api'
+  // Temporary local-development mode:
+  // Always use Vite's same-origin /api proxy, which forwards requests to
+  // http://127.0.0.1:8000. This intentionally ignores any production
+  // VITE_API_URL (for example a Render URL) until deployment is enabled again.
+  return '/api'
 }
 
 const api = axios.create({
