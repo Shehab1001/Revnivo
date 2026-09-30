@@ -4,6 +4,7 @@ import {
   CardBody,
   Chip,
   Input,
+  Pagination,
   Select,
   SelectItem,
   Spinner,
@@ -31,6 +32,8 @@ const statusLabel = {
   browse: 'Browse official site',
   directory: 'Account-matched roles',
   account_only: 'Sign in to view matched jobs',
+  api_key_needed: 'API key needed for full sync',
+  partial: 'Partial public sync',
   unavailable: 'Temporarily unavailable',
 }
 
@@ -39,6 +42,8 @@ const statusColor = {
   browse: 'primary',
   directory: 'secondary',
   account_only: 'secondary',
+  api_key_needed: 'warning',
+  partial: 'warning',
   unavailable: 'warning',
 }
 
@@ -163,10 +168,14 @@ function PlatformCard({ source }) {
             </div>
             <div className="mt-0.5 text-xs text-default-400">
               {source.job_count
-                ? `${source.job_count} public roles loaded`
+                ? source.reported_total > source.job_count
+                  ? `${source.job_count.toLocaleString()} loaded of ${source.reported_total.toLocaleString()} reported`
+                  : `${source.job_count.toLocaleString()} public roles loaded`
                 : source.status === 'account_only'
                   ? 'Jobs are personalized after sign-in'
-                  : 'No public roles detected right now'}
+                  : source.status === 'api_key_needed'
+                    ? 'Add the platform API key for exhaustive sync'
+                    : 'No public roles detected right now'}
             </div>
           </div>
         </div>
@@ -219,6 +228,9 @@ export default function Jobs() {
   const [category, setCategory] = useState(ALL)
   const [remoteOnly, setRemoteOnly] = useState(false)
   const [sortBy, setSortBy] = useState('platform')
+  const [page, setPage] = useState(1)
+
+  const PAGE_SIZE = 60
 
   const loadJobs = async (refresh = false) => {
     refresh ? setRefreshing(true) : setLoading(true)
@@ -317,6 +329,36 @@ export default function Jobs() {
     sortBy,
   ])
 
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredJobs.length / PAGE_SIZE)
+  )
+
+  const visibleJobs = useMemo(
+    () =>
+      filteredJobs.slice(
+        (page - 1) * PAGE_SIZE,
+        page * PAGE_SIZE
+      ),
+    [filteredJobs, page]
+  )
+
+  useEffect(() => {
+    setPage(1)
+  }, [
+    search,
+    platform,
+    category,
+    remoteOnly,
+    sortBy,
+  ])
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages)
+    }
+  }, [page, totalPages])
+
   const clearFilters = () => {
     setSearch('')
     setPlatform(ALL)
@@ -366,7 +408,7 @@ export default function Jobs() {
         <div className="grid border-t border-divider sm:grid-cols-3">
           <div className="p-4 sm:p-5">
             <div className="text-2xl font-semibold text-foreground">
-              {payload.total || 0}
+              {(payload.total || 0).toLocaleString()}
             </div>
             <div className="mt-1 text-xs text-default-500">
               Public roles loaded
@@ -530,7 +572,7 @@ export default function Jobs() {
               Open opportunities
             </h2>
             <p className="mt-0.5 text-xs text-default-500">
-              {filteredJobs.length} matching roles
+              {filteredJobs.length.toLocaleString()} matching roles
             </p>
           </div>
         </div>
@@ -544,7 +586,7 @@ export default function Jobs() {
           </div>
         ) : filteredJobs.length ? (
           <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-            {filteredJobs.map((job) => (
+            {visibleJobs.map((job) => (
               <JobCard
                 key={job.id}
                 job={job}
@@ -565,6 +607,24 @@ export default function Jobs() {
               only reveals jobs after sign-in or profile matching, use its
               official access card below.
             </p>
+          </div>
+        )}
+
+        {!loading && filteredJobs.length > PAGE_SIZE && (
+          <div className="mt-6 flex flex-col items-center gap-2">
+            <Pagination
+              showControls
+              page={page}
+              total={totalPages}
+              onChange={setPage}
+              color="primary"
+              variant="flat"
+            />
+            <div className="text-xs text-default-400">
+              Showing {((page - 1) * PAGE_SIZE + 1).toLocaleString()}–
+              {Math.min(page * PAGE_SIZE, filteredJobs.length).toLocaleString()}
+              {' '}of {filteredJobs.length.toLocaleString()} roles
+            </div>
           </div>
         )}
       </section>
