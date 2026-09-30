@@ -341,7 +341,7 @@ def _read_upload(uploaded_file, max_bytes):
 def _upload_root(folder):
     return Path(
         settings.PRIVATE_MEDIA_ROOT
-        if str(folder).strip().strip("/") in {"chat", "notes"}
+        if str(folder).strip().strip("/") in {"chat", "notes", "applications"}
         else settings.MEDIA_ROOT
     ).resolve()
 
