@@ -1123,28 +1123,13 @@ export default function SupportChat() {
     search.trim().toLowerCase()
 
   const visibleContacts =
-    contacts.filter((contact) => {
-      const matchesSearch =
-        `${contact.name} ${contact.email} ${
-          contact.last_message || ''
-        }`
-          .toLowerCase()
-          .includes(normalizedSearch)
-
-      if (!matchesSearch) return false
-
-      // The normal inbox is private to this admin: only real conversations
-      // appear. Searching doubles as "start a new chat" and exposes the full
-      // account directory without making every admin's inbox identical.
-      if (user?.role === 'admin' && !normalizedSearch) {
-        return Boolean(
-          contact.last_message_at ||
-          contact.unread_count
-        )
-      }
-
-      return true
-    })
+    contacts.filter((contact) =>
+      `${contact.name} ${contact.email} ${
+        contact.last_message || ''
+      }`
+        .toLowerCase()
+        .includes(normalizedSearch)
+    )
 
   const ownSender =
     user?.role === 'admin'
@@ -1250,7 +1235,7 @@ export default function SupportChat() {
               <div className="px-4 py-10 text-center text-sm text-default-400">
                 {search.trim()
                   ? 'No accounts match your search.'
-                  : 'No conversations yet. Search for a user or admin to start a chat.'}
+                  : 'No other accounts found.'}
               </div>
             )}
 
