@@ -80,6 +80,16 @@ def is_superadmin_doc(doc):
     )
 
 
+def can_admin_chat_with(viewer, target):
+    if not is_admin_doc(viewer) or not target:
+        return False
+    if viewer.get("_id") == target.get("_id"):
+        return False
+    if is_superadmin_doc(viewer):
+        return True
+    return not is_admin_doc(target)
+
+
 def serialize_user(doc, request):
     avatar = doc.get("profile_image") or ""
     avatar_url = public_upload_url(avatar) if avatar else ""
@@ -96,6 +106,7 @@ def serialize_user(doc, request):
         "email": doc.get("email", ""),
         "profile_image_url": profile_image_url,
         "role": "admin" if is_admin_doc(doc) else doc.get("role", "user"),
+        "is_superadmin": is_superadmin_doc(doc),
         "trial_ends_at": serialize_datetime(doc.get("trial_ends_at")),
         "subscription_status": doc.get("subscription_status", "trial"),
     }
@@ -1786,7 +1797,16 @@ def support_chat(request):
             )
         return Response({"status": "deleted"})
     if request.method == "GET" and is_admin_doc(user_doc) and request.query_params.get("summary"):
-        users = [doc for doc in db.users.find({"role": {"$ne": "admin"}}).sort("created_at", DESCENDING)]
+        contact_query = (
+            {"_id": {"$ne": owner}}
+            if is_superadmin_doc(user_doc)
+            else {"role": {"$ne": "admin"}}
+        )
+        users = [
+            doc
+            for doc in db.users.find(contact_query).sort("created_at", DESCENDING)
+            if can_admin_chat_with(user_doc, doc)
+        ]
         summaries = []
         for contact in users:
             contact_id = contact["_id"]
@@ -1828,8 +1848,8 @@ def support_chat(request):
             return Response({"detail": "Select a user before replying."}, status=status.HTTP_400_BAD_REQUEST)
 
         if is_admin_doc(user_doc):
-            target_doc = db.users.find_one({"_id": target_user, "role": {"$ne": "admin"}}, {"_id": 1})
-            if not target_doc:
+            target_doc = db.users.find_one({"_id": target_user})
+            if not can_admin_chat_with(user_doc, target_doc):
                 return Response({"detail": "Chat user not found."}, status=status.HTTP_404_NOT_FOUND)
 
         requested_type = str(request.data.get("message_type", "text")).lower()
@@ -1863,6 +1883,10 @@ def support_chat(request):
         else:
             create_notification("chat", "New support reply", "The Revnivo admin replied to your support message.", target_user, target_user)
     selected_user = oid(request.query_params.get("user_id")) if is_admin_doc(user_doc) else owner
+    if is_admin_doc(user_doc) and selected_user:
+        target_doc = db.users.find_one({"_id": selected_user})
+        if not can_admin_chat_with(user_doc, target_doc):
+            return Response({"detail": "Chat user not found."}, status=status.HTTP_404_NOT_FOUND)
     query = {"user_id": selected_user} if selected_user else {"user_id": owner}
     docs = db.chat_messages.find(query).sort("created_at", ASCENDING)
     result = []
@@ -1979,10 +2003,17 @@ def chat_presence(request):
 
     db.users.update_one({"_id": owner}, {"$set": {"last_seen": utcnow()}})
     viewer = db.users.find_one({"_id": owner})
-    query = {"role": "admin"} if not is_admin_doc(viewer) else {"role": {"$ne": "admin"}}
+    if not is_admin_doc(viewer):
+        query = {"role": "admin"}
+    elif is_superadmin_doc(viewer):
+        query = {"_id": {"$ne": owner}}
+    else:
+        query = {"role": {"$ne": "admin"}}
     people = []
 
     for person in db.users.find(query).sort("created_at", DESCENDING):
+        if is_admin_doc(viewer) and not can_admin_chat_with(viewer, person):
+            continue
         last_seen = person.get("last_seen")
         typing_until = person.get("typing_until")
         recording_until = person.get("recording_until")
