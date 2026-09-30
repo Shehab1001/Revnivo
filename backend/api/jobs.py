@@ -46,10 +46,10 @@ JOB_SOURCES = [
     {
         "key": "alignerr",
         "name": "Alignerr",
-        "listing_url": "https://www.alignerr.com/en/jobs",
-        "browse_url": "https://www.alignerr.com/en/jobs",
+        "listing_url": "https://www.alignerr.com/jobs",
+        "browse_url": "https://www.alignerr.com/jobs",
         "mode": "alignerr",
-        "detail_url_template": "https://www.alignerr.com/en/jobs/{id}",
+        "detail_url_template": "https://www.alignerr.com/jobs/{id}",
         "description": "All public expert and AI training roles Revnivo can retrieve from Alignerr.",
     },
     {
@@ -2195,7 +2195,7 @@ def parse_alignerr_raw_links(source, raw_html):
         job = make_job(
             source,
             title,
-            f"https://www.alignerr.com/en/jobs/{identifier}",
+            f"https://www.alignerr.com/jobs/{identifier}",
             card_text or title,
             location=infer_location(card_text),
             pay=extract_pay(card_text),
@@ -2225,7 +2225,7 @@ def parse_alignerr_visible_jobs(source, soup):
         if identifier in seen:
             continue
 
-        url = f"https://www.alignerr.com/en/jobs/{identifier}"
+        url = f"https://www.alignerr.com/jobs/{identifier}"
 
         # Alignerr cards may put title and metadata on nested elements or on
         # the entire link. Walk up a few levels to capture pay/remote text.
@@ -2610,32 +2610,9 @@ def fetch_alignerr_source(source):
         if reported_total and len(jobs) >= reported_total:
             break
 
-    # Alignerr's own jobs page only server-renders the first batch. If the
-    # private/public feed discovery above did not reach the advertised total,
-    # fall back to LinkedIn's public guest feed scoped to Alignerr's company
-    # id. This exposes the thousands of active Alignerr postings without
-    # requiring a LinkedIn login.
-    if not (
-        reported_total
-        and len(jobs) >= reported_total
-    ):
-        linkedin_jobs = fetch_all_alignerr_linkedin_jobs(
-            source,
-            reported_total=reported_total,
-        )
-        if len(linkedin_jobs) > len(jobs):
-            jobs = linkedin_jobs
-        elif linkedin_jobs:
-            jobs.extend(linkedin_jobs)
-            jobs = dedupe_jobs(
-                jobs,
-                MAX_JOBS_PER_SOURCE,
-            )
-
-        reported_total = max(
-            reported_total,
-            len(linkedin_jobs),
-        )
+    # Alignerr is intentionally sourced only from alignerr.com/jobs and
+    # the public data/endpoints referenced by that page. Do not merge
+    # third-party copies of Alignerr listings into this source.
 
     complete = bool(
         reported_total
