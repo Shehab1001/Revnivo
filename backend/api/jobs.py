@@ -2349,6 +2349,8 @@ def fetch_source(source):
             **source,
             "status": "account_only",
             "jobs": [],
+            "reported_total": 0,
+            "complete": False,
             "error": "",
         }
 
@@ -2357,6 +2359,15 @@ def fetch_source(source):
 
     if mode == "telus":
         return fetch_telus_source(source)
+
+    if mode == "bulk_public":
+        return fetch_bulk_public_source(source)
+
+    if mode == "mercor":
+        return fetch_mercor_source(source)
+
+    if mode == "micro1":
+        return fetch_micro1_source(source)
 
     return fetch_public_source(source)
 
@@ -2410,6 +2421,8 @@ def build_jobs_payload():
                 "description": source["description"],
                 "status": source["status"],
                 "job_count": len(source["jobs"]),
+                "reported_total": source.get("reported_total", 0),
+                "complete": bool(source.get("complete")),
                 "error": source["error"],
             }
         )
