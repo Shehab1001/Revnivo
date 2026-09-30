@@ -10,8 +10,10 @@ import {
   Spinner,
 } from '@heroui/react'
 import {
+  BookmarkPlus,
   BriefcaseBusiness,
   Building2,
+  Check,
   DollarSign,
   ExternalLink,
   Globe2,
@@ -158,7 +160,12 @@ function SourceMark({ name }) {
   )
 }
 
-function JobCard({ job }) {
+function JobCard({
+  job,
+  onTrack,
+  tracking = false,
+  tracked = false,
+}) {
   return (
     <Card
       shadow="none"
@@ -228,7 +235,26 @@ function JobCard({ job }) {
           </p>
         )}
 
-        <div className="mt-auto flex items-center justify-end border-t border-divider pt-3">
+        <div className="mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-divider pt-3">
+          <Button
+            variant="flat"
+            color={tracked ? 'success' : 'default'}
+            radius="lg"
+            size="sm"
+            isLoading={tracking}
+            isDisabled={tracked}
+            startContent={
+              !tracking && (
+                tracked
+                  ? <Check size={14} />
+                  : <BookmarkPlus size={14} />
+              )
+            }
+            onPress={() => onTrack(job)}
+          >
+            {tracked ? 'Tracked' : 'Track application'}
+          </Button>
+
           <Button
             as="a"
             href={job.url}
@@ -326,6 +352,14 @@ export default function Jobs() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
+  const [trackingIds, setTrackingIds] = useState(
+    () => new Set()
+  )
+  const [trackedIds, setTrackedIds] = useState(
+    () => new Set()
+  )
+  const [trackMessage, setTrackMessage] =
+    useState('')
 
   const [search, setSearch] = useState('')
   const [platform, setPlatform] = useState(ALL)
@@ -506,6 +540,64 @@ export default function Jobs() {
     setCategory(ALL)
     setRemoteOnly(false)
     setSortBy('platform')
+  }
+
+  const trackApplication = async (job) => {
+    if (!job?.id || trackingIds.has(job.id)) {
+      return
+    }
+
+    setTrackMessage('')
+    setTrackingIds((current) => {
+      const next = new Set(current)
+      next.add(job.id)
+      return next
+    })
+
+    try {
+      const { data } = await api.post(
+        '/applications/',
+        {
+          title: job.title,
+          company: job.platform,
+          source_platform:
+            job.source_name || job.platform,
+          source_job_id: job.id,
+          job_url: job.url,
+          location: job.location || '',
+          remote: Boolean(job.remote),
+          category: job.category || '',
+          employment_type:
+            job.employment_type || '',
+          salary_text: job.pay || '',
+          status: 'saved',
+          priority: 'medium',
+        }
+      )
+
+      setTrackedIds((current) => {
+        const next = new Set(current)
+        next.add(job.id)
+        return next
+      })
+
+      setTrackMessage(
+        data.duplicate
+          ? 'This role is already in your Application Tracker.'
+          : 'Role added to your Application Tracker.'
+      )
+    } catch (requestError) {
+      setTrackMessage(
+        requestError.response?.data?.detail ||
+          'Could not track this role.'
+      )
+    } finally {
+      setTrackingIds((current) => {
+        const next = new Set(current)
+        next.delete(job.id)
+        return next
+      })
+    }
   }
 
   return (
@@ -719,6 +811,12 @@ export default function Jobs() {
         </div>
       )}
 
+      {trackMessage && (
+        <div className="rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary">
+          {trackMessage}
+        </div>
+      )}
+
       <section>
         <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
           <div>
@@ -744,6 +842,9 @@ export default function Jobs() {
               <JobCard
                 key={job.id}
                 job={job}
+                onTrack={trackApplication}
+                tracking={trackingIds.has(job.id)}
+                tracked={trackedIds.has(job.id)}
               />
             ))}
           </div>
