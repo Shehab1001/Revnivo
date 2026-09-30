@@ -92,9 +92,9 @@ JOB_SOURCES = [
         "name": "AfterQuery Experts",
         "listing_url": "https://experts.afterquery.com/apply",
         "browse_url": "https://experts.afterquery.com/apply",
-        "mode": "public_page",
+        "mode": "afterquery_experts",
         "detail_url_template": "https://experts.afterquery.com/apply/{id}",
-        "description": "Public expert opportunities exposed by the AfterQuery Experts application site.",
+        "description": "All public expert opportunities listed on the official AfterQuery Experts application site.",
     },
     {
         "key": "afterquery_careers",
@@ -1124,6 +1124,206 @@ def parse_public_page(source, url):
 
     return dedupe_jobs(jobs, MAX_JOBS_PER_SOURCE)
 
+
+def afterquery_apply_slug(url):
+    parsed = urlparse(url)
+    match = re.match(r"^/apply/([^/?#]+?)/?$", parsed.path or "")
+    if not match:
+        return ""
+    slug = clean_text(match.group(1))
+    if not slug or slug.lower() in {"apply", "general"}:
+        return ""
+    return slug
+
+
+def discover_afterquery_apply_urls(source, raw_html, soup):
+    urls = []
+    seen = set()
+
+    def add(value):
+        url = safe_url(source["listing_url"], value)
+        if not url:
+            return
+        slug = afterquery_apply_slug(url)
+        if not slug:
+            return
+        canonical = f"https://experts.afterquery.com/apply/{slug}"
+        if canonical in seen:
+            return
+        seen.add(canonical)
+        urls.append(canonical)
+
+    for anchor_tag in soup.find_all("a", href=True):
+        add(anchor_tag.get("href"))
+
+    normalized = (
+        html.unescape(raw_html or "")
+        .replace("\\u002F", "/")
+        .replace("\\/", "/")
+    )
+    for match in re.finditer(
+        r"(?:https://experts\.afterquery\.com)?/apply/[a-zA-Z0-9_-]+",
+        normalized,
+    ):
+        add(match.group(0))
+
+    # Client-rendered boards may keep routes only inside JS bundles.
+    for script in soup.find_all("script", src=True):
+        script_url = safe_url(
+            source["listing_url"],
+            script.get("src"),
+        )
+        if not script_url:
+            continue
+        try:
+            response = requests.get(
+                script_url,
+                headers=REQUEST_HEADERS,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+        except requests.RequestException:
+            continue
+
+        body = (
+            html.unescape(response.text)
+            .replace("\\u002F", "/")
+            .replace("\\/", "/")
+        )
+        for match in re.finditer(
+            r"(?:https://experts\.afterquery\.com)?/apply/[a-zA-Z0-9_-]+",
+            body,
+        ):
+            add(match.group(0))
+
+        if len(urls) >= 500:
+            break
+
+    return urls
+
+
+def parse_afterquery_detail(source, url, html_text):
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html_text, "html.parser")
+    page_text = clean_text(soup.get_text(" ", strip=True))
+
+    if "job not found" in page_text.lower():
+        return None
+
+    title = ""
+    heading = soup.find("h1")
+    if heading:
+        title = clean_text(heading.get_text(" ", strip=True))
+
+    if not title:
+        meta = soup.find("meta", attrs={"property": "og:title"})
+        if meta:
+            title = clean_text(meta.get("content"))
+
+    if not title or title.lower() in {"afterquery experts", "apply"}:
+        return None
+
+    pay = extract_pay(page_text)
+    location = "Remote" if detect_remote(page_text) else infer_location(page_text)
+
+    employment = detect_employment(page_text)
+    industry = ""
+    industry_match = re.search(
+        r"\bIndustry\s+([^|]{2,80}?)(?:\s+Location\b|\s+Time Commitment\b|$)",
+        page_text,
+        flags=re.IGNORECASE,
+    )
+    if industry_match:
+        industry = clean_text(industry_match.group(1))
+
+    return make_job(
+        source,
+        title,
+        url,
+        page_text[:900],
+        location=location,
+        pay=pay,
+        employment_type=employment,
+        category=industry,
+    )
+
+
+def fetch_afterquery_experts_source(source):
+    try:
+        from bs4 import BeautifulSoup
+
+        response = request_url(source["listing_url"])
+        raw_html = response.text
+        soup = BeautifulSoup(raw_html, "html.parser")
+
+        urls = discover_afterquery_apply_urls(
+            source,
+            raw_html,
+            soup,
+        )
+
+        # Also parse cards on the listing page itself in case the detail
+        # route discovery misses a newly published opportunity.
+        jobs = []
+        jobs.extend(parse_jobposting_json(source, soup))
+        jobs.extend(parse_embedded_json(source, soup))
+        jobs.extend(parse_dom_cards(source, soup))
+        jobs.extend(parse_anchor_roles(source, soup))
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {
+                executor.submit(
+                    request_url,
+                    url,
+                ): url
+                for url in urls[:500]
+            }
+            for future in as_completed(futures):
+                url = futures[future]
+                try:
+                    detail_response = future.result()
+                    job = parse_afterquery_detail(
+                        source,
+                        url,
+                        detail_response.text,
+                    )
+                except (
+                    requests.RequestException,
+                    ImportError,
+                    ValueError,
+                ):
+                    continue
+
+                if job:
+                    jobs.append(job)
+
+        jobs = dedupe_jobs(
+            jobs,
+            MAX_JOBS_PER_SOURCE,
+        )
+
+        return {
+            **source,
+            "status": "live" if jobs else "browse",
+            "jobs": jobs,
+            "reported_total": len(urls),
+            "complete": bool(urls) and len(jobs) >= len(urls),
+            "error": "",
+        }
+    except (
+        requests.RequestException,
+        ImportError,
+        ValueError,
+    ) as exc:
+        return {
+            **source,
+            "status": "unavailable",
+            "jobs": [],
+            "reported_total": 0,
+            "complete": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 def fetch_public_source(source):
     urls = [
@@ -3260,6 +3460,9 @@ def fetch_source(source):
 
     if mode == "alignerr":
         return fetch_alignerr_source(source)
+
+    if mode == "afterquery_experts":
+        return fetch_afterquery_experts_source(source)
 
     if mode == "bulk_public":
         return fetch_bulk_public_source(source)
