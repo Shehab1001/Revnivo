@@ -1765,31 +1765,98 @@ def fetch_json_endpoint_pages(source, endpoint):
     all_jobs = []
     reported_total = 0
 
+    # First try the endpoint exactly as published. Some public feeds return
+    # their complete dataset without pagination parameters.
+    try:
+        payload = request_json(endpoint)
+        all_jobs.extend(
+            jobs_from_json_payload(
+                source,
+                payload,
+            )
+        )
+        all_jobs = dedupe_jobs(
+            all_jobs,
+            MAX_JOBS_PER_SOURCE,
+        )
+        reported_total = max(
+            reported_total,
+            payload_reported_total(payload),
+        )
+    except (
+        requests.RequestException,
+        ValueError,
+        json.JSONDecodeError,
+    ):
+        pass
+
+    if reported_total and len(all_jobs) >= reported_total:
+        return all_jobs, reported_total
+
+    # Cursor pagination is common on modern React/Next.js job boards.
+    cursor_jobs = []
+    cursor = ""
+    seen_cursors = set()
+    for _ in range(MAX_BULK_PAGES):
+        params = {"limit": 500}
+        if cursor:
+            params["cursor"] = cursor
+
+        try:
+            payload = request_json(
+                endpoint,
+                params=params,
+            )
+        except (
+            requests.RequestException,
+            ValueError,
+            json.JSONDecodeError,
+        ):
+            break
+
+        page_jobs = jobs_from_json_payload(
+            source,
+            payload,
+        )
+        reported_total = max(
+            reported_total,
+            payload_reported_total(payload),
+        )
+
+        before = len(cursor_jobs)
+        cursor_jobs.extend(page_jobs)
+        cursor_jobs = dedupe_jobs(
+            cursor_jobs,
+            MAX_JOBS_PER_SOURCE,
+        )
+
+        next_cursor = payload_next_cursor(payload)
+        if reported_total and len(cursor_jobs) >= reported_total:
+            break
+        if not next_cursor or next_cursor in seen_cursors:
+            break
+        if len(cursor_jobs) == before and cursor:
+            break
+
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+
+    if len(cursor_jobs) > len(all_jobs):
+        all_jobs = cursor_jobs
+
+    if reported_total and len(all_jobs) >= reported_total:
+        return all_jobs, reported_total
+
     strategies = [
-        (
-            "page_limit",
-            lambda page: {
-                "page": page,
-                "limit": 500,
-            },
-        ),
-        (
-            "page_size",
-            lambda page: {
-                "page": page,
-                "pageSize": 500,
-            },
-        ),
-        (
-            "offset_limit",
-            lambda page: {
-                "offset": (page - 1) * 500,
-                "limit": 500,
-            },
-        ),
+        lambda page: {"page": page, "limit": 1000},
+        lambda page: {"page": page, "pageSize": 1000},
+        lambda page: {"page": page, "perPage": 1000},
+        lambda page: {"page": page, "per_page": 1000},
+        lambda page: {"offset": (page - 1) * 1000, "limit": 1000},
+        lambda page: {"skip": (page - 1) * 1000, "limit": 1000},
     ]
 
-    for _, params_for_page in strategies:
+    for params_for_page in strategies:
         strategy_jobs = []
         no_growth = 0
 
@@ -1829,9 +1896,7 @@ def fetch_json_endpoint_pages(source, endpoint):
 
             if reported_total and len(strategy_jobs) >= reported_total:
                 break
-            if no_growth >= 2:
-                break
-            if not page_jobs:
+            if no_growth >= 2 or not page_jobs:
                 break
 
         if len(strategy_jobs) > len(all_jobs):
@@ -1847,7 +1912,6 @@ def fetch_json_endpoint_pages(source, endpoint):
         ),
         reported_total,
     )
-
 
 def parse_public_response(source, response):
     from bs4 import BeautifulSoup
