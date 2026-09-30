@@ -112,6 +112,7 @@ if not DEBUG and len(JWT_SECRET_KEY) < 32:
     raise RuntimeError("JWT_SECRET_KEY must be at least 32 characters in production.")
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+MICRO1_API_KEY = os.getenv("MICRO1_API_KEY", "").strip()
 SUPERADMIN_EMAIL = os.getenv("SUPERADMIN_EMAIL", "").strip().lower()
 
 EGP_PER_USD = Decimal(os.getenv("EGP_PER_USD", "50.00"))
