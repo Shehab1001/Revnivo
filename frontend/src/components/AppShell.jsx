@@ -1,4 +1,4 @@
-import { Bell, BarChart3, BriefcaseBusiness, ChevronDown, ChevronLeft, ChevronRight, CreditCard, DollarSign, FileText, LogOut, Menu, MessageCircle, Moon, PanelLeft, PanelsTopLeft, Settings as SettingsIcon, Sun, Trash2, Users, WalletCards } from 'lucide-react'
+import { Bell, BarChart3, BriefcaseBusiness, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, CreditCard, DollarSign, FileText, LogOut, Menu, MessageCircle, Moon, PanelLeft, PanelsTopLeft, Settings as SettingsIcon, Sun, Trash2, Users, WalletCards } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
@@ -12,6 +12,7 @@ const baseNav = [
   { to: '/earnings', label: 'Earnings', icon: WalletCards },
   { to: '/notes', label: 'Notes', icon: FileText },
   { to: '/jobs', label: 'Jobs', icon: BriefcaseBusiness },
+  { to: '/applications', label: 'Applications', icon: ClipboardList },
   { to: '/support-chat', label: 'Chat', icon: MessageCircle },
 ]
 
