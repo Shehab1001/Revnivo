@@ -871,6 +871,7 @@ export default function Subscriptions() {
             />
 
             <Select
+          disableAnimation
               label="Provider"
               selectedKeys={
                 new Set([
