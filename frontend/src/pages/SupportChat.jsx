@@ -1119,14 +1119,32 @@ export default function SupportChat() {
           online: false,
         }
 
+  const normalizedSearch =
+    search.trim().toLowerCase()
+
   const visibleContacts =
-    contacts.filter((contact) =>
-      `${contact.name} ${contact.email} ${
-        contact.last_message || ''
-      }`
-        .toLowerCase()
-        .includes(search.toLowerCase())
-    )
+    contacts.filter((contact) => {
+      const matchesSearch =
+        `${contact.name} ${contact.email} ${
+          contact.last_message || ''
+        }`
+          .toLowerCase()
+          .includes(normalizedSearch)
+
+      if (!matchesSearch) return false
+
+      // The normal inbox is private to this admin: only real conversations
+      // appear. Searching doubles as "start a new chat" and exposes the full
+      // account directory without making every admin's inbox identical.
+      if (user?.role === 'admin' && !normalizedSearch) {
+        return Boolean(
+          contact.last_message_at ||
+          contact.unread_count
+        )
+      }
+
+      return true
+    })
 
   const ownSender =
     user?.role === 'admin'
@@ -1209,7 +1227,7 @@ export default function SupportChat() {
           <div className="sticky top-0 z-10 border-b border-divider bg-content1 p-3 sm:p-4">
             <Input
               aria-label="Search people"
-              placeholder="Search people..."
+              placeholder="Search or start a chat..."
               value={search}
               onValueChange={setSearch}
               startContent={
@@ -1228,6 +1246,14 @@ export default function SupportChat() {
           </div>
 
           <div className="divide-y divide-divider">
+            {!visibleContacts.length && (
+              <div className="px-4 py-10 text-center text-sm text-default-400">
+                {search.trim()
+                  ? 'No accounts match your search.'
+                  : 'No conversations yet. Search for a user or admin to start a chat.'}
+              </div>
+            )}
+
             {visibleContacts.map(
               (contact) => (
                 <button
