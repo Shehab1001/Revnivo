@@ -40,6 +40,30 @@ const JOB_LOGOS = {
     'https://pbs.twimg.com/profile_images/2076957420530589696/8pWBYaGV_400x400.jpg',
 }
 
+const PLATFORM_LOGO_DOMAINS = {
+  alignlist: 'alignlist.com',
+  turing: 'turing.com',
+  micro1: 'micro1.ai',
+  outlier: 'outlier.ai',
+  mindrift: 'mindrift.ai',
+  crowdgen: 'crowdgen.com',
+  appen: 'appen.com',
+  telusdigital: 'telusdigital.com',
+  telus: 'telusdigital.com',
+  stellarai: 'joinstellar.ai',
+  stellar: 'joinstellar.ai',
+  oneforma: 'oneforma.com',
+  lxt: 'lxt.ai',
+}
+
+function domainLogo(domain) {
+  return (
+    'https://www.google.com/s2/favicons' +
+    `?domain=${encodeURIComponent(domain)}&sz=128`
+  )
+}
+
+
 function getJobLogo(name) {
   const normalized = String(name || '')
     .trim()
@@ -66,30 +90,17 @@ function getJobLogo(name) {
     return JOB_LOGOS.prolific
   }
 
+  for (const [alias, domain] of Object.entries(
+    PLATFORM_LOGO_DOMAINS
+  )) {
+    if (normalized.includes(alias)) {
+      return domainLogo(domain)
+    }
+  }
+
   return ''
 }
 
-const statusLabel = {
-  live: 'Live listings',
-  browse: 'Browse official site',
-  directory: 'Account-matched roles',
-  account_only: 'Sign in to view matched jobs',
-  api_key_needed: 'API key needed for full sync',
-  partial: 'Partial public sync',
-  syncing: 'Syncing roles...',
-  unavailable: 'Temporarily unavailable',
-}
-
-const statusColor = {
-  live: 'success',
-  browse: 'primary',
-  directory: 'secondary',
-  account_only: 'secondary',
-  api_key_needed: 'warning',
-  partial: 'warning',
-  syncing: 'primary',
-  unavailable: 'warning',
-}
 
 function SourceMark({ name }) {
   const [imageFailed, setImageFailed] =
