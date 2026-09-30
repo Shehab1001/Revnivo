@@ -396,6 +396,7 @@ function ApplicationCard({
 function KanbanColumn({
   statusKey,
   applications,
+  allApplications,
   onOpen,
   onMove,
   onArchive,
@@ -426,7 +427,7 @@ function KanbanColumn({
             'text/application-id'
           )
 
-        const application = applications.find(
+        const application = allApplications.find(
           (item) => item.id === applicationId
         )
 
@@ -984,6 +985,7 @@ export default function Applications() {
                 key={statusKey}
                 statusKey={statusKey}
                 applications={byStatus[statusKey]}
+                allApplications={filteredApplications}
                 onOpen={openApplication}
                 onMove={moveApplication}
                 onArchive={archiveApplication}
