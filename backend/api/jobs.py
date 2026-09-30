@@ -2070,6 +2070,7 @@ def fetch_bulk_public_source(source):
     errors = []
     reported_total = 0
     raw_html = ""
+    soup = None
 
     try:
         response = request_url(
@@ -2081,11 +2082,25 @@ def fetch_bulk_public_source(source):
             response,
         )
         jobs.extend(base_jobs)
+
+        if source["key"] == "alignerr":
+            jobs.extend(
+                parse_alignerr_embedded_jobs(
+                    source,
+                    raw_html,
+                )
+            )
+            jobs = dedupe_jobs(
+                jobs,
+                MAX_JOBS_PER_SOURCE,
+            )
+
         reported_total = max(
             reported_total,
             extract_reported_total(
                 soup.get_text(" ", strip=True)
             ),
+            extract_reported_total(raw_html),
         )
     except (
         requests.RequestException,
@@ -2096,10 +2111,32 @@ def fetch_bulk_public_source(source):
             f"base: {exc.__class__.__name__}"
         )
 
-    for endpoint in discover_job_json_endpoints(
+    endpoints = discover_job_json_endpoints(
         source["listing_url"],
         raw_html,
-    ):
+    )
+
+    if source["key"] == "alignerr" and soup is not None:
+        endpoints.extend(
+            discover_script_job_endpoints(
+                source["listing_url"],
+                soup,
+            )
+        )
+        endpoints.extend(
+            alignerr_fallback_endpoints()
+        )
+
+    deduped_endpoints = []
+    seen_endpoints = set()
+    for endpoint in endpoints:
+        endpoint = clean_text(endpoint)
+        if not endpoint or endpoint in seen_endpoints:
+            continue
+        seen_endpoints.add(endpoint)
+        deduped_endpoints.append(endpoint)
+
+    for endpoint in deduped_endpoints:
         endpoint_jobs, endpoint_total = (
             fetch_json_endpoint_pages(
                 source,
