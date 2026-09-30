@@ -35,7 +35,7 @@ REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/154.0 Safari/537.36 RevnivoJobs/2.0"
+        "Chrome/154.0.0.0 Safari/537.36"
     ),
     "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
@@ -2134,6 +2134,78 @@ def parse_alignerr_embedded_jobs(source, raw_html):
         MAX_JOBS_PER_SOURCE,
     )
 
+def parse_alignerr_raw_links(source, raw_html):
+    """Fallback parser for SSR HTML when the DOM/card structure changes."""
+    if not raw_html:
+        return []
+
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return []
+
+    soup = BeautifulSoup(raw_html, "html.parser")
+    jobs = []
+    seen = set()
+    job_href = re.compile(
+        r"/(?:[a-z]{2}/)?jobs/([0-9a-f]{8}-[0-9a-f-]{20,})",
+        flags=re.IGNORECASE,
+    )
+
+    for anchor_tag in soup.find_all("a", href=True):
+        href = clean_text(anchor_tag.get("href"))
+        match = job_href.search(href)
+        if not match:
+            continue
+
+        identifier = match.group(1).lower()
+        if identifier in seen:
+            continue
+
+        # Look for the smallest surrounding card-like node with enough text.
+        node = anchor_tag
+        card_text = ""
+        for _ in range(6):
+            if node is None:
+                break
+            text_value = clean_text(node.get_text(" ", strip=True))
+            if 8 <= len(text_value) <= 1200:
+                card_text = text_value
+            node = getattr(node, "parent", None)
+
+        title = ""
+        for candidate in (
+            anchor_tag.select_one("h1"),
+            anchor_tag.select_one("h2"),
+            anchor_tag.select_one("h3"),
+            anchor_tag.select_one("h4"),
+            anchor_tag.select_one("strong"),
+        ):
+            if candidate:
+                title = normalize_title(candidate.get_text(" ", strip=True))
+                if title:
+                    break
+
+        if not title:
+            title = normalize_title(anchor_tag.get_text(" ", strip=True))
+
+        if not title:
+            continue
+
+        job = make_job(
+            source,
+            title,
+            f"https://www.alignerr.com/en/jobs/{identifier}",
+            card_text or title,
+            location=infer_location(card_text),
+            pay=extract_pay(card_text),
+        )
+        if job:
+            jobs.append(job)
+            seen.add(identifier)
+
+    return dedupe_jobs(jobs, MAX_JOBS_PER_SOURCE)
+
 def parse_alignerr_visible_jobs(source, soup):
     """Parse Alignerr cards directly; this guarantees the visible batch."""
     jobs = []
@@ -2323,7 +2395,8 @@ def parse_linkedin_alignerr_jobs(source, html_text):
 
 
 def fetch_alignerr_linkedin_page(source, start):
-    url = (
+    search_url = "https://www.linkedin.com/jobs/search/"
+    api_url = (
         "https://www.linkedin.com/jobs-guest/jobs/api/"
         "seeMoreJobPostings/search"
     )
@@ -2331,18 +2404,40 @@ def fetch_alignerr_linkedin_page(source, start):
         "f_C": ALIGNERR_LINKEDIN_COMPANY_ID,
         "start": start,
     }
-    headers = {
-        **REQUEST_HEADERS,
-        "Referer": (
-            "https://www.linkedin.com/jobs/search/"
-            f"?f_C={ALIGNERR_LINKEDIN_COMPANY_ID}"
-        ),
-    }
 
-    response = requests.get(
-        url,
-        headers=headers,
+    session = requests.Session()
+    session.headers.update(
+        {
+            **REQUEST_HEADERS,
+            "Accept": (
+                "text/html,application/xhtml+xml,application/xml;"
+                "q=0.9,image/avif,image/webp,*/*;q=0.8"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+    )
+
+    # LinkedIn guest search is more reliable after the normal search page
+    # establishes its public cookies. Failure here is non-fatal.
+    try:
+        session.get(
+            search_url,
+            params={"f_C": ALIGNERR_LINKEDIN_COMPANY_ID},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException:
+        pass
+
+    response = session.get(
+        api_url,
         params=params,
+        headers={
+            "Referer": (
+                "https://www.linkedin.com/jobs/search/"
+                f"?f_C={ALIGNERR_LINKEDIN_COMPANY_ID}"
+            ),
+            "X-Requested-With": "XMLHttpRequest",
+        },
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
@@ -2350,7 +2445,6 @@ def fetch_alignerr_linkedin_page(source, start):
         source,
         response.text,
     )
-
 
 def fetch_all_alignerr_linkedin_jobs(source, reported_total=0):
     """Fetch the complete public Alignerr company listing in waves."""
@@ -2444,6 +2538,9 @@ def fetch_alignerr_source(source):
 
         jobs.extend(
             parse_alignerr_visible_jobs(source, soup)
+        )
+        jobs.extend(
+            parse_alignerr_raw_links(source, raw_html)
         )
         jobs.extend(
             parse_alignerr_embedded_jobs(source, raw_html)
