@@ -3,6 +3,7 @@ from . import views
 from . import jobs as job_views
 from . import applications as application_views
 from . import application_workspace as application_workspace_views
+from . import resumes as resume_views
 
 urlpatterns = [
     path("health/", views.health),
@@ -27,10 +28,19 @@ urlpatterns = [
     path("support-chat/<str:message_id>/attachment/", views.support_chat_attachment),
     path("chat-presence/", views.chat_presence),
     path("jobs/", job_views.jobs_feed),
+    path("resumes/", resume_views.resumes),
+    path("resumes/<str:resume_id>/", resume_views.resume_detail),
+    path("resumes/<str:resume_id>/duplicate/", resume_views.resume_duplicate),
+    path("resumes/<str:resume_id>/versions/", resume_views.resume_versions),
+    path("resumes/<str:resume_id>/versions/<str:version_id>/restore/", resume_views.resume_restore_version),
+    path("resumes/<str:resume_id>/analyze/", resume_views.resume_analyze),
+    path("cover-letters/", resume_views.cover_letters),
+    path("cover-letters/<str:cover_letter_id>/", resume_views.cover_letter_detail),
     path("applications/", application_views.applications),
     path("applications/stats/", application_views.application_stats),
     path("applications/agenda/", application_workspace_views.application_agenda),
     path("applications/analytics/", application_workspace_views.application_analytics),
+    path("applications/<str:application_id>/materials/", resume_views.application_materials),
     path("applications/<str:application_id>/", application_views.application_detail),
     path("applications/<str:application_id>/status/", application_views.application_status),
     path("applications/<str:application_id>/events/", application_views.application_events),
