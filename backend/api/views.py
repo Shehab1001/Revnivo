@@ -995,13 +995,21 @@ def google_login(request):
             except DuplicateKeyError:
                 doc = db.users.find_one({"email": email})
 
-            for admin_doc in db.users.find({"role": "admin"}, {"_id": 1}):
-                create_notification(
-                    "user",
-                    "New user registered",
-                    f"{email} created a Revnivo account.",
-                    admin_doc["_id"],
-                )
+            # Account creation must not fail just because an auxiliary
+            # notification write fails. Authentication is the critical path.
+            try:
+                for admin_doc in db.users.find(
+                    {"role": "admin"},
+                    {"_id": 1},
+                ):
+                    create_notification(
+                        "user",
+                        "New user registered",
+                        f"{email} created a Revnivo account.",
+                        admin_doc["_id"],
+                    )
+            except PyMongoError:
+                pass
 
         if not doc:
             return Response(
@@ -1018,12 +1026,25 @@ def google_login(request):
 
         return auth_success_response(doc, request)
     except PyMongoError as exc:
-        detail = "Google sign-in succeeded, but Revnivo could not reach MongoDB."
+        detail = (
+            "Google sign-in succeeded, but Revnivo could not reach MongoDB."
+        )
         if settings.DEBUG:
-            detail += f" ({type(exc).__name__})"
+            detail += f" ({type(exc).__name__}: {exc})"
         return Response(
             {"detail": detail},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    except Exception as exc:
+        # Never return Django's generic HTML 500 for Google login. In local
+        # development expose the exception class/message so the failing step
+        # can be fixed immediately; production keeps the response generic.
+        detail = "Google sign-in failed while creating the Revnivo session."
+        if settings.DEBUG:
+            detail += f" ({type(exc).__name__}: {exc})"
+        return Response(
+            {"detail": detail},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 @api_view(["POST"])
