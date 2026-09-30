@@ -1867,3 +1867,233 @@ def application_materials(
             ),
         }
     )
+
+
+@api_view(["GET"])
+def resume_job_matches(request, resume_id):
+    from . import jobs as jobs_module
+
+    db = get_db()
+    owner_id = _owner_oid(request)
+    resume = _resume_doc(
+        db,
+        owner_id,
+        resume_id,
+    )
+
+    if not resume:
+        return Response(
+            {"detail": "Resume not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    with jobs_module._cache_lock:
+        payload = copy.deepcopy(
+            jobs_module._cache.get("payload")
+        )
+
+    if not payload:
+        return Response(
+            {
+                "matches": [],
+                "total_jobs": 0,
+                "detail": (
+                    "Refresh the Jobs board first so "
+                    "Revnivo has current listings to compare."
+                ),
+            }
+        )
+
+    resume_text = _resume_text(resume)
+    resume_tokens = set(
+        _tokens(resume_text)
+    )
+    resume_skills = {
+        skill.lower()
+        for skill in resume.get(
+            "skills",
+            [],
+        )
+        if skill
+    }
+
+    matches = []
+
+    for job in payload.get("jobs", []):
+        title = str(
+            job.get("title") or ""
+        )
+        category = str(
+            job.get("category") or ""
+        )
+        summary = str(
+            job.get("summary") or ""
+        )
+        employment = str(
+            job.get(
+                "employment_type"
+            )
+            or ""
+        )
+
+        job_text = " ".join(
+            [
+                title,
+                category,
+                summary,
+                employment,
+            ]
+        )
+
+        job_tokens = set(
+            _tokens(job_text)
+        )
+
+        if not job_tokens:
+            continue
+
+        overlap = sorted(
+            resume_tokens & job_tokens
+        )
+
+        keyword_coverage = (
+            len(overlap)
+            / max(
+                min(
+                    len(job_tokens),
+                    60,
+                ),
+                1,
+            )
+        )
+
+        title_tokens = set(
+            _tokens(title)
+        )
+        title_overlap = (
+            len(
+                title_tokens
+                & resume_tokens
+            )
+            / max(
+                len(title_tokens),
+                1,
+            )
+        )
+
+        category_tokens = set(
+            _tokens(category)
+        )
+        category_overlap = (
+            len(
+                category_tokens
+                & resume_tokens
+            )
+            / max(
+                len(category_tokens),
+                1,
+            )
+            if category_tokens
+            else 0
+        )
+
+        skill_matches = [
+            skill
+            for skill in resume_skills
+            if skill
+            and skill in job_text.lower()
+        ]
+
+        skill_bonus = min(
+            len(skill_matches) / 10,
+            1,
+        )
+
+        score = round(
+            min(
+                100,
+                (
+                    keyword_coverage
+                    * 45
+                    + title_overlap
+                    * 30
+                    + category_overlap
+                    * 15
+                    + skill_bonus
+                    * 10
+                ),
+            ),
+            1,
+        )
+
+        if score <= 0:
+            continue
+
+        matches.append(
+            {
+                "job": job,
+                "score": score,
+                "matched_keywords": overlap[
+                    :20
+                ],
+                "matched_skills": (
+                    skill_matches[:15]
+                ),
+            }
+        )
+
+    matches.sort(
+        key=lambda item: (
+            -item["score"],
+            str(
+                item["job"].get(
+                    "platform",
+                    "",
+                )
+            ).lower(),
+            str(
+                item["job"].get(
+                    "title",
+                    "",
+                )
+            ).lower(),
+        )
+    )
+
+    limit = request.query_params.get(
+        "limit",
+        "100",
+    )
+
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 100
+
+    limit = max(
+        1,
+        min(limit, 250),
+    )
+
+    return Response(
+        {
+            "matches": matches[:limit],
+            "total_jobs": len(
+                payload.get(
+                    "jobs",
+                    [],
+                )
+            ),
+            "resume_id": str(
+                resume["_id"]
+            ),
+            "resume_name": resume.get(
+                "name",
+                "",
+            ),
+            "method": (
+                "Heuristic relevance based on truthful "
+                "resume/job keyword and skill overlap."
+            ),
+        }
+    )
