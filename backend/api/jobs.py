@@ -5,16 +5,19 @@ import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import monotonic
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 import requests
+from django.conf import settings
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 
-CACHE_TTL_SECONDS = 15 * 60
+CACHE_TTL_SECONDS = 30 * 60
 REQUEST_TIMEOUT_SECONDS = 12
-MAX_JOBS_PER_SOURCE = 500
+MAX_JOBS_PER_SOURCE = 10000
+BULK_PAGE_SIZE = 100
+MAX_BULK_PAGES = 150
 MAX_TELUS_PAGES = 12
 
 _cache = {"expires_at": 0.0, "payload": None}
@@ -37,9 +40,35 @@ JOB_SOURCES = [
         "name": "Alignerr",
         "listing_url": "https://www.alignerr.com/jobs",
         "browse_url": "https://www.alignerr.com/jobs",
-        "mode": "public_page",
+        "mode": "bulk_public",
         "detail_url_template": "https://www.alignerr.com/jobs/{id}",
-        "description": "Public expert and AI training roles from Alignerr.",
+        "description": "All public expert and AI training roles Revnivo can retrieve from Alignerr.",
+    },
+    {
+        "key": "mercor",
+        "name": "Mercor",
+        "listing_url": "https://work.mercor.com/explore",
+        "browse_url": "https://work.mercor.com/explore",
+        "mode": "mercor",
+        "api_url": "https://aws.api.mercor.com/work/listings-explore-page",
+        "description": "Public project-based and talent-network opportunities from Mercor.",
+    },
+    {
+        "key": "turing",
+        "name": "Turing",
+        "listing_url": "https://work.turing.com/jobs?sort=recommended",
+        "browse_url": "https://work.turing.com/jobs?sort=recommended",
+        "mode": "bulk_public",
+        "description": "Public software, AI, science, business, finance, healthcare, and expert roles from Turing.",
+    },
+    {
+        "key": "micro1",
+        "name": "micro1",
+        "listing_url": "https://www.micro1.ai/experts/opportunities",
+        "browse_url": "https://www.micro1.ai/experts/opportunities",
+        "mode": "micro1",
+        "api_url": "https://public.api.micro1.ai/jobs",
+        "description": "Public AI training opportunities from micro1 across expert domains.",
     },
     {
         "key": "outlier",
