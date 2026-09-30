@@ -1775,38 +1775,84 @@ def support_chat(request):
     owner = owner_oid(request)
     user_doc = db.users.find_one({"_id": owner})
     db.users.update_one({"_id": owner}, {"$set": {"last_seen": utcnow()}})
+
     if request.method == "PATCH":
         chat_user_id = oid(request.data.get("user_id")) if is_admin_doc(user_doc) else owner
         if chat_user_id:
-            db.notifications.update_many({"kind": "chat", "chat_user_id": str(chat_user_id), "read": False, "$or": [{"owner_id": None}, {"owner_id": owner}]}, {"$set": {"read": True}})
+            db.notifications.update_many(
+                {
+                    "kind": "chat",
+                    "chat_user_id": str(chat_user_id),
+                    "read": False,
+                    "$or": [{"owner_id": None}, {"owner_id": owner}],
+                },
+                {"$set": {"read": True}},
+            )
         return Response({"status": "read"})
+
     if request.method == "DELETE":
         if request.data.get("mode") == "chat":
             if not is_admin_doc(user_doc):
-                return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
+                return Response(
+                    {"detail": "Admin access required."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
             chat_user_id = oid(request.data.get("user_id"))
-            if not chat_user_id:
-                return Response({"detail": "Invalid user id."}, status=status.HTTP_400_BAD_REQUEST)
-            for chat_message in db.chat_messages.find(
-                {"user_id": chat_user_id},
-                {"attachment": 1},
-            ):
+            target_doc = db.users.find_one({"_id": chat_user_id}) if chat_user_id else None
+            if not can_admin_chat_with(user_doc, target_doc):
+                return Response(
+                    {"detail": "Invalid chat user."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            chat_query = admin_contact_message_query(owner, target_doc)
+            for chat_message in db.chat_messages.find(chat_query, {"attachment": 1}):
                 if chat_message.get("attachment"):
                     delete_logo(chat_message["attachment"])
 
-            result = db.chat_messages.delete_many({"user_id": chat_user_id})
-            db.notifications.delete_many({"kind": "chat", "chat_user_id": str(chat_user_id)})
-            return Response({"status": "cleared", "deleted_messages": result.deleted_count})
+            result = db.chat_messages.delete_many(chat_query)
+            db.notifications.delete_many(
+                {
+                    "kind": "chat",
+                    "$or": [
+                        {"owner_id": owner, "chat_user_id": str(chat_user_id)},
+                        {"owner_id": chat_user_id, "chat_user_id": str(owner)},
+                    ],
+                }
+            )
+            return Response(
+                {
+                    "status": "cleared",
+                    "deleted_messages": result.deleted_count,
+                }
+            )
 
         message_id = oid(request.data.get("id"))
         if not message_id:
-            return Response({"detail": "Invalid message id."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Invalid message id."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         message = db.chat_messages.find_one({"_id": message_id})
         if not message:
-            return Response({"detail": "Message not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Message not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
-        if not is_admin_doc(user_doc) and message.get("user_id") != owner:
-            return Response({"detail": "Message not found."}, status=status.HTTP_404_NOT_FOUND)
+        if is_admin_doc(user_doc):
+            if not message_visible_to_admin(message, user_doc):
+                return Response(
+                    {"detail": "Message not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        elif message.get("user_id") != owner:
+            return Response(
+                {"detail": "Message not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         if request.data.get("mode") == "everyone":
             allowed = is_admin_doc(user_doc) or (
@@ -1818,8 +1864,10 @@ def support_chat(request):
                     {"detail": "You can only delete your own messages for everyone."},
                     status=status.HTTP_403_FORBIDDEN,
                 )
+
             if message.get("attachment"):
                 delete_logo(message["attachment"])
+
             db.chat_messages.update_one(
                 {"_id": message_id},
                 {
@@ -1836,29 +1884,45 @@ def support_chat(request):
                 {"_id": message_id},
                 {"$addToSet": {"deleted_for": owner}},
             )
+
         return Response({"status": "deleted"})
-    if request.method == "GET" and is_admin_doc(user_doc) and request.query_params.get("summary"):
-        contact_query = (
-            {"_id": {"$ne": owner}}
-            if is_superadmin_doc(user_doc)
-            else {"role": {"$ne": "admin"}}
-        )
+
+    if (
+        request.method == "GET"
+        and is_admin_doc(user_doc)
+        and request.query_params.get("summary")
+    ):
         users = [
             doc
-            for doc in db.users.find(contact_query).sort("created_at", DESCENDING)
+            for doc in db.users.find({"_id": {"$ne": owner}}).sort(
+                "created_at", DESCENDING
+            )
             if can_admin_chat_with(user_doc, doc)
         ]
+
         summaries = []
         for contact in users:
             contact_id = contact["_id"]
+            contact_query = admin_contact_message_query(owner, contact)
             latest = db.chat_messages.find_one(
                 {
-                    "user_id": contact_id,
-                    "deleted_for": {"$ne": owner},
+                    "$and": [
+                        contact_query,
+                        {"deleted_for": {"$ne": owner}},
+                    ]
                 },
                 sort=[("created_at", DESCENDING)],
             )
-            unread_count = db.notifications.count_documents({"kind": "chat", "chat_user_id": str(contact_id), "$or": [{"owner_id": None}, {"owner_id": owner}], "read": False})
+
+            unread_count = db.notifications.count_documents(
+                {
+                    "kind": "chat",
+                    "chat_user_id": str(contact_id),
+                    "$or": [{"owner_id": None}, {"owner_id": owner}],
+                    "read": False,
+                }
+            )
+
             last_seen = contact.get("last_seen")
             typing_until = contact.get("typing_until")
             recording_until = contact.get("recording_until")
@@ -1868,36 +1932,85 @@ def support_chat(request):
                 typing_until = typing_until.replace(tzinfo=timezone.utc)
             if recording_until and recording_until.tzinfo is None:
                 recording_until = recording_until.replace(tzinfo=timezone.utc)
+
+            typing_for = str(contact.get("typing_for") or "")
+            recording_for = str(contact.get("recording_for") or "")
+            visible_activity_targets = {"admin", str(owner)}
+
             latest_message = chat_message_preview(latest, owner)
-            summaries.append({
-                **serialize_user(contact, request),
-                "online": bool(last_seen and utcnow() - last_seen <= timedelta(minutes=2)),
-                "typing": bool(typing_until and utcnow() < typing_until),
-                "recording": bool(recording_until and utcnow() < recording_until),
-                "unread_count": unread_count,
-                "last_message": latest_message,
-                "last_message_at": serialize_datetime(latest.get("created_at")) if latest else None,
-            })
+            summaries.append(
+                {
+                    **serialize_user(contact, request),
+                    "online": bool(
+                        last_seen
+                        and utcnow() - last_seen <= timedelta(minutes=2)
+                    ),
+                    "typing": bool(
+                        typing_until
+                        and utcnow() < typing_until
+                        and typing_for in visible_activity_targets
+                    ),
+                    "recording": bool(
+                        recording_until
+                        and utcnow() < recording_until
+                        and recording_for in visible_activity_targets
+                    ),
+                    "unread_count": unread_count,
+                    "last_message": latest_message,
+                    "last_message_at": (
+                        serialize_datetime(latest.get("created_at"))
+                        if latest
+                        else None
+                    ),
+                }
+            )
+
         return Response(summaries)
+
+    target_doc = None
+    target_user = None
+
     if request.method == "POST":
         content = str(request.data.get("content", "")).strip()
         attachment = request.FILES.get("attachment")
         if not content and not attachment:
-            return Response({"detail": "Message is required."}, status=status.HTTP_400_BAD_REQUEST)
-        target_user = oid(request.data.get("user_id")) if is_admin_doc(user_doc) else owner
+            return Response(
+                {"detail": "Message is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        target_user = (
+            oid(request.data.get("user_id"))
+            if is_admin_doc(user_doc)
+            else owner
+        )
         if not target_user:
-            return Response({"detail": "Select a user before replying."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Select a user before replying."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if is_admin_doc(user_doc):
             target_doc = db.users.find_one({"_id": target_user})
             if not can_admin_chat_with(user_doc, target_doc):
-                return Response({"detail": "Chat user not found."}, status=status.HTTP_404_NOT_FOUND)
+                return Response(
+                    {"detail": "Chat user not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
 
-        requested_type = str(request.data.get("message_type", "text")).lower()
-        message_type = requested_type if requested_type in {"text", "image", "audio", "video", "file"} else "file"
+        requested_type = str(
+            request.data.get("message_type", "text")
+        ).lower()
+        message_type = (
+            requested_type
+            if requested_type in {"text", "image", "audio", "video", "file"}
+            else "file"
+        )
 
         if attachment:
-            mime_type = str(getattr(attachment, "content_type", "") or "").lower()
+            mime_type = str(
+                getattr(attachment, "content_type", "") or ""
+            ).lower()
             if mime_type.startswith("image/"):
                 message_type = "image"
             elif mime_type.startswith("audio/"):
@@ -1908,46 +2021,121 @@ def support_chat(request):
                 message_type = "file"
 
         message = {
-            "user_id": target_user,
             "content": content[:2000],
             "message_type": message_type,
             "sender": "admin" if is_admin_doc(user_doc) else "user",
             "created_at": utcnow(),
         }
+
+        if is_admin_doc(user_doc) and is_admin_doc(target_doc):
+            message.update(
+                {
+                    "conversation_key": admin_direct_chat_key(owner, target_user),
+                    "participant_ids": [str(owner), str(target_user)],
+                    "sender_id": owner,
+                    "recipient_id": target_user,
+                }
+            )
+        else:
+            message["user_id"] = target_user
+
         if attachment:
             message["attachment"] = save_upload(attachment, "chat")
+
         db.chat_messages.insert_one(message)
+
         if message["sender"] == "user":
-            admin_ids = [admin["_id"] for admin in db.users.find({"role": "admin"}, {"_id": 1})]
+            admin_ids = [
+                admin["_id"]
+                for admin in db.users.find({"role": "admin"}, {"_id": 1})
+            ]
             for admin_id in admin_ids:
-                create_notification("chat", "New support message", f"{user_doc.get('name', user_doc.get('email'))} sent a support message.", admin_id, target_user)
+                create_notification(
+                    "chat",
+                    "New support message",
+                    f"{user_doc.get('name', user_doc.get('email'))} sent a support message.",
+                    admin_id,
+                    target_user,
+                )
+        elif is_admin_doc(target_doc):
+            create_notification(
+                "chat",
+                "New message",
+                f"{user_doc.get('name', user_doc.get('email'))} sent you a message.",
+                target_user,
+                owner,
+            )
         else:
-            create_notification("chat", "New support reply", "The Revnivo admin replied to your support message.", target_user, target_user)
-    selected_user = oid(request.query_params.get("user_id")) if is_admin_doc(user_doc) else owner
+            create_notification(
+                "chat",
+                "New support reply",
+                "The Revnivo admin replied to your support message.",
+                target_user,
+                target_user,
+            )
+
+    selected_user = (
+        oid(request.query_params.get("user_id"))
+        if is_admin_doc(user_doc)
+        else owner
+    )
+
     if is_admin_doc(user_doc) and selected_user:
-        target_doc = db.users.find_one({"_id": selected_user})
+        target_doc = target_doc or db.users.find_one({"_id": selected_user})
         if not can_admin_chat_with(user_doc, target_doc):
-            return Response({"detail": "Chat user not found."}, status=status.HTTP_404_NOT_FOUND)
-    query = {"user_id": selected_user} if selected_user else {"user_id": owner}
+            return Response(
+                {"detail": "Chat user not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        query = admin_contact_message_query(owner, target_doc)
+    else:
+        query = {"user_id": owner}
+
     docs = db.chat_messages.find(query).sort("created_at", ASCENDING)
     result = []
+
     for doc in docs:
         if owner in doc.get("deleted_for", []):
             continue
+
         attachment = doc.get("attachment", "")
-        result.append({
-            **{key: doc.get(key) for key in ("content", "sender", "message_type")},
-            "deleted": bool(doc.get("deleted")),
-            "deleted_by_me": bool(
-                doc.get("deleted_by")
-                and str(doc.get("deleted_by")) == str(owner)
-            ),
-            "preview_text": chat_message_preview(doc, owner),
-            "id": str(doc["_id"]),
-            "user_id": str(doc["user_id"]),
-            "created_at": serialize_datetime(doc.get("created_at")),
-            "attachment_url": f"/api/support-chat/{doc['_id']}/attachment/" if attachment else "",
-        })
+        sender_id = doc.get("sender_id")
+        if sender_id:
+            is_mine = str(sender_id) == str(owner)
+        else:
+            is_mine = doc.get("sender") == (
+                "admin" if is_admin_doc(user_doc) else "user"
+            )
+
+        result.append(
+            {
+                **{
+                    key: doc.get(key)
+                    for key in ("content", "sender", "message_type")
+                },
+                "is_mine": is_mine,
+                "deleted": bool(doc.get("deleted")),
+                "deleted_by_me": bool(
+                    doc.get("deleted_by")
+                    and str(doc.get("deleted_by")) == str(owner)
+                ),
+                "preview_text": chat_message_preview(doc, owner),
+                "id": str(doc["_id"]),
+                "user_id": str(
+                    doc.get("user_id")
+                    or doc.get("recipient_id")
+                    or selected_user
+                    or owner
+                ),
+                "created_at": serialize_datetime(doc.get("created_at")),
+                "attachment_url": (
+                    f"/api/support-chat/{doc['_id']}/attachment/"
+                    if attachment
+                    else ""
+                ),
+            }
+        )
+
     return Response(result)
 
 
