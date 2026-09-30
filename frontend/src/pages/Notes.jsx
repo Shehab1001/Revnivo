@@ -898,13 +898,13 @@ export default function Notes() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 sm:space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
             Workspace
           </p>
-          <h1 className="mt-2 text-3xl font-semibold text-foreground">
+          <h1 className="mt-2 text-2xl font-semibold text-foreground sm:text-3xl">
             Notes
           </h1>
           <p className="mt-1 text-sm text-default-500">
@@ -915,6 +915,7 @@ export default function Notes() {
         <Button
           color="primary"
           radius="lg"
+          className="shrink-0 w-full sm:w-auto"
           isLoading={creating}
           onPress={createNote}
           startContent={
@@ -931,7 +932,7 @@ export default function Notes() {
         </div>
       )}
 
-      <div className="grid min-h-[70vh] overflow-hidden rounded-2xl border border-default-200/70 bg-content1 shadow-sm dark:border-white/8 lg:grid-cols-[280px_minmax(0,1fr)]">
+      <div className="grid overflow-hidden rounded-2xl border border-default-200/70 bg-content1 shadow-sm dark:border-white/8 lg:min-h-[70vh] lg:grid-cols-[280px_minmax(0,1fr)]">
         <aside className="flex min-h-0 flex-col border-b border-divider bg-default-50/55 dark:bg-white/[0.015] lg:border-b-0 lg:border-r">
           <div className="p-3">
             <Input
@@ -950,7 +951,7 @@ export default function Notes() {
             />
           </div>
 
-          <div className="max-h-[280px] flex-1 overflow-y-auto border-t border-divider lg:max-h-none">
+          <div className="max-h-[220px] flex-1 overflow-y-auto border-t border-divider sm:max-h-[280px] lg:max-h-none">
             {items.length ? (
               items.map((note) => (
                 <button
@@ -987,7 +988,7 @@ export default function Notes() {
 
                   <button
                     type="button"
-                    className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg text-default-400 opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
+                    className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-default-400 opacity-100 transition hover:bg-danger/10 hover:text-danger sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100"
                     onClick={(event) => {
                       event.stopPropagation()
                       setDeleteTarget(note)
@@ -1011,7 +1012,7 @@ export default function Notes() {
         <main className="min-w-0 bg-content1">
           {activeNote ? (
             <div
-              className={`relative flex min-h-[70vh] flex-col transition ${
+              className={`relative flex min-h-[55vh] flex-col transition sm:min-h-[60vh] lg:min-h-[70vh] ${
                 draggingFiles
                   ? 'ring-2 ring-inset ring-primary'
                   : ''
@@ -1085,8 +1086,8 @@ export default function Notes() {
                 </div>
               )}
 
-              <div className="border-b border-divider px-4 py-3 sm:px-7">
-                <div className="flex flex-wrap items-center gap-1">
+              <div className="border-b border-divider px-3 py-2.5 sm:px-7 sm:py-3">
+                <div className="notes-toolbar flex items-center gap-1 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0">
                   <ToolbarButton
                     label="Heading 1"
                     icon={Heading1}
@@ -1101,7 +1102,7 @@ export default function Notes() {
                       formatBlock('h2')
                     }
                   />
-                  <span className="mx-1 h-5 w-px bg-divider" />
+                  <span className="mx-1 h-5 w-px shrink-0 bg-divider" />
                   <ToolbarButton
                     label="Bold"
                     icon={Bold}
@@ -1123,7 +1124,7 @@ export default function Notes() {
                       runCommand('underline')
                     }
                   />
-                  <span className="mx-1 h-5 w-px bg-divider" />
+                  <span className="mx-1 h-5 w-px shrink-0 bg-divider" />
                   <ToolbarButton
                     label="Bulleted list"
                     icon={List}
@@ -1157,7 +1158,7 @@ export default function Notes() {
                     }
                   />
 
-                  <span className="mx-1 h-5 w-px bg-divider" />
+                  <span className="mx-1 h-5 w-px shrink-0 bg-divider" />
 
                   <input
                     ref={fileInputRef}
@@ -1175,6 +1176,7 @@ export default function Notes() {
                     size="sm"
                     variant="light"
                     radius="lg"
+                    className="shrink-0"
                     isLoading={uploading}
                     startContent={
                       !uploading ? (
@@ -1188,7 +1190,7 @@ export default function Notes() {
                     Attach
                   </Button>
 
-                  <div className="ml-auto">
+                  <div className="ml-auto shrink-0 pl-2">
                     <Chip
                       size="sm"
                       variant="flat"
@@ -1207,7 +1209,7 @@ export default function Notes() {
               </div>
 
               {selectedAttachmentId && (
-                <div className="flex flex-wrap items-center gap-2 border-b border-divider bg-default-50/60 px-4 py-2 dark:bg-white/[0.02] sm:px-7">
+                <div className="notes-attachment-controls flex items-center gap-2 overflow-x-auto border-b border-divider bg-default-50/60 px-3 py-2 dark:bg-white/[0.02] sm:flex-wrap sm:px-7">
                   <span className="mr-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-default-400">
                     Attachment size
                   </span>
@@ -1254,7 +1256,7 @@ export default function Notes() {
                 </div>
               )}
 
-              <div className="mx-auto w-full max-w-4xl flex-1 px-5 py-8 sm:px-10 sm:py-10">
+              <div className="mx-auto w-full max-w-4xl flex-1 px-4 py-5 sm:px-8 sm:py-8 lg:px-10 lg:py-10">
                 <input
                   value={draftTitle}
                   onChange={(event) =>
@@ -1265,10 +1267,10 @@ export default function Notes() {
                   placeholder="Untitled"
                   dir={hasArabic(draftTitle) ? 'rtl' : 'ltr'}
                   style={{ textAlign: hasArabic(draftTitle) ? 'right' : 'left' }}
-                  className="w-full border-0 bg-transparent text-3xl font-bold tracking-tight text-foreground outline-none placeholder:text-default-300 sm:text-4xl"
+                  className="w-full border-0 bg-transparent text-2xl font-bold tracking-tight text-foreground outline-none placeholder:text-default-300 sm:text-4xl"
                 />
 
-                <div className="mt-2 flex items-center gap-2 text-[11px] text-default-400">
+                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-default-400">
                   <span>
                     Updated{' '}
                     {localDateTime(
@@ -1312,14 +1314,14 @@ export default function Notes() {
                     }
                   }}
                   data-placeholder="Start writing…"
-                  className={`note-editor mt-7 min-h-[300px] w-full text-[15px] leading-7 text-foreground outline-none ${resizingAttachment ? 'select-none' : ''}`}
+                  className={`note-editor mt-5 min-h-[240px] w-full max-w-full overflow-x-hidden text-[15px] leading-7 text-foreground outline-none sm:mt-7 sm:min-h-[300px] ${resizingAttachment ? 'select-none' : ''}`}
                 />
 
 
               </div>
             </div>
           ) : (
-            <div className="grid min-h-[70vh] place-items-center px-6 text-center">
+            <div className="grid min-h-[55vh] place-items-center px-4 py-10 text-center sm:min-h-[60vh] sm:px-6 lg:min-h-[70vh]">
               <div>
                 <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 text-primary">
                   <FileText size={24} />
@@ -1374,6 +1376,7 @@ function ToolbarButton({
         size="sm"
         variant="light"
         radius="lg"
+        className="shrink-0"
         aria-label={label}
         onMouseDown={(event) =>
           event.preventDefault()
