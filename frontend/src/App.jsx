@@ -17,6 +17,7 @@ import Landing from './pages/Landing'
 import Jobs from './pages/Jobs'
 import Applications from './pages/Applications'
 import ApplicationWorkspace from './pages/ApplicationWorkspace'
+import ResumeStudio from './pages/ResumeStudio'
 
 function Protected({ children }) {
   const { isAuthenticated, sessionChecked } = useAuth()
@@ -56,7 +57,10 @@ export default function App() {
         <Route path="/payments" element={<Payments/>}/>
         <Route path="/notes" element={<Notes/>}/>
         <Route path="/jobs" element={<Jobs/>}/>
-        <Route path="/applications" element={<Applications/>}/>
+        <Route path="/jobs/applications" element={<Applications/>}/>
+        <Route path="/jobs/applications/:applicationId" element={<ApplicationWorkspace/>}/>
+        <Route path="/jobs/resume-studio" element={<ResumeStudio/>}/>
+        <Route path="/applications" element={<Navigate to="/jobs/applications" replace/>}/>
         <Route path="/applications/:applicationId" element={<ApplicationWorkspace/>}/>
         <Route path="/settings" element={<Settings/>}/>
         <Route path="/admin/users" element={<AdminUsers/>}/>
