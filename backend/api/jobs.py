@@ -44,6 +44,14 @@ REQUEST_HEADERS = {
 
 JOB_SOURCES = [
     {
+        "key": "alignlist",
+        "name": "AlignList",
+        "listing_url": "https://alignlist.com/jobs",
+        "browse_url": "https://alignlist.com/jobs",
+        "mode": "alignlist",
+        "description": "Thousands of public AI training and expert-work listings aggregated by AlignList.",
+    },
+    {
         "key": "alignerr",
         "name": "Alignerr",
         "listing_url": "https://www.alignerr.com/jobs",
@@ -1309,6 +1317,259 @@ def fetch_afterquery_experts_source(source):
             "jobs": jobs,
             "reported_total": len(urls),
             "complete": bool(urls) and len(jobs) >= len(urls),
+            "error": "",
+        }
+    except (
+        requests.RequestException,
+        ImportError,
+        ValueError,
+    ) as exc:
+        return {
+            **source,
+            "status": "unavailable",
+            "jobs": [],
+            "reported_total": 0,
+            "complete": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+def alignlist_company_from_card(card, title, card_text, href):
+    """Best-effort company extraction from AlignList job cards."""
+    company_link = card.select_one(
+        'a[href^="/companies/"], a[href*="alignlist.com/companies/"]'
+    )
+    if company_link:
+        company = clean_text(company_link.get_text(" ", strip=True))
+        if company:
+            return company
+
+    for selector in (
+        '[class*="company"]',
+        '[data-company]',
+        '[class*="employer"]',
+        '[class*="organization"]',
+    ):
+        node = card.select_one(selector)
+        if node:
+            company = clean_text(
+                node.get("data-company")
+                or node.get_text(" ", strip=True)
+            )
+            if company and company.lower() != title.lower():
+                return company
+
+    # AlignList cards render compact text as: Title + Company + Remote + Pay.
+    remainder = clean_text(card_text)
+    if title and remainder.lower().startswith(title.lower()):
+        remainder = clean_text(remainder[len(title):])
+
+    markers = [
+        " Remote",
+        " Hybrid",
+        " On-site",
+        " Onsite",
+        " $",
+        " £",
+        " €",
+    ]
+    marker_positions = [
+        remainder.find(marker)
+        for marker in markers
+        if remainder.find(marker) > 0
+    ]
+    if marker_positions:
+        company = clean_text(
+            remainder[:min(marker_positions)]
+        )
+        if company and len(company) <= 120:
+            return company
+
+    # Last fallback: AlignList detail slugs start with the company slug.
+    slug = (urlparse(href).path or "").rstrip("/").split("/")[-1]
+    if "-list-" in slug:
+        prefix = slug.split("-list-", 1)[0]
+        title_slug = re.sub(
+            r"[^a-z0-9]+",
+            "-",
+            title.lower(),
+        ).strip("-")
+        if title_slug and prefix.endswith(title_slug):
+            company_slug = prefix[: -(len(title_slug))].strip("-")
+            if company_slug:
+                return " ".join(
+                    word.capitalize()
+                    for word in company_slug.split("-")
+                )
+
+    return "AlignList"
+
+
+def parse_alignlist_jobs(source, html_text):
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html_text, "html.parser")
+    jobs = []
+    seen_urls = set()
+
+    for link in soup.find_all("a", href=True):
+        href = safe_url(source["listing_url"], link.get("href"))
+        if not href:
+            continue
+
+        parsed = urlparse(href)
+        path = parsed.path.rstrip("/")
+        if not path.startswith("/jobs/") or path == "/jobs":
+            continue
+
+        # Ignore navigation/query links; real AlignList job pages have a
+        # stable slug after /jobs/.
+        slug = path.split("/jobs/", 1)[1]
+        if not slug or "/" in slug:
+            continue
+
+        canonical_url = f"https://alignlist.com/jobs/{slug}"
+        if canonical_url in seen_urls:
+            continue
+
+        # Find the smallest useful surrounding job-card container.
+        candidates = []
+        node = link
+        for _ in range(6):
+            if node is None:
+                break
+            text_value = clean_text(node.get_text(" ", strip=True))
+            if 8 <= len(text_value) <= 1400:
+                candidates.append((node, text_value))
+            node = getattr(node, "parent", None)
+
+        if not candidates:
+            continue
+
+        card, card_text = min(
+            candidates,
+            key=lambda item: len(item[1]),
+        )
+
+        title = ""
+        for selector in (
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            '[class*="title"]',
+            "strong",
+        ):
+            title_node = card.select_one(selector)
+            if title_node:
+                candidate = normalize_title(
+                    title_node.get_text(" ", strip=True)
+                )
+                if candidate and len(candidate) >= 3:
+                    title = candidate
+                    break
+
+        if not title:
+            title = normalize_title(
+                link.get_text(" ", strip=True)
+            )
+
+        if not title or len(title) > 220:
+            continue
+
+        company = alignlist_company_from_card(
+            card,
+            title,
+            card_text,
+            canonical_url,
+        )
+
+        location = infer_location(card_text)
+        if not location:
+            location_node = card.select_one(
+                '[class*="location"], [data-location]'
+            )
+            if location_node:
+                location = clean_text(
+                    location_node.get("data-location")
+                    or location_node.get_text(" ", strip=True)
+                )
+
+        pay = extract_pay(card_text)
+        job = make_job(
+            source,
+            title,
+            canonical_url,
+            card_text,
+            location=location,
+            pay=pay,
+        )
+        if not job:
+            continue
+
+        # Keep AlignList as the filter/source while showing the original
+        # employer on every job card.
+        job["platform"] = company
+        job["platform_key"] = source["key"]
+        job["source_name"] = "AlignList"
+        job["source_url"] = canonical_url
+        job["id"] = job_id(
+            source["key"],
+            f"{company}|{title}",
+            canonical_url,
+        )
+
+        jobs.append(job)
+        seen_urls.add(canonical_url)
+
+        if len(jobs) >= MAX_JOBS_PER_SOURCE:
+            break
+
+    return jobs
+
+
+def fetch_alignlist_source(source):
+    try:
+        response = requests.get(
+            source["listing_url"],
+            headers={
+                **REQUEST_HEADERS,
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;"
+                    "q=0.9,*/*;q=0.8"
+                ),
+                "Referer": "https://alignlist.com/",
+            },
+            timeout=25,
+        )
+        response.raise_for_status()
+
+        jobs = parse_alignlist_jobs(
+            source,
+            response.text,
+        )
+        reported_total = max(
+            extract_reported_total(response.text),
+            len(jobs),
+        )
+
+        complete = bool(
+            jobs
+            and (
+                not reported_total
+                or len(jobs) >= reported_total
+            )
+        )
+
+        return {
+            **source,
+            "status": (
+                "live"
+                if jobs and complete
+                else ("partial" if jobs else "browse")
+            ),
+            "jobs": jobs,
+            "reported_total": reported_total,
+            "complete": complete,
             "error": "",
         }
     except (
@@ -3457,6 +3718,9 @@ def fetch_source(source):
 
     if mode == "telus":
         return fetch_telus_source(source)
+
+    if mode == "alignlist":
+        return fetch_alignlist_source(source)
 
     if mode == "alignerr":
         return fetch_alignerr_source(source)
