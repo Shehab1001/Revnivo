@@ -52,6 +52,11 @@ const TYPE_META = {
     color: 'secondary',
     icon: CalendarClock,
   },
+  reminder: {
+    label: 'Reminder',
+    color: 'warning',
+    icon: Clock3,
+  },
   deadline: {
     label: 'Deadline',
     color: 'danger',
