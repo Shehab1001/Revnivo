@@ -725,6 +725,7 @@ export default function Platforms() {
         />
 
         <Autocomplete
+          disableAnimation
           label="Default currency"
           selectedKey={form.default_currency}
           onSelectionChange={(key) =>
@@ -764,6 +765,7 @@ export default function Platforms() {
         </Autocomplete>
 
         <Select
+          disableAnimation
           label="Status"
           selectedKeys={new Set([form.status])}
           onSelectionChange={(keys) =>
@@ -922,6 +924,7 @@ export default function Platforms() {
         />
 
         <Select
+          disableAnimation
           aria-label="Filter by status"
           className="w-full sm:w-48"
           selectedKeys={new Set([statusFilter])}
