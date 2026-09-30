@@ -510,7 +510,7 @@ export default function ApplicationWorkspace() {
         <Button
           variant="light"
           startContent={<ArrowLeft size={16} />}
-          onPress={() => navigate('/applications')}
+          onPress={() => navigate('/jobs/applications')}
         >
           Back to applications
         </Button>
@@ -533,7 +533,7 @@ export default function ApplicationWorkspace() {
               className="-ml-2 mb-3"
               startContent={<ArrowLeft size={15} />}
               onPress={() =>
-                navigate('/applications')
+                navigate('/jobs/applications')
               }
             >
               Applications
@@ -610,7 +610,7 @@ export default function ApplicationWorkspace() {
             <Button
               color="primary"
               onPress={() =>
-                navigate('/applications')
+                navigate('/jobs/applications')
               }
             >
               Back to board
