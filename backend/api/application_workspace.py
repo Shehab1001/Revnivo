@@ -1298,6 +1298,42 @@ def application_agenda(request):
             continue
 
         due_at = task.get("due_at")
+        reminder_at = task.get("reminder_at")
+
+        if (
+            reminder_at
+            and reminder_at <= horizon
+        ):
+            items.append(
+                {
+                    "id": (
+                        f"reminder-{task['_id']}"
+                    ),
+                    "type": "reminder",
+                    "application_id": str(
+                        application["_id"]
+                    ),
+                    "company": application.get(
+                        "company",
+                        "",
+                    ),
+                    "job_title": application.get(
+                        "title",
+                        "",
+                    ),
+                    "title": (
+                        f"Reminder: "
+                        f"{task.get('title', '')}"
+                    ),
+                    "at": serialize_datetime(
+                        reminder_at
+                    ),
+                    "priority": task.get(
+                        "priority",
+                        "medium",
+                    ),
+                }
+            )
 
         if (
             due_at
