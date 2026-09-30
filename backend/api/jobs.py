@@ -1313,6 +1313,7 @@ def extract_reported_total(text):
     patterns = [
         r"Showing\s+[\d,]+\s+of\s+([\d,]+)\s+roles",
         r"All\s+([\d,]+)\s+(?:roles|jobs)",
+        r"All\s+([\d,]+)\s+Priority\b",
         r"([\d,]+)\s+(?:open\s+)?(?:roles|jobs)",
     ]
 
