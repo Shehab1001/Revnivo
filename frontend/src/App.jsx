@@ -14,6 +14,7 @@ import AdminUsers from './pages/AdminUsers'
 import Subscriptions from './pages/Subscriptions'
 import SupportChat from './pages/SupportChat'
 import Landing from './pages/Landing'
+import Jobs from './pages/Jobs'
 
 function Protected({ children }) {
   const { isAuthenticated, sessionChecked } = useAuth()
@@ -52,6 +53,7 @@ export default function App() {
         <Route path="/earnings" element={<Earnings/>}/>
         <Route path="/payments" element={<Payments/>}/>
         <Route path="/notes" element={<Notes/>}/>
+        <Route path="/jobs" element={<Jobs/>}/>
         <Route path="/settings" element={<Settings/>}/>
         <Route path="/admin/users" element={<AdminUsers/>}/>
         <Route path="/admin/subscriptions" element={<Subscriptions/>}/>
