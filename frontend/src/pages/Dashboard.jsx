@@ -559,6 +559,7 @@ export default function Dashboard() {
 
           <div className="flex w-full flex-wrap justify-end gap-2">
             <Select
+          disableAnimation
               aria-label="Platform"
               className="w-full sm:w-44"
               size="md"
@@ -585,6 +586,7 @@ export default function Dashboard() {
             </Select>
 
             <Select
+          disableAnimation
               aria-label="Date range"
               className="w-full sm:w-44" 
               size="md"
@@ -613,6 +615,7 @@ export default function Dashboard() {
             </Select>
 
             <Autocomplete
+          disableAnimation
               aria-label="Currency"
               className="w-full sm:w-44"
               size="md"
