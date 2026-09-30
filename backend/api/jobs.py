@@ -6,7 +6,6 @@ from time import monotonic
 from urllib.parse import urljoin, urlparse
 
 import requests
-from bs4 import BeautifulSoup
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
@@ -402,6 +401,10 @@ def fetch_source(source):
         }
 
     try:
+        # Keep the rest of Revnivo bootable even before a local developer has
+        # refreshed requirements after pulling the Jobs feature.
+        from bs4 import BeautifulSoup
+
         response = requests.get(
             source["listing_url"],
             headers=REQUEST_HEADERS,
@@ -421,7 +424,7 @@ def fetch_source(source):
             "jobs": jobs,
             "error": "",
         }
-    except requests.RequestException as exc:
+    except (requests.RequestException, ImportError) as exc:
         return {
             **source,
             "status": "unavailable",
