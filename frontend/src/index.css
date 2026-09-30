@@ -564,3 +564,47 @@ html.dark .note-inline-file-card {
     display: none;
   }
 }
+
+
+@media (max-width: 640px) {
+  .notes-toolbar {
+    overflow: visible;
+    padding-bottom: 0;
+  }
+
+  .notes-list {
+    scrollbar-width: thin;
+  }
+
+  .note-editor,
+  .note-editor * {
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .note-editor {
+    overflow-x: hidden;
+  }
+
+  .note-editor pre {
+    max-width: 100%;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .note-editor img,
+  .note-inline-image-frame,
+  .note-inline-file-card {
+    max-width: 100%;
+  }
+
+  .note-inline-file-card {
+    overflow: hidden;
+  }
+
+  .note-inline-file-meta strong {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
