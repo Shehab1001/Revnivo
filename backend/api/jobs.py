@@ -1292,6 +1292,1055 @@ def fetch_telus_source(source):
     }
 
 
+
+def add_query_params(url, **params):
+    parsed = urlparse(url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    for key, value in params.items():
+        if value is None:
+            query.pop(key, None)
+        else:
+            query[key] = str(value)
+    return urlunparse(
+        parsed._replace(query=urlencode(query))
+    )
+
+
+def extract_reported_total(text):
+    value = clean_text(text)
+    candidates = []
+
+    patterns = [
+        r"Showing\s+[\d,]+\s+of\s+([\d,]+)\s+roles",
+        r"All\s+([\d,]+)\s+(?:roles|jobs)",
+        r"([\d,]+)\s+(?:open\s+)?(?:roles|jobs)",
+    ]
+
+    for pattern in patterns:
+        for match in re.finditer(
+            pattern,
+            value,
+            flags=re.IGNORECASE,
+        ):
+            try:
+                candidates.append(
+                    int(match.group(1).replace(",", ""))
+                )
+            except (TypeError, ValueError):
+                continue
+
+    return max(candidates) if candidates else 0
+
+
+def payload_reported_total(payload):
+    keys = {
+        "total",
+        "totalCount",
+        "total_count",
+        "totalJobs",
+        "total_jobs",
+        "count",
+    }
+    candidates = []
+
+    for item in flatten_json(payload):
+        for key in keys:
+            value = item.get(key)
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)) and value >= 0:
+                candidates.append(int(value))
+            elif isinstance(value, str) and value.replace(",", "").isdigit():
+                candidates.append(
+                    int(value.replace(",", ""))
+                )
+
+    return max(candidates) if candidates else 0
+
+
+def structured_pay(item):
+    minimum = item.get("rateMin")
+    maximum = item.get("rateMax")
+    frequency = clean_text(
+        item.get("payRateFrequency")
+        or item.get("rateFrequency")
+        or ""
+    ).lower()
+    currency = clean_text(
+        item.get("currency")
+        or item.get("payCurrency")
+        or "USD"
+    ).upper()
+
+    if minimum is None and maximum is None:
+        return clean_text(
+            item.get("pay")
+            or item.get("compensation")
+            or ""
+        )
+
+    if minimum is not None and maximum is not None:
+        amount = (
+            str(minimum)
+            if str(minimum) == str(maximum)
+            else f"{minimum}-{maximum}"
+        )
+    else:
+        amount = str(
+            minimum
+            if minimum is not None
+            else maximum
+        )
+
+    suffix = ""
+    if frequency:
+        aliases = {
+            "hourly": "hr",
+            "hour": "hr",
+            "yearly": "yr",
+            "annual": "yr",
+            "task": "task",
+            "project": "project",
+        }
+        suffix = f"/{aliases.get(frequency, frequency)}"
+
+    symbol = "$" if currency == "USD" else f"{currency} "
+    return f"{symbol}{amount}{suffix}"
+
+
+def structured_location(item):
+    location = item.get("location")
+    if isinstance(location, str):
+        return clean_text(location)
+
+    if isinstance(location, dict):
+        for key in (
+            "displayName",
+            "name",
+            "formatted",
+            "city",
+        ):
+            if clean_text(location.get(key)):
+                return clean_text(location.get(key))
+
+    for key in (
+        "locationName",
+        "workplace",
+        "eligibleLocation",
+        "eligibleLocations",
+    ):
+        value = item.get(key)
+        if isinstance(value, str):
+            return clean_text(value)
+        if isinstance(value, list):
+            names = [
+                clean_text(
+                    part.get("name")
+                    if isinstance(part, dict)
+                    else part
+                )
+                for part in value
+            ]
+            names = [
+                name
+                for name in names
+                if name
+            ]
+            if names:
+                return ", ".join(names[:4])
+
+    return ""
+
+
+def jobs_from_json_payload(source, payload):
+    jobs = []
+    seen_records = set()
+
+    for item in flatten_json(payload):
+        title = object_title(item)
+        if not title:
+            continue
+
+        identifier = object_identifier(item)
+        fingerprint = (
+            title.lower(),
+            identifier,
+            clean_text(
+                item.get("listingUrl")
+                or item.get("job_apply_url")
+                or item.get("jobUrl")
+                or item.get("url")
+                or ""
+            ),
+        )
+        if fingerprint in seen_records:
+            continue
+
+        key_text = " ".join(
+            str(key).lower()
+            for key in item.keys()
+        )
+        if not any(
+            marker in key_text
+            for marker in (
+                "job",
+                "listing",
+                "opportun",
+                "position",
+                "role",
+                "salary",
+                "rate",
+                "compensation",
+            )
+        ):
+            continue
+
+        status_value = clean_text(
+            item.get("job_status")
+            or item.get("status")
+            or ""
+        ).lower()
+        if status_value in {
+            "closed",
+            "inactive",
+            "archived",
+            "filled",
+            "cancelled",
+            "canceled",
+        }:
+            continue
+
+        url = object_url(source, item)
+        if (
+            source["key"] == "mercor"
+            and identifier
+            and (
+                not url
+                or url == source["browse_url"]
+            )
+        ):
+            url = (
+                "https://work.mercor.com/jobs/"
+                f"{identifier}"
+            )
+
+        blob = object_blob(item)
+        category = clean_text(
+            item.get("listingDomain")
+            or item.get("department")
+            or item.get("category")
+            or item.get("skill")
+            or ""
+        )
+        employment = clean_text(
+            item.get("commitment")
+            or item.get("employmentType")
+            or item.get("employment_type")
+            or ""
+        )
+
+        job = make_job(
+            source,
+            title,
+            url,
+            blob,
+            location=structured_location(item),
+            pay=structured_pay(item),
+            employment_type=employment,
+            category=category,
+        )
+        if job:
+            jobs.append(job)
+            seen_records.add(fingerprint)
+
+    return dedupe_jobs(
+        jobs,
+        MAX_JOBS_PER_SOURCE,
+    )
+
+
+def discover_job_json_endpoints(base_url, raw_html):
+    if not raw_html:
+        return []
+
+    decoded = raw_html.replace("\\/", "/")
+    candidates = []
+
+    absolute_pattern = re.compile(
+        r'https?://[^"\'<>\\\s]+',
+        re.IGNORECASE,
+    )
+    relative_pattern = re.compile(
+        r'["\']((?:/api/|/v\d+/|/graphql)[^"\']+)["\']',
+        re.IGNORECASE,
+    )
+
+    for match in absolute_pattern.finditer(decoded):
+        candidates.append(
+            match.group(0).rstrip("),;")
+        )
+
+    for match in relative_pattern.finditer(decoded):
+        candidates.append(
+            urljoin(base_url, match.group(1))
+        )
+
+    result = []
+    seen = set()
+
+    for candidate in candidates:
+        lowered = candidate.lower()
+        if not any(
+            marker in lowered
+            for marker in (
+                "job",
+                "role",
+                "opportun",
+                "listing",
+                "position",
+            )
+        ):
+            continue
+        if any(
+            lowered.endswith(ext)
+            for ext in (
+                ".js",
+                ".css",
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".svg",
+                ".webp",
+            )
+        ):
+            continue
+
+        candidate = html.unescape(candidate)
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        result.append(candidate)
+
+        if len(result) >= 20:
+            break
+
+    return result
+
+
+def request_json(url, *, method="get", params=None, body=None, headers=None):
+    merged_headers = {
+        **REQUEST_HEADERS,
+        "Accept": "application/json",
+        **(headers or {}),
+    }
+
+    if method == "post":
+        response = requests.post(
+            url,
+            headers=merged_headers,
+            params=params,
+            json=body,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    else:
+        response = requests.get(
+            url,
+            headers=merged_headers,
+            params=params,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+
+    response.raise_for_status()
+    return response.json()
+
+
+def fetch_json_endpoint_pages(source, endpoint):
+    all_jobs = []
+    reported_total = 0
+
+    strategies = [
+        (
+            "page_limit",
+            lambda page: {
+                "page": page,
+                "limit": 500,
+            },
+        ),
+        (
+            "page_size",
+            lambda page: {
+                "page": page,
+                "pageSize": 500,
+            },
+        ),
+        (
+            "offset_limit",
+            lambda page: {
+                "offset": (page - 1) * 500,
+                "limit": 500,
+            },
+        ),
+    ]
+
+    for _, params_for_page in strategies:
+        strategy_jobs = []
+        no_growth = 0
+
+        for page in range(1, MAX_BULK_PAGES + 1):
+            try:
+                payload = request_json(
+                    endpoint,
+                    params=params_for_page(page),
+                )
+            except (
+                requests.RequestException,
+                ValueError,
+                json.JSONDecodeError,
+            ):
+                break
+
+            page_jobs = jobs_from_json_payload(
+                source,
+                payload,
+            )
+            reported_total = max(
+                reported_total,
+                payload_reported_total(payload),
+            )
+
+            before = len(strategy_jobs)
+            strategy_jobs.extend(page_jobs)
+            strategy_jobs = dedupe_jobs(
+                strategy_jobs,
+                MAX_JOBS_PER_SOURCE,
+            )
+
+            if len(strategy_jobs) == before:
+                no_growth += 1
+            else:
+                no_growth = 0
+
+            if reported_total and len(strategy_jobs) >= reported_total:
+                break
+            if no_growth >= 2:
+                break
+            if not page_jobs:
+                break
+
+        if len(strategy_jobs) > len(all_jobs):
+            all_jobs = strategy_jobs
+
+        if reported_total and len(all_jobs) >= reported_total:
+            break
+
+    return (
+        dedupe_jobs(
+            all_jobs,
+            MAX_JOBS_PER_SOURCE,
+        ),
+        reported_total,
+    )
+
+
+def parse_public_response(source, response):
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(
+        response.text,
+        "html.parser",
+    )
+    jobs = []
+    jobs.extend(
+        parse_jobposting_json(source, soup)
+    )
+    jobs.extend(
+        parse_embedded_json(source, soup)
+    )
+    jobs.extend(
+        parse_dom_cards(source, soup)
+    )
+    jobs.extend(
+        parse_anchor_roles(source, soup)
+    )
+    jobs.extend(
+        parse_text_salary_roles(source, soup)
+    )
+    return (
+        dedupe_jobs(
+            jobs,
+            MAX_JOBS_PER_SOURCE,
+        ),
+        soup,
+    )
+
+
+def fetch_bulk_public_source(source):
+    jobs = []
+    errors = []
+    reported_total = 0
+    raw_html = ""
+
+    try:
+        response = request_url(
+            source["listing_url"]
+        )
+        raw_html = response.text
+        base_jobs, soup = parse_public_response(
+            source,
+            response,
+        )
+        jobs.extend(base_jobs)
+        reported_total = max(
+            reported_total,
+            extract_reported_total(
+                soup.get_text(" ", strip=True)
+            ),
+        )
+    except (
+        requests.RequestException,
+        ImportError,
+        ValueError,
+    ) as exc:
+        errors.append(
+            f"base: {exc.__class__.__name__}"
+        )
+
+    for endpoint in discover_job_json_endpoints(
+        source["listing_url"],
+        raw_html,
+    ):
+        endpoint_jobs, endpoint_total = (
+            fetch_json_endpoint_pages(
+                source,
+                endpoint,
+            )
+        )
+        jobs.extend(endpoint_jobs)
+        jobs = dedupe_jobs(
+            jobs,
+            MAX_JOBS_PER_SOURCE,
+        )
+        reported_total = max(
+            reported_total,
+            endpoint_total,
+        )
+
+        if reported_total and len(jobs) >= reported_total:
+            break
+
+    if not (
+        reported_total
+        and len(jobs) >= reported_total
+    ):
+        pagination_strategies = [
+            lambda page: add_query_params(
+                source["listing_url"],
+                page=page,
+            ),
+            lambda page: add_query_params(
+                source["listing_url"],
+                offset=(page - 1) * 60,
+                limit=60,
+            ),
+            lambda page: add_query_params(
+                source["listing_url"],
+                skip=(page - 1) * 60,
+                limit=60,
+            ),
+        ]
+
+        for build_url in pagination_strategies:
+            strategy_found_new = False
+            no_growth = 0
+
+            for page in range(2, MAX_BULK_PAGES + 1):
+                try:
+                    response = request_url(
+                        build_url(page)
+                    )
+                    page_jobs, soup = (
+                        parse_public_response(
+                            source,
+                            response,
+                        )
+                    )
+                except (
+                    requests.RequestException,
+                    ImportError,
+                    ValueError,
+                ):
+                    break
+
+                reported_total = max(
+                    reported_total,
+                    extract_reported_total(
+                        soup.get_text(
+                            " ",
+                            strip=True,
+                        )
+                    ),
+                )
+
+                before = len(jobs)
+                jobs.extend(page_jobs)
+                jobs = dedupe_jobs(
+                    jobs,
+                    MAX_JOBS_PER_SOURCE,
+                )
+
+                if len(jobs) > before:
+                    strategy_found_new = True
+                    no_growth = 0
+                else:
+                    no_growth += 1
+
+                if (
+                    reported_total
+                    and len(jobs) >= reported_total
+                ):
+                    break
+                if no_growth >= 2:
+                    break
+
+            if strategy_found_new:
+                break
+
+    jobs = dedupe_jobs(
+        jobs,
+        MAX_JOBS_PER_SOURCE,
+    )
+    complete = bool(
+        reported_total
+        and len(jobs) >= reported_total
+    )
+
+    return {
+        **source,
+        "status": (
+            "live"
+            if jobs and (
+                complete
+                or not reported_total
+            )
+            else (
+                "partial"
+                if jobs
+                else (
+                    "unavailable"
+                    if errors
+                    else "browse"
+                )
+            )
+        ),
+        "jobs": jobs,
+        "reported_total": reported_total,
+        "complete": complete,
+        "error": "; ".join(errors[:3]),
+    }
+
+
+def mercor_job_from_item(source, item):
+    title = clean_text(
+        item.get("title")
+        or item.get("jobTitle")
+        or item.get("listingTitle")
+        or ""
+    )
+    if not title:
+        return None
+
+    identifier = clean_text(
+        item.get("listingId")
+        or item.get("id")
+        or ""
+    )
+    url = clean_text(
+        item.get("listingUrl")
+        or item.get("url")
+        or ""
+    )
+    if not url and identifier:
+        url = (
+            "https://work.mercor.com/jobs/"
+            f"{identifier}"
+        )
+
+    return make_job(
+        source,
+        title,
+        url or source["browse_url"],
+        clean_text(
+            item.get("description")
+            or item.get("summary")
+            or ""
+        ),
+        location=structured_location(item),
+        pay=structured_pay(item),
+        employment_type=clean_text(
+            item.get("commitment")
+            or ""
+        ),
+        category=clean_text(
+            item.get("listingDomain")
+            or item.get("category")
+            or ""
+        ),
+    )
+
+
+def mercor_jobs_from_payload(source, payload):
+    jobs = []
+
+    for item in flatten_json(payload):
+        identifier = clean_text(
+            item.get("listingId")
+            or ""
+        )
+        if not identifier:
+            continue
+
+        status_value = clean_text(
+            item.get("status") or ""
+        ).lower()
+        if status_value in {
+            "closed",
+            "inactive",
+            "archived",
+            "filled",
+        }:
+            continue
+
+        job = mercor_job_from_item(
+            source,
+            item,
+        )
+        if job:
+            jobs.append(job)
+
+    return dedupe_jobs(
+        jobs,
+        MAX_JOBS_PER_SOURCE,
+    )
+
+
+def fetch_mercor_source(source):
+    endpoint = source["api_url"]
+    headers = {
+        "Origin": "https://work.mercor.com",
+        "Referer": "https://work.mercor.com/explore",
+    }
+
+    request_modes = [
+        (
+            "get",
+            lambda page: {
+                "page": page,
+                "limit": 100,
+                "orderBy": "newest",
+            },
+        ),
+        (
+            "post",
+            lambda page: {
+                "page": page,
+                "limit": 100,
+                "orderBy": "newest",
+            },
+        ),
+        (
+            "post",
+            lambda page: {
+                "pagination": {
+                    "page": page,
+                    "limit": 100,
+                },
+                "orderBy": "newest",
+            },
+        ),
+        (
+            "post",
+            lambda page: {
+                "offset": (page - 1) * 100,
+                "limit": 100,
+                "orderBy": "newest",
+            },
+        ),
+    ]
+
+    best_jobs = []
+    reported_total = 0
+    errors = []
+
+    for method, payload_for_page in request_modes:
+        jobs = []
+        no_growth = 0
+        mode_worked = False
+
+        for page in range(1, MAX_BULK_PAGES + 1):
+            payload_or_params = payload_for_page(
+                page
+            )
+            try:
+                if method == "post":
+                    payload = request_json(
+                        endpoint,
+                        method="post",
+                        body=payload_or_params,
+                        headers=headers,
+                    )
+                else:
+                    payload = request_json(
+                        endpoint,
+                        params=payload_or_params,
+                        headers=headers,
+                    )
+            except (
+                requests.RequestException,
+                ValueError,
+                json.JSONDecodeError,
+            ) as exc:
+                if page == 1:
+                    errors.append(
+                        f"{method}: {exc.__class__.__name__}"
+                    )
+                break
+
+            page_jobs = mercor_jobs_from_payload(
+                source,
+                payload,
+            )
+            if page_jobs:
+                mode_worked = True
+
+            reported_total = max(
+                reported_total,
+                payload_reported_total(payload),
+            )
+
+            before = len(jobs)
+            jobs.extend(page_jobs)
+            jobs = dedupe_jobs(
+                jobs,
+                MAX_JOBS_PER_SOURCE,
+            )
+
+            if len(jobs) == before:
+                no_growth += 1
+            else:
+                no_growth = 0
+
+            if reported_total and len(jobs) >= reported_total:
+                break
+            if no_growth >= 2 or not page_jobs:
+                break
+
+        if len(jobs) > len(best_jobs):
+            best_jobs = jobs
+
+        if (
+            mode_worked
+            and (
+                not reported_total
+                or len(best_jobs) >= reported_total
+            )
+        ):
+            break
+
+    if not best_jobs:
+        fallback = fetch_bulk_public_source(
+            {
+                **source,
+                "mode": "bulk_public",
+            }
+        )
+        best_jobs = fallback["jobs"]
+        reported_total = max(
+            reported_total,
+            fallback.get("reported_total", 0),
+        )
+
+    complete = bool(
+        reported_total
+        and len(best_jobs) >= reported_total
+    )
+
+    return {
+        **source,
+        "status": (
+            "live"
+            if best_jobs and (
+                complete
+                or not reported_total
+            )
+            else (
+                "partial"
+                if best_jobs
+                else "unavailable"
+            )
+        ),
+        "jobs": dedupe_jobs(
+            best_jobs,
+            MAX_JOBS_PER_SOURCE,
+        ),
+        "reported_total": reported_total,
+        "complete": complete,
+        "error": "; ".join(errors[:3]),
+    }
+
+
+def micro1_job_from_item(source, item):
+    if clean_text(
+        item.get("job_status")
+        or ""
+    ).lower() == "closed":
+        return None
+
+    return make_job(
+        source,
+        item.get("job_title")
+        or item.get("title")
+        or "",
+        item.get("job_apply_url")
+        or source["browse_url"],
+        strip_html(
+            item.get("job_description")
+            or item.get("description")
+            or ""
+        ),
+        location=structured_location(item),
+        category=clean_text(
+            item.get("category")
+            or item.get("department")
+            or ""
+        ),
+    )
+
+
+def fetch_micro1_source(source):
+    api_key = settings.MICRO1_API_KEY
+
+    if api_key:
+        jobs = []
+        reported_total = 0
+        page_size = 100
+
+        for page in range(
+            1,
+            MAX_BULK_PAGES + 1,
+        ):
+            try:
+                payload = request_json(
+                    source["api_url"],
+                    params={
+                        "page": page,
+                        "limit": page_size,
+                    },
+                    headers={
+                        "x-api-key": api_key,
+                    },
+                )
+            except (
+                requests.RequestException,
+                ValueError,
+                json.JSONDecodeError,
+            ):
+                break
+
+            data = payload.get("data")
+            if not isinstance(data, list):
+                data = []
+
+            reported_total = max(
+                reported_total,
+                payload_reported_total(payload),
+            )
+            page_jobs = [
+                job
+                for item in data
+                if isinstance(item, dict)
+                for job in [
+                    micro1_job_from_item(
+                        source,
+                        item,
+                    )
+                ]
+                if job
+            ]
+
+            before = len(jobs)
+            jobs.extend(page_jobs)
+            jobs = dedupe_jobs(
+                jobs,
+                MAX_JOBS_PER_SOURCE,
+            )
+
+            if not data:
+                break
+            if len(jobs) == before:
+                break
+            if len(data) < page_size:
+                break
+            if reported_total and len(jobs) >= reported_total:
+                break
+
+        if jobs:
+            complete = bool(
+                reported_total
+                and len(jobs) >= reported_total
+            )
+            return {
+                **source,
+                "status": (
+                    "live"
+                    if complete
+                    or not reported_total
+                    else "partial"
+                ),
+                "jobs": jobs,
+                "reported_total": reported_total,
+                "complete": complete,
+                "error": "",
+            }
+
+    fallback = fetch_bulk_public_source(
+        {
+            **source,
+            "mode": "bulk_public",
+        }
+    )
+
+    return {
+        **source,
+        **{
+            key: value
+            for key, value in fallback.items()
+            if key not in source
+        },
+        "status": (
+            fallback["status"]
+            if fallback["jobs"]
+            else (
+                "api_key_needed"
+                if not api_key
+                else fallback["status"]
+            )
+        ),
+        "jobs": fallback["jobs"],
+        "reported_total": fallback.get(
+            "reported_total",
+            0,
+        ),
+        "complete": fallback.get(
+            "complete",
+            False,
+        ),
+        "error": fallback.get(
+            "error",
+            "",
+        ),
+    }
+
+
 def fetch_source(source):
     mode = source["mode"]
 
