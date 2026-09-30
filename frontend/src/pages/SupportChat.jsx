@@ -42,17 +42,24 @@ function formatMessageTime(value) {
   }).toLowerCase()
 }
 
-function Avatar({ user, isAdmin = false }) {
+function Avatar({
+  user,
+  showSupportLogo = false,
+}) {
   return (
     <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border border-default-300/80 bg-primary/10 font-bold text-primary dark:border-white/15">
-      {isAdmin ? (
+      {showSupportLogo ? (
         <img
           src="/profile.png"
           alt="Revnivo Support"
           className="h-full w-full bg-white object-cover p-1.5"
         />
       ) : (
-        <ProfileAvatar user={user} className="h-full w-full" alt="Profile" />
+        <ProfileAvatar
+          user={user}
+          className="h-full w-full"
+          alt="Profile"
+        />
       )}
     </div>
   )
@@ -482,9 +489,11 @@ export default function SupportChat() {
     const { data } = await api.get('/chat-presence/')
 
     if (user?.role !== 'admin') {
-      const admin = data.find(
-        (person) => person.id !== user?.id
-      )
+      const supportPresence = {
+        online: data.some((person) => person.online),
+        typing: data.some((person) => person.typing),
+        recording: data.some((person) => person.recording),
+      }
 
       setContacts((items) => [
         {
@@ -493,9 +502,7 @@ export default function SupportChat() {
             name: 'Revnivo Support',
             email: 'Technical support',
           }),
-          online: admin?.online,
-          typing: admin?.typing,
-          recording: admin?.recording,
+          ...supportPresence,
         },
       ])
     }
@@ -1255,11 +1262,6 @@ export default function SupportChat() {
                   <div className="relative">
                     <Avatar
                       user={contact}
-                      isAdmin={
-                        contact.id === 'support' ||
-                        contact.role === 'admin' ||
-                        contact.is_superadmin
-                      }
                     />
 
                     <span
@@ -1388,10 +1390,8 @@ export default function SupportChat() {
                 <div className="relative">
                   <Avatar
                     user={active}
-                    isAdmin={
-                      active.id === 'support' ||
-                      active.role === 'admin' ||
-                      active.is_superadmin
+                    showSupportLogo={
+                      user?.role !== 'admin'
                     }
                   />
 
@@ -1573,13 +1573,9 @@ export default function SupportChat() {
                                     ? user
                                     : active
                                 }
-                                isAdmin={
-                                  own
-                                    ? user?.role === 'admin'
-                                    : active?.id === 'support' ||
-                                      active?.role === 'admin' ||
-                                      active?.is_superadmin ||
-                                      message.sender === 'admin'
+                                showSupportLogo={
+                                  user?.role !== 'admin' &&
+                                  !own
                                 }
                               />
                             ) : (
