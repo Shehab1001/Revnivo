@@ -22,6 +22,14 @@ MAX_TELUS_PAGES = 12
 
 _cache = {"expires_at": 0.0, "payload": None}
 _cache_lock = threading.Lock()
+_source_results_cache = {}
+_sync_state = {
+    "refreshing": False,
+    "started_at": 0.0,
+    "completed_sources": 0,
+    "total_sources": 0,
+    "last_error": "",
+}
 
 REQUEST_HEADERS = {
     "User-Agent": (
@@ -2321,7 +2329,6 @@ def fetch_alignerr_linkedin_page(source, start):
     )
     params = {
         "f_C": ALIGNERR_LINKEDIN_COMPANY_ID,
-        "geoId": "92000000",
         "start": start,
     }
     headers = {
@@ -3192,47 +3199,29 @@ def fetch_source(source):
     return fetch_public_source(source)
 
 
-def build_jobs_payload():
-    source_results = []
-
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = {
-            executor.submit(
-                fetch_source,
-                source,
-            ): source
-            for source in JOB_SOURCES
-        }
-
-        for future in as_completed(futures):
-            source = futures[future]
-            try:
-                source_results.append(
-                    future.result()
-                )
-            except Exception as exc:
-                source_results.append(
-                    {
-                        **source,
-                        "status": "unavailable",
-                        "jobs": [],
-                        "error": exc.__class__.__name__,
-                    }
-                )
-
+def payload_from_source_results(source_results):
     source_order = {
         source["key"]: index
         for index, source in enumerate(JOB_SOURCES)
     }
-    source_results.sort(
-        key=lambda item: source_order[item["key"]]
+    ordered = sorted(
+        source_results,
+        key=lambda item: source_order.get(
+            item["key"],
+            len(source_order),
+        ),
     )
 
     jobs = []
     sources = []
 
-    for source in source_results:
-        jobs.extend(source["jobs"])
+    completed_keys = {
+        source["key"]
+        for source in ordered
+    }
+
+    for source in ordered:
+        jobs.extend(source.get("jobs", []))
         sources.append(
             {
                 "key": source["key"],
@@ -3240,12 +3229,38 @@ def build_jobs_payload():
                 "browse_url": source["browse_url"],
                 "description": source["description"],
                 "status": source["status"],
-                "job_count": len(source["jobs"]),
+                "job_count": len(source.get("jobs", [])),
                 "reported_total": source.get("reported_total", 0),
                 "complete": bool(source.get("complete")),
-                "error": source["error"],
+                "error": source.get("error", ""),
             }
         )
+
+    # Keep every configured platform visible while its source is still
+    # syncing so the UI does not jump between 0 and N platform cards.
+    for source in JOB_SOURCES:
+        if source["key"] in completed_keys:
+            continue
+        sources.append(
+            {
+                "key": source["key"],
+                "name": source["name"],
+                "browse_url": source["browse_url"],
+                "description": source["description"],
+                "status": "syncing",
+                "job_count": 0,
+                "reported_total": 0,
+                "complete": False,
+                "error": "",
+            }
+        )
+
+    sources.sort(
+        key=lambda item: source_order.get(
+            item["key"],
+            len(source_order),
+        )
+    )
 
     jobs = dedupe_jobs(jobs)
     jobs.sort(
@@ -3273,6 +3288,139 @@ def build_jobs_payload():
     }
 
 
+def empty_jobs_payload():
+    return payload_from_source_results([])
+
+
+def build_jobs_payload():
+    source_results = []
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {
+            executor.submit(
+                fetch_source,
+                source,
+            ): source
+            for source in JOB_SOURCES
+        }
+
+        for future in as_completed(futures):
+            source = futures[future]
+            try:
+                source_results.append(
+                    future.result()
+                )
+            except Exception as exc:
+                source_results.append(
+                    {
+                        **source,
+                        "status": "unavailable",
+                        "jobs": [],
+                        "reported_total": 0,
+                        "complete": False,
+                        "error": exc.__class__.__name__,
+                    }
+                )
+
+    return payload_from_source_results(
+        source_results
+    )
+
+
+def refresh_jobs_cache():
+    """Refresh sources without blocking the HTTP request that started it."""
+    global _source_results_cache
+
+    with _cache_lock:
+        if _sync_state["refreshing"]:
+            return
+        _sync_state.update(
+            {
+                "refreshing": True,
+                "started_at": monotonic(),
+                "completed_sources": 0,
+                "total_sources": len(JOB_SOURCES),
+                "last_error": "",
+            }
+        )
+
+    fresh_results = {}
+
+    try:
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {
+                executor.submit(
+                    fetch_source,
+                    source,
+                ): source
+                for source in JOB_SOURCES
+            }
+
+            for future in as_completed(futures):
+                source = futures[future]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    result = {
+                        **source,
+                        "status": "unavailable",
+                        "jobs": [],
+                        "reported_total": 0,
+                        "complete": False,
+                        "error": exc.__class__.__name__,
+                    }
+
+                fresh_results[source["key"]] = result
+
+                with _cache_lock:
+                    # Keep old results for sources that have not finished yet,
+                    # while replacing each source immediately as it completes.
+                    progressive = dict(_source_results_cache)
+                    progressive.update(fresh_results)
+                    _source_results_cache = progressive
+                    _cache["payload"] = payload_from_source_results(
+                        list(progressive.values())
+                    )
+                    _cache["expires_at"] = (
+                        monotonic()
+                        + CACHE_TTL_SECONDS
+                    )
+                    _sync_state["completed_sources"] = len(fresh_results)
+
+        with _cache_lock:
+            _source_results_cache = dict(fresh_results)
+            _cache["payload"] = payload_from_source_results(
+                list(fresh_results.values())
+            )
+            _cache["expires_at"] = (
+                monotonic()
+                + CACHE_TTL_SECONDS
+            )
+    except Exception as exc:
+        with _cache_lock:
+            _sync_state["last_error"] = (
+                f"{type(exc).__name__}: {exc}"
+            )
+    finally:
+        with _cache_lock:
+            _sync_state["refreshing"] = False
+
+
+def start_jobs_refresh():
+    with _cache_lock:
+        already_refreshing = _sync_state["refreshing"]
+
+    if already_refreshing:
+        return False
+
+    thread = threading.Thread(
+        target=refresh_jobs_cache,
+        name="revnivo-jobs-refresh",
+        daemon=True,
+    )
+    thread.start()
+    return True
+
 @api_view(["GET"])
 def jobs_feed(request):
     force_refresh = str(
@@ -3288,30 +3436,33 @@ def jobs_feed(request):
 
     now = monotonic()
     with _cache_lock:
-        if (
-            not force_refresh
-            and _cache["payload"] is not None
-            and now < _cache["expires_at"]
-        ):
-            return Response(
-                {
-                    **_cache["payload"],
-                    "cached": True,
-                }
-            )
+        payload = _cache["payload"]
+        cache_expired = (
+            payload is None
+            or now >= _cache["expires_at"]
+        )
+        currently_refreshing = _sync_state["refreshing"]
 
-    payload = build_jobs_payload()
+    should_refresh = (
+        force_refresh
+        or cache_expired
+    )
+
+    if should_refresh and not currently_refreshing:
+        start_jobs_refresh()
 
     with _cache_lock:
-        _cache["payload"] = payload
-        _cache["expires_at"] = (
-            monotonic()
-            + CACHE_TTL_SECONDS
-        )
+        payload = _cache["payload"] or empty_jobs_payload()
+        sync_snapshot = dict(_sync_state)
 
     return Response(
         {
             **payload,
-            "cached": False,
+            "cached": _cache["payload"] is not None,
+            "refreshing": sync_snapshot["refreshing"],
+            "sync_completed_sources": sync_snapshot["completed_sources"],
+            "sync_total_sources": sync_snapshot["total_sources"],
+            "sync_error": sync_snapshot["last_error"],
         }
     )
+
