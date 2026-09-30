@@ -1628,6 +1628,112 @@ def discover_job_json_endpoints(base_url, raw_html):
     return result
 
 
+def discover_script_job_endpoints(base_url, soup):
+    """Discover the public jobs endpoint used by modern Load More UIs."""
+    script_urls = []
+    for script in soup.find_all("script", src=True):
+        src = safe_url(base_url, script.get("src"))
+        if not src or src in script_urls:
+            continue
+        script_urls.append(src)
+        if len(script_urls) >= 40:
+            break
+
+    endpoints = []
+    seen = set()
+
+    def add_endpoint(value):
+        value = html.unescape(clean_text(value))
+        value = value.replace("\\u002F", "/").replace("\\/", "/")
+        if not value.startswith(("http://", "https://")):
+            return
+        lowered = value.lower()
+        if not any(word in lowered for word in ("job", "role", "opportun", "listing", "position")):
+            return
+        if value in seen:
+            return
+        seen.add(value)
+        endpoints.append(value)
+
+    for script_url in script_urls:
+        try:
+            response = requests.get(
+                script_url,
+                headers=REQUEST_HEADERS,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+        except requests.RequestException:
+            continue
+
+        if len(response.content) > 8_000_000:
+            continue
+
+        normalized = response.text.replace("\\u002F", "/").replace("\\/", "/")
+        api_hosts = set(
+            match.group(0).rstrip("/")
+            for match in re.finditer(
+                r"https://[a-zA-Z0-9.-]+(?:alignerr|labelbox)[a-zA-Z0-9.-]*\.[a-zA-Z]{2,}",
+                normalized,
+            )
+        )
+
+        for match in re.finditer(
+            r"https?://[^\\"\'<>\\\\\s]+",
+            normalized,
+            flags=re.IGNORECASE,
+        ):
+            add_endpoint(match.group(0).rstrip("),;}"))
+
+        relative_patterns = [
+            r'["\\\']((?:/api/|/v\\d+/|/public/|/jobs?|/roles?|/opportunities?)[^"\\\']*)["\\\']',
+        ]
+        relative_paths = set()
+        for pattern in relative_patterns:
+            for match in re.finditer(pattern, normalized, flags=re.IGNORECASE):
+                path = match.group(1)
+                if any(word in path.lower() for word in ("job", "role", "opportun", "listing", "position")):
+                    relative_paths.add(path)
+
+        for path in relative_paths:
+            add_endpoint(urljoin(base_url, path))
+            for host in api_hosts:
+                add_endpoint(urljoin(host + "/", path.lstrip("/")))
+
+        if len(endpoints) >= 40:
+            break
+
+    return endpoints[:40]
+
+
+def payload_next_cursor(payload):
+    cursor_keys = {
+        "nextCursor",
+        "next_cursor",
+        "nextPageToken",
+        "next_page_token",
+        "pageToken",
+        "continuationToken",
+        "continuation_token",
+    }
+    for item in flatten_json(payload):
+        for key in cursor_keys:
+            value = item.get(key)
+            if isinstance(value, (str, int)) and clean_text(value):
+                return clean_text(value)
+    return ""
+
+
+def alignerr_fallback_endpoints():
+    return [
+        "https://api.alignerr.com/jobs",
+        "https://api.alignerr.com/public/jobs",
+        "https://api.alignerr.com/api/jobs",
+        "https://api.alignerr.com/v1/jobs",
+        "https://api.alignerr.com/roles",
+        "https://api.alignerr.com/opportunities",
+    ]
+
 def request_json(url, *, method="get", params=None, body=None, headers=None):
     merged_headers = {
         **REQUEST_HEADERS,
