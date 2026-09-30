@@ -34,6 +34,7 @@ const statusLabel = {
   account_only: 'Sign in to view matched jobs',
   api_key_needed: 'API key needed for full sync',
   partial: 'Partial public sync',
+  syncing: 'Syncing roles...',
   unavailable: 'Temporarily unavailable',
 }
 
@@ -44,6 +45,7 @@ const statusColor = {
   account_only: 'secondary',
   api_key_needed: 'warning',
   partial: 'warning',
+  syncing: 'primary',
   unavailable: 'warning',
 }
 
@@ -218,6 +220,9 @@ export default function Jobs() {
     sources: [],
     total: 0,
     live_sources: 0,
+    refreshing: false,
+    sync_completed_sources: 0,
+    sync_total_sources: 0,
   })
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -232,29 +237,69 @@ export default function Jobs() {
 
   const PAGE_SIZE = 60
 
-  const loadJobs = async (refresh = false) => {
-    refresh ? setRefreshing(true) : setLoading(true)
-    setError('')
+  const loadJobs = async (
+    refresh = false,
+    silent = false
+  ) => {
+    if (refresh) {
+      setRefreshing(true)
+    } else if (!silent) {
+      setLoading(true)
+    }
+
+    if (!silent) {
+      setError('')
+    }
 
     try {
       const { data } = await api.get('/jobs/', {
         params: refresh ? { refresh: 1 } : {},
       })
+
       setPayload(data)
+      setRefreshing(Boolean(data.refreshing))
+
+      if (data.sync_error) {
+        setError(data.sync_error)
+      }
     } catch (requestError) {
+      const detail =
+        requestError.response?.data?.detail
+
       setError(
-        requestError.response?.data?.detail ||
-        'Could not load the jobs feed right now.'
+        detail ||
+        (requestError.code === 'ECONNABORTED'
+          ? 'The jobs request timed out.'
+          : 'Could not load the jobs feed right now.')
       )
+
+      if (refresh) {
+        setRefreshing(false)
+      }
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (!silent) {
+        setLoading(false)
+      }
     }
   }
 
   useEffect(() => {
     loadJobs()
   }, [])
+
+  useEffect(() => {
+    if (!payload.refreshing) return undefined
+
+    const timer = window.setTimeout(
+      () => loadJobs(false, true),
+      3000
+    )
+
+    return () => window.clearTimeout(timer)
+  }, [
+    payload.refreshing,
+    payload.sync_completed_sources,
+  ])
 
   const categories = useMemo(
     () =>
@@ -387,13 +432,26 @@ export default function Jobs() {
               loads each role as its own listing; platforms that only reveal
               personalized jobs after sign-in are clearly marked below.
             </p>
+
+            {payload.refreshing && (
+              <div className="mt-3 inline-flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">
+                <RefreshCw
+                  size={14}
+                  className="animate-spin"
+                />
+                Syncing job sources
+                {payload.sync_total_sources
+                  ? ` — ${payload.sync_completed_sources}/${payload.sync_total_sources} sources completed`
+                  : '...'}
+              </div>
+            )}
           </div>
 
           <Button
             color="primary"
             variant="flat"
             radius="lg"
-            isLoading={refreshing}
+            isLoading={refreshing || payload.refreshing}
             startContent={
               refreshing
                 ? null
