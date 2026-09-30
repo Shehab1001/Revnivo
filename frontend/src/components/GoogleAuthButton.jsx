@@ -69,10 +69,20 @@ export default function GoogleAuthButton() {
         await loginWithGoogle(credential)
         navigate('/dashboard')
       } catch (err) {
-        setError(
-          err.response?.data?.detail ||
+        const backendDetail =
+          err.response?.data?.detail
+
+        if (backendDetail) {
+          setError(backendDetail)
+        } else if (!err.response) {
+          setError(
+            'Cannot reach the Revnivo backend. Make sure Django is running on 127.0.0.1:8000.'
+          )
+        } else {
+          setError(
             'Google sign-in failed. Please try again.'
-        )
+          )
+        }
       } finally {
         setLoading(false)
       }
