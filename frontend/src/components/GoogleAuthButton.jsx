@@ -79,8 +79,19 @@ export default function GoogleAuthButton() {
             'Cannot reach the Revnivo backend. Make sure Django is running on 127.0.0.1:8000.'
           )
         } else {
+          const status = err.response?.status
+          const statusText = err.response?.statusText
+          const suffix = [
+            status ? `HTTP ${status}` : '',
+            statusText || '',
+          ]
+            .filter(Boolean)
+            .join(' ')
+
           setError(
-            'Google sign-in failed. Please try again.'
+            suffix
+              ? `Google sign-in request failed (${suffix}).`
+              : 'Google sign-in request failed.'
           )
         }
       } finally {
