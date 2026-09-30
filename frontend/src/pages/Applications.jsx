@@ -1366,7 +1366,7 @@ export default function Applications() {
                 onPress={() => {
                   const id = editing.id
                   closeModal()
-                  navigate(`/applications/${id}`)
+                  navigate(`/jobs/applications/${id}`)
                 }}
               >
                 Open workspace
