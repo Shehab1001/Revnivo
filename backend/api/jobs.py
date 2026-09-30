@@ -1945,6 +1945,126 @@ def parse_public_response(source, response):
     )
 
 
+def nearest_embedded_string(window, center, keys):
+    key_pattern = "|".join(re.escape(key) for key in keys)
+    pattern = re.compile(
+        rf'"(?:{key_pattern})"\s*:\s*"((?:\\.|[^"])*)"',
+        flags=re.IGNORECASE,
+    )
+    candidates = []
+    for match in pattern.finditer(window):
+        value = clean_text(
+            match.group(1)
+            .replace("\\n", " ")
+            .replace("\\t", " ")
+            .replace("\\\"", '"')
+        )
+        if value:
+            candidates.append(
+                (
+                    abs(match.start() - center),
+                    value,
+                )
+            )
+    if not candidates:
+        return ""
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
+
+
+def parse_alignerr_embedded_jobs(source, raw_html):
+    """Extract every job object serialized into Alignerr Next.js flight data."""
+    if not raw_html:
+        return []
+
+    normalized = html.unescape(raw_html)
+    normalized = (
+        normalized
+        .replace("\\u002F", "/")
+        .replace("\\u002f", "/")
+        .replace("\\u0022", '"')
+        .replace("\\/", "/")
+        .replace("\\\"", '"')
+    )
+
+    job_pattern = re.compile(
+        r"/(?:en/)?jobs/([0-9a-f]{8}-[0-9a-f-]{20,})",
+        flags=re.IGNORECASE,
+    )
+    jobs = []
+    seen_ids = set()
+
+    for match in job_pattern.finditer(normalized):
+        identifier = match.group(1).lower()
+        if identifier in seen_ids:
+            continue
+
+        start = max(0, match.start() - 6000)
+        end = min(len(normalized), match.end() + 6000)
+        window = normalized[start:end]
+        center = match.start() - start
+
+        title = nearest_embedded_string(
+            window,
+            center,
+            (
+                "jobTitle",
+                "job_title",
+                "title",
+                "roleTitle",
+                "name",
+            ),
+        )
+        if not looks_like_title(title):
+            continue
+
+        description = nearest_embedded_string(
+            window,
+            center,
+            (
+                "description",
+                "summary",
+                "subtitle",
+            ),
+        )
+        category = nearest_embedded_string(
+            window,
+            center,
+            (
+                "category",
+                "jobCategory",
+                "domain",
+            ),
+        )
+        location = nearest_embedded_string(
+            window,
+            center,
+            (
+                "location",
+                "locationName",
+                "city",
+            ),
+        )
+
+        context = clean_text(" ".join([title, description, window[:1500]]))
+        job = make_job(
+            source,
+            title,
+            f"https://www.alignerr.com/jobs/{identifier}",
+            description or context,
+            location=location or infer_location(context),
+            pay=extract_pay(window),
+            category=category,
+        )
+        if job:
+            jobs.append(job)
+            seen_ids.add(identifier)
+
+    return dedupe_jobs(
+        jobs,
+        MAX_JOBS_PER_SOURCE,
+    )
+
 def fetch_bulk_public_source(source):
     jobs = []
     errors = []
