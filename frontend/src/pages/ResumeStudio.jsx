@@ -26,8 +26,9 @@ import {
   Sparkles,
   WandSparkles,
   Trash2,
+  Upload,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import ResumePreview from '../components/ResumePreview'
 import api from '../services/api'
@@ -202,6 +203,7 @@ function ScoreGauge({ score = 0 }) {
 }
 
 export default function ResumeStudio() {
+  const importInputRef = useRef(null)
   const [resumes, setResumes] = useState([])
   const [selectedId, setSelectedId] = useState('')
   const [draft, setDraft] = useState(null)
@@ -227,6 +229,9 @@ export default function ResumeStudio() {
   const [jobMatches, setJobMatches] = useState([])
   const [jobMatchMeta, setJobMatchMeta] = useState(null)
   const [matchingJobs, setMatchingJobs] = useState(false)
+  const [importingCv, setImportingCv] = useState(false)
+  const [readiness, setReadiness] = useState(null)
+  const [importReport, setImportReport] = useState(null)
 
   const loadLibrary = async () => {
     setLoading(true)
@@ -286,6 +291,20 @@ export default function ResumeStudio() {
       .catch(() => setVersions([]))
   }, [selectedId])
 
+  useEffect(() => {
+    if (!selectedId) {
+      setReadiness(null)
+      return
+    }
+
+    api
+      .get(`/resumes/${selectedId}/readiness/`)
+      .then(({ data }) =>
+        setReadiness(data.readiness || null)
+      )
+      .catch(() => setReadiness(null))
+  }, [selectedId])
+
   const selectedResume = useMemo(
     () =>
       resumes.find(
@@ -306,6 +325,7 @@ export default function ResumeStudio() {
     setSelectedId(resume.id)
     setDraft(structuredClone(resume))
     setAnalysis(null)
+    setImportReport(null)
     setMessage('')
   }
 
@@ -347,6 +367,56 @@ export default function ResumeStudio() {
     }
   }
 
+  const importCv = async (file) => {
+    if (!file) return
+
+    setImportingCv(true)
+    setError('')
+    setMessage('')
+    setImportReport(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const { data } = await api.post(
+        '/resumes/import/',
+        formData
+      )
+
+      const resume = data.resume
+
+      setResumes((items) => [
+        resume,
+        ...items.filter(
+          (item) => item.id !== resume.id
+        ),
+      ])
+      setSelectedId(resume.id)
+      setDraft(resume)
+      setReadiness(
+        data.import?.readiness || null
+      )
+      setImportReport(data.import || null)
+      setAnalysis(null)
+      setTab('resume')
+      setMessage(
+        'CV imported. Review the extracted fields, edit anything that needs correction, then run ATS Match against a job description.'
+      )
+    } catch (requestError) {
+      setError(
+        requestError.response?.data?.detail ||
+          'Could not import this CV.'
+      )
+    } finally {
+      setImportingCv(false)
+
+      if (importInputRef.current) {
+        importInputRef.current.value = ''
+      }
+    }
+  }
+
   const saveResume = async () => {
     if (!draft?.id) return
 
@@ -369,6 +439,15 @@ export default function ResumeStudio() {
         )
       )
       setMessage('Resume saved.')
+
+      api
+        .get(`/resumes/${data.resume.id}/readiness/`)
+        .then(({ data: readinessData }) =>
+          setReadiness(
+            readinessData.readiness || null
+          )
+        )
+        .catch(() => {})
     } catch (requestError) {
       setError(
         requestError.response?.data?.detail ||
@@ -871,6 +950,28 @@ export default function ResumeStudio() {
           </div>
 
           <div className="flex flex-wrap gap-2">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+              className="hidden"
+              onChange={(event) =>
+                importCv(event.target.files?.[0])
+              }
+            />
+
+            <Button
+              color="secondary"
+              variant="flat"
+              startContent={<Upload size={16} />}
+              isLoading={importingCv}
+              onPress={() =>
+                importInputRef.current?.click()
+              }
+            >
+              Upload CV
+            </Button>
+
             <Button
               variant="flat"
               startContent={<FilePlus2 size={16} />}
@@ -922,6 +1023,87 @@ export default function ResumeStudio() {
         <div className="rounded-2xl border border-success/20 bg-success/5 px-4 py-3 text-sm text-success">
           {message}
         </div>
+      )}
+
+      {draft && readiness && (
+        <Card
+          shadow="none"
+          className="border border-default-200/80 bg-content1"
+        >
+          <CardBody className="gap-4 p-4 sm:p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-4">
+                <div className="grid h-20 w-20 shrink-0 place-items-center rounded-2xl bg-primary/10 text-center">
+                  <div>
+                    <div className="text-2xl font-semibold text-primary">
+                      {readiness.score}%
+                    </div>
+                    <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-default-400">
+                      ATS ready
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <h2 className="text-sm font-semibold">
+                    ATS Readiness
+                  </h2>
+                  <p className="mt-1 max-w-xl text-xs leading-5 text-default-500">
+                    General CV structure/content readiness. For a
+                    job-specific percentage, open the ATS Match tab
+                    and paste that job description.
+                  </p>
+
+                  {importReport && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <Chip size="sm" variant="flat">
+                        {(importReport.words_extracted || 0).toLocaleString()} words extracted
+                      </Chip>
+                      {(importReport.detected_sections || []).map(
+                        (section) => (
+                          <Chip
+                            key={section}
+                            size="sm"
+                            variant="flat"
+                            color="success"
+                          >
+                            {SECTION_LABELS[section] || section}
+                          </Chip>
+                        )
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <Button
+                variant="flat"
+                color="primary"
+                startContent={<SearchCheck size={15} />}
+                onPress={() => setTab('ats')}
+              >
+                Run job-specific ATS
+              </Button>
+            </div>
+
+            {(readiness.warnings || []).length > 0 && (
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {readiness.warnings.map((warning, index) => (
+                  <div
+                    key={`${warning}-${index}`}
+                    className="rounded-xl bg-warning/5 px-3 py-2 text-xs leading-5 text-default-600"
+                  >
+                    {warning}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <p className="text-[10px] leading-4 text-default-400">
+              {readiness.disclaimer}
+            </p>
+          </CardBody>
+        </Card>
       )}
 
       <div className="overflow-x-auto">
