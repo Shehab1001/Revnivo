@@ -3331,19 +3331,6 @@ def refresh_jobs_cache():
     """Refresh sources without blocking the HTTP request that started it."""
     global _source_results_cache
 
-    with _cache_lock:
-        if _sync_state["refreshing"]:
-            return
-        _sync_state.update(
-            {
-                "refreshing": True,
-                "started_at": monotonic(),
-                "completed_sources": 0,
-                "total_sources": len(JOB_SOURCES),
-                "last_error": "",
-            }
-        )
-
     fresh_results = {}
 
     try:
@@ -3408,10 +3395,18 @@ def refresh_jobs_cache():
 
 def start_jobs_refresh():
     with _cache_lock:
-        already_refreshing = _sync_state["refreshing"]
+        if _sync_state["refreshing"]:
+            return False
 
-    if already_refreshing:
-        return False
+        _sync_state.update(
+            {
+                "refreshing": True,
+                "started_at": monotonic(),
+                "completed_sources": 0,
+                "total_sources": len(JOB_SOURCES),
+                "last_error": "",
+            }
+        )
 
     thread = threading.Thread(
         target=refresh_jobs_cache,
