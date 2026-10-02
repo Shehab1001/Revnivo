@@ -15,11 +15,16 @@ function getCookie(name) {
 }
 
 function getApiBaseUrl() {
-  // Temporary local-development mode:
-  // Always use Vite's same-origin /api proxy, which forwards requests to
-  // http://127.0.0.1:8000. This intentionally ignores any production
-  // VITE_API_URL (for example a Render URL) until deployment is enabled again.
-  return '/api'
+  const configured = String(
+    import.meta.env.VITE_API_URL || ''
+  ).trim()
+
+  // Local development keeps using Vite's same-origin /api proxy.
+  if (!configured) {
+    return '/api'
+  }
+
+  return configured.replace(/\/+$/, '')
 }
 
 const api = axios.create({
