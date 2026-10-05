@@ -1,4 +1,4 @@
-import { ArrowUpRight, CalendarDays, CircleDollarSign, Clock3, Download, Eye, EyeOff, GripVertical, Layers3, ReceiptText, RotateCcw, Save, Settings2, Target, TrendingDown, TrendingUp } from 'lucide-react'
+import { ArrowUpRight, CalendarDays, CircleDollarSign, Download, Eye, EyeOff, GripVertical, Layers3, ReceiptText, RotateCcw, Save, Settings2, Target, TrendingDown, TrendingUp } from 'lucide-react'
 import { Autocomplete, AutocompleteItem, Button, Card, CardBody, Input, Select, SelectItem, Switch } from '@heroui/react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -16,9 +16,7 @@ import 'flag-icons/css/flag-icons.min.css'
 const platformLineColors = ['#48a4ff', '#b993ff', '#28d8e9', '#37dc8d', '#ffb020', '#ff7096']
 
 const DEFAULT_DASHBOARD_WIDGETS = [
-  'gross_revenue',
   'net_income',
-  'pending',
   'this_month',
   'transactions',
   'platforms',
@@ -30,9 +28,7 @@ const DEFAULT_DASHBOARD_WIDGETS = [
 ]
 
 const DASHBOARD_WIDGET_LABELS = {
-  gross_revenue: 'Gross revenue',
   net_income: 'Net income',
-  pending: 'Pending',
   this_month: 'This month income',
   transactions: 'Transactions',
   platforms: 'Platforms',
@@ -44,9 +40,7 @@ const DASHBOARD_WIDGET_LABELS = {
 }
 
 const DASHBOARD_WIDGET_SPANS = {
-  gross_revenue: 'xl:col-span-4',
   net_income: 'xl:col-span-4',
-  pending: 'xl:col-span-4',
   this_month: 'xl:col-span-4',
   transactions: 'xl:col-span-4',
   platforms: 'xl:col-span-4',
@@ -225,9 +219,33 @@ export default function Dashboard() {
     api
       .get('/dashboard/preferences/')
       .then(({ data: preferences }) => {
+        const allowedWidgets = new Set(
+          DEFAULT_DASHBOARD_WIDGETS
+        )
+        const savedOrder = Array.isArray(
+          preferences.order
+        )
+          ? preferences.order.filter((widgetId) =>
+              allowedWidgets.has(widgetId)
+            )
+          : []
+
+        const missingWidgets =
+          DEFAULT_DASHBOARD_WIDGETS.filter(
+            (widgetId) =>
+              !savedOrder.includes(widgetId)
+          )
+
         setDashboardPreferences({
-          order: preferences.order || DEFAULT_DASHBOARD_WIDGETS,
-          hidden: preferences.hidden || [],
+          order: [
+            ...savedOrder,
+            ...missingWidgets,
+          ],
+          hidden: Array.isArray(preferences.hidden)
+            ? preferences.hidden.filter((widgetId) =>
+                allowedWidgets.has(widgetId)
+              )
+            : [],
         })
       })
       .catch(() => {
@@ -248,7 +266,29 @@ export default function Dashboard() {
         '/dashboard/preferences/',
         nextPreferences
       )
-      setDashboardPreferences(saved)
+      const allowedWidgets = new Set(
+        DEFAULT_DASHBOARD_WIDGETS
+      )
+      const savedOrder = Array.isArray(saved.order)
+        ? saved.order.filter((widgetId) =>
+            allowedWidgets.has(widgetId)
+          )
+        : []
+
+      setDashboardPreferences({
+        order: [
+          ...savedOrder,
+          ...DEFAULT_DASHBOARD_WIDGETS.filter(
+            (widgetId) =>
+              !savedOrder.includes(widgetId)
+          ),
+        ],
+        hidden: Array.isArray(saved.hidden)
+          ? saved.hidden.filter((widgetId) =>
+              allowedWidgets.has(widgetId)
+            )
+          : [],
+      })
     } catch {
       setDashboardPreferences(previous)
       setError('Could not save dashboard customization.')
@@ -395,16 +435,8 @@ export default function Dashboard() {
     : currentMonthIncome > 0 ? { direction: 'up', label: 'New' } : null
 
   const renderDashboardWidget = (widgetId) => {
-    if (widgetId === 'gross_revenue') {
-      return <Metric label="Gross revenue" value={formatMoney(summary.total_income, effectiveCurrency)} note={period === 'all' ? 'Paid income across all time' : period === 'custom' ? `${dateFrom || 'Start'} to ${dateTo || 'End'}` : period.replaceAll('_', ' ')} icon={CircleDollarSign} accent="blue" visible={dataVisible}/>
-    }
-
     if (widgetId === 'net_income') {
       return <Metric label="Net income" value={formatMoney(summary.net_income, effectiveCurrency)} note="After platform and payment fees" icon={CircleDollarSign} accent="green" visible={dataVisible}/>
-    }
-
-    if (widgetId === 'pending') {
-      return <Metric label="Pending" value={formatMoney(summary.pending_net_income, effectiveCurrency)} note={`${summary.pending_count || 0} expected payment${summary.pending_count === 1 ? '' : 's'}`} icon={Clock3} accent="violet" visible={dataVisible}/>
     }
 
     if (widgetId === 'this_month') {
