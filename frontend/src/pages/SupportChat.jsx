@@ -42,6 +42,23 @@ function formatMessageTime(value) {
   }).toLowerCase()
 }
 
+
+function resolveChatAttachmentUrl(url) {
+  const value = String(url || '')
+
+  if (
+    typeof window === 'undefined' ||
+    !value.startsWith('/api/') ||
+    !window.location.hostname.endsWith('.vercel.app')
+  ) {
+    return value
+  }
+
+  const backendPath = value.replace(/^\/api\//, '')
+
+  return `/api/proxy?path=${encodeURIComponent(backendPath)}`
+}
+
 function Avatar({
   user,
   showSupportLogo = false,
@@ -215,7 +232,9 @@ function AttachmentPreview({ url, file, own, messageType = '' }) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [viewerOpen])
 
-  const imageUrl = localUrl || url
+  const imageUrl =
+    localUrl ||
+    resolveChatAttachmentUrl(url)
 
   if (!imageUrl) return null
 
