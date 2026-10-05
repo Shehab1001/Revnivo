@@ -1,5 +1,5 @@
 import { Button, Card, CardBody, Chip, Input, Textarea } from '@heroui/react'
-import { ChevronLeft, Mic, MessageCircle, Paperclip, Pause, Play, Search, Smile, Trash2, Volume2 } from 'lucide-react'
+import { ChevronLeft, Mic, MessageCircle, Paperclip, Pause, Play, Search, Smile, Trash2, Volume2, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
@@ -172,7 +172,44 @@ function VoiceMessage({ src, own }) {
 }
 
 function AttachmentPreview({ url, file, own, messageType = '' }) {
-  const imageUrl = file ? URL.createObjectURL(file) : url
+  const [localUrl, setLocalUrl] = useState('')
+  const [viewerOpen, setViewerOpen] = useState(false)
+  const [zoom, setZoom] = useState(1)
+
+  useEffect(() => {
+    if (!file) {
+      setLocalUrl('')
+      return undefined
+    }
+
+    const objectUrl = URL.createObjectURL(file)
+    setLocalUrl(objectUrl)
+
+    return () => URL.revokeObjectURL(objectUrl)
+  }, [file])
+
+  useEffect(() => {
+    if (!viewerOpen) return undefined
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setViewerOpen(false)
+      }
+
+      if (event.key === '+' || event.key === '=') {
+        setZoom((value) => Math.min(4, value + 0.25))
+      }
+
+      if (event.key === '-') {
+        setZoom((value) => Math.max(0.5, value - 0.25))
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [viewerOpen])
+
+  const imageUrl = localUrl || url
 
   if (!imageUrl) return null
 
@@ -192,12 +229,109 @@ function AttachmentPreview({ url, file, own, messageType = '' }) {
 
   if (isImage) {
     return (
-      <img
-        src={imageUrl}
-        crossOrigin="use-credentials"
-        alt="Attachment"
-        className="mt-2 max-h-56 w-auto max-w-full rounded-xl object-contain sm:max-h-64"
-      />
+      <>
+        <button
+          type="button"
+          className="mt-2 block max-w-full cursor-zoom-in overflow-hidden rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          onClick={(event) => {
+            event.stopPropagation()
+            setZoom(1)
+            setViewerOpen(true)
+          }}
+          aria-label="Open image"
+        >
+          <img
+            src={imageUrl}
+            crossOrigin="use-credentials"
+            alt="Attachment"
+            className="max-h-56 w-auto max-w-full rounded-xl object-contain transition-transform hover:scale-[1.01] sm:max-h-64"
+          />
+        </button>
+
+        {viewerOpen && (
+          <div
+            className="fixed inset-0 z-[120] flex items-center justify-center overflow-hidden bg-black/90 p-3 backdrop-blur-sm sm:p-6"
+            onClick={() => setViewerOpen(false)}
+            onWheel={(event) => {
+              event.preventDefault()
+              setZoom((value) =>
+                Math.min(
+                  4,
+                  Math.max(
+                    0.5,
+                    value + (event.deltaY < 0 ? 0.2 : -0.2)
+                  )
+                )
+              )
+            }}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Image viewer"
+          >
+            <div
+              className="absolute right-3 top-3 z-20 flex items-center gap-2 sm:right-5 sm:top-5"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white backdrop-blur transition hover:bg-white/20 disabled:opacity-40"
+                onClick={() =>
+                  setZoom((value) => Math.max(0.5, value - 0.25))
+                }
+                disabled={zoom <= 0.5}
+                aria-label="Zoom out"
+              >
+                <ZoomOut size={20} />
+              </button>
+
+              <div className="min-w-14 rounded-full bg-white/10 px-3 py-2 text-center text-xs font-semibold text-white backdrop-blur">
+                {Math.round(zoom * 100)}%
+              </div>
+
+              <button
+                type="button"
+                className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white backdrop-blur transition hover:bg-white/20 disabled:opacity-40"
+                onClick={() =>
+                  setZoom((value) => Math.min(4, value + 0.25))
+                }
+                disabled={zoom >= 4}
+                aria-label="Zoom in"
+              >
+                <ZoomIn size={20} />
+              </button>
+
+              <button
+                type="button"
+                className="ml-1 grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white backdrop-blur transition hover:bg-white/20"
+                onClick={() => setViewerOpen(false)}
+                aria-label="Close image"
+              >
+                <X size={21} />
+              </button>
+            </div>
+
+            <div
+              className="flex h-full w-full items-center justify-center overflow-auto"
+              onClick={(event) => event.stopPropagation()}
+              onDoubleClick={() =>
+                setZoom((value) => (value === 1 ? 2 : 1))
+              }
+            >
+              <img
+                src={imageUrl}
+                crossOrigin="use-credentials"
+                alt="Attachment preview"
+                draggable={false}
+                className="max-h-[88vh] max-w-[92vw] select-none object-contain transition-transform duration-150"
+                style={{
+                  transform: `scale(${zoom})`,
+                  transformOrigin: 'center center',
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </>
     )
   }
 
@@ -579,9 +713,32 @@ export default function SupportChat() {
       overrideContent
     )
 
+    let resolvedMessageType = messageType
+
+    if (
+      overrideAttachment &&
+      messageType === 'text'
+    ) {
+      if (
+        overrideAttachment.type?.startsWith(
+          'image/'
+        )
+      ) {
+        resolvedMessageType = 'image'
+      } else if (
+        overrideAttachment.type?.startsWith(
+          'audio/'
+        )
+      ) {
+        resolvedMessageType = 'audio'
+      } else {
+        resolvedMessageType = 'file'
+      }
+    }
+
     form.append(
       'message_type',
-      messageType
+      resolvedMessageType
     )
 
     if (user?.role === 'admin') {
