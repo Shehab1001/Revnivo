@@ -3092,6 +3092,48 @@ def _import_bullets(lines):
     return bullets
 
 
+def _expand_import_lines(lines):
+    expanded = []
+
+    for raw in lines:
+        text = str(raw or "").strip()
+
+        if not text:
+            expanded.append("")
+            continue
+
+        # CVs often keep title, company, location and dates on one line
+        # separated by pipes. Split those fields before classifying them.
+        if "|" in text and not re.search(
+            r"https?://",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            parts = [
+                part.strip()
+                for part in text.split("|")
+                if part.strip()
+            ]
+            expanded.extend(parts)
+        else:
+            expanded.append(text)
+
+    return expanded
+
+
+def _strip_import_label(value):
+    text = str(value or "").strip()
+    return re.sub(
+        r"^(?:company|employer|organization|organisation|"
+        r"position|job title|title|role|location|dates?|period|"
+        r"school|university|college|degree|field|major|issuer)"
+        r"\s*[:\-]\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+
+
 def _looks_like_date_line(value):
     text = str(value or "").strip().lower()
     if not text:
@@ -3265,8 +3307,8 @@ def _parse_import_experience(lines):
         blocks[:20]
     ):
         clean = [
-            line.strip()
-            for line in block
+            _strip_import_label(line)
+            for line in _expand_import_lines(block)
             if str(line or "").strip()
         ]
 
@@ -3389,8 +3431,8 @@ def _parse_import_education(lines):
         blocks[:15]
     ):
         clean = [
-            line.strip()
-            for line in block
+            _strip_import_label(line)
+            for line in _expand_import_lines(block)
             if str(line or "").strip()
         ]
 
@@ -3495,39 +3537,68 @@ def _parse_import_projects(lines):
         blocks[:20]
     ):
         clean = [
-            line
-            for line in block
-            if line
+            _strip_import_label(line)
+            for line in _expand_import_lines(block)
+            if str(line or "").strip()
         ]
 
         if not clean:
             continue
+
+        url = next(
+            (
+                item
+                for item in clean
+                if re.search(
+                    r"(?:https?://|www\.)",
+                    item,
+                    re.IGNORECASE,
+                )
+            ),
+            "",
+        )
+        bullets = _import_bullets(clean)
+        non_bullets = [
+            line
+            for line in clean
+            if line != url
+            and not re.match(
+                r"^[•·▪◦*-]\s+",
+                line,
+            )
+        ]
+
+        name = (
+            non_bullets[0]
+            if non_bullets
+            else "Imported project"
+        )
+        role = next(
+            (
+                item
+                for item in non_bullets[1:]
+                if _looks_like_job_title(item)
+            ),
+            "",
+        )
+        description_parts = [
+            item
+            for item in non_bullets[1:]
+            if item != role
+        ]
 
         output.append(
             {
                 "id": (
                     f"imported-project-{index + 1}"
                 ),
-                "name": clean[0],
-                "role": "",
-                "url": next(
-                    (
-                        item
-                        for item in clean
-                        if re.search(
-                            r"(?:https?://|www\.)",
-                            item,
-                            re.IGNORECASE,
-                        )
-                    ),
-                    "",
-                ),
+                "name": name,
+                "role": role,
+                "url": url,
                 "description": " ".join(
-                    clean[1:]
+                    description_parts
                 ),
-                "bullets": _import_bullets(
-                    clean
-                ),
+                "bullets": bullets,
                 "technologies": [],
             }
         )
@@ -3536,29 +3607,72 @@ def _parse_import_projects(lines):
 
 
 def _parse_import_certifications(lines):
+    blocks = _blocks_from_lines(lines)
     output = []
 
-    for index, line in enumerate(
-        [
-            item
-            for item in lines
-            if item
-        ][:40]
+    for index, block in enumerate(
+        blocks[:30]
     ):
+        clean = [
+            _strip_import_label(line)
+            for line in _expand_import_lines(block)
+            if str(line or "").strip()
+        ]
+
+        if not clean:
+            continue
+
+        url = next(
+            (
+                item
+                for item in clean
+                if re.search(
+                    r"(?:https?://|www\.)",
+                    item,
+                    re.IGNORECASE,
+                )
+            ),
+            "",
+        )
+        date = next(
+            (
+                item
+                for item in clean
+                if _looks_like_date_line(item)
+            ),
+            "",
+        )
+
+        remaining = [
+            item
+            for item in clean
+            if item not in {url, date}
+        ]
+
+        name = (
+            remaining[0]
+            if remaining
+            else clean[0]
+        )
+        issuer = (
+            remaining[1]
+            if len(remaining) > 1
+            else ""
+        )
+
         output.append(
             {
                 "id": (
                     f"imported-cert-{index + 1}"
                 ),
-                "name": line,
-                "issuer": "",
-                "date": "",
-                "url": "",
+                "name": name,
+                "issuer": issuer,
+                "date": date,
+                "url": url,
             }
         )
 
     return output
-
 
 def _parse_import_languages(lines):
     output = []
