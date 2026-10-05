@@ -1072,7 +1072,9 @@ def logout(request):
 @api_view(["GET"])
 def me(request):
     doc = get_db().users.find_one({"_id": ObjectId(request.user.id)})
-    return Response(serialize_user(doc, request))
+    response = Response(serialize_user(doc, request))
+    response["Cache-Control"] = "no-store, private"
+    return response
 
 
 @api_view(["PATCH"])
