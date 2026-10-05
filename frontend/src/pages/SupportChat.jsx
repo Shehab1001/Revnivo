@@ -1818,7 +1818,7 @@ export default function SupportChat() {
                           attachment
                         )
                       }
-                    }
+                    }}
                     placeholder={
                       recording
                         ? 'Recording voice message...'
