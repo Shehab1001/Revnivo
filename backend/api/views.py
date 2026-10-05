@@ -79,8 +79,7 @@ def serialize_user(doc, request):
     avatar = doc.get("profile_image") or ""
     avatar_url = ""
     if avatar:
-        path = f"{settings.MEDIA_URL}{avatar}".replace("//", "/")
-        avatar_url = request.build_absolute_uri(path)
+        avatar_url = f"{settings.MEDIA_URL}{avatar}".replace("//", "/")
 
     # If the user explicitly removed their avatar, do not fall back to the
     # Google account photo. Returning an empty URL lets the frontend render
@@ -1797,7 +1796,7 @@ def support_chat(request):
         if owner in doc.get("deleted_for", []):
             continue
         attachment = doc.get("attachment", "")
-        result.append({**{key: doc.get(key) for key in ("content", "sender", "message_type")}, "deleted": bool(doc.get("deleted")), "id": str(doc["_id"]), "user_id": str(doc["user_id"]), "created_at": serialize_datetime(doc.get("created_at")), "attachment_url": request.build_absolute_uri(f"/api/support-chat/{doc['_id']}/attachment/") if attachment else ""})
+        result.append({**{key: doc.get(key) for key in ("content", "sender", "message_type")}, "deleted": bool(doc.get("deleted")), "id": str(doc["_id"]), "user_id": str(doc["user_id"]), "created_at": serialize_datetime(doc.get("created_at")), "attachment_url": f"/api/support-chat/{doc['_id']}/attachment/" if attachment else ""})
     return Response(result)
 
 
