@@ -60,6 +60,23 @@ const formatBytes = (value = 0) => {
   return `${(value / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`
 }
 
+
+const resolveNoteAttachmentUrl = (url) => {
+  const value = String(url || '')
+
+  if (
+    typeof window === 'undefined' ||
+    !value.startsWith('/api/') ||
+    !window.location.hostname.endsWith('.vercel.app')
+  ) {
+    return value
+  }
+
+  const backendPath = value.replace(/^\/api\//, '')
+
+  return `/api/proxy?path=${encodeURIComponent(backendPath)}`
+}
+
 export default function Notes() {
   const [items, setItems] = useState([])
   const [activeId, setActiveId] = useState('')
@@ -171,10 +188,15 @@ export default function Notes() {
     block.style.width = `${width}%`
     block.dataset.kind = attachment.kind
 
+    const attachmentUrl =
+      resolveNoteAttachmentUrl(
+        attachment.url
+      )
+
     if (attachment.kind === 'image') {
       block.innerHTML = `
         <span class="note-inline-image-frame">
-          <img src="${attachment.url}" alt="" draggable="false" />
+          <img src="${attachmentUrl}" alt="" draggable="false" />
           <span class="note-image-resize-handle" data-resize-handle="true" title="Drag to resize"></span>
         </span>
       `
@@ -186,7 +208,7 @@ export default function Notes() {
             <strong>${escapeHtml(attachment.name)}</strong>
             <small>${formatBytes(attachment.size)}</small>
           </span>
-          <a href="${attachment.url}" target="_blank" rel="noreferrer">Open</a>
+          <a href="${attachmentUrl}" target="_blank" rel="noreferrer">Open</a>
         </span>
       `
     }
