@@ -160,7 +160,10 @@ export default function AppShell() {
       navigate(target)
     } else if (notification.kind === 'user') {
       navigate('/admin/users')
-    } else if (notification.kind === 'subscription') {
+    } else if (
+      notification.kind === 'subscription' &&
+      isAdmin
+    ) {
       navigate('/admin/subscriptions')
     }
   }
