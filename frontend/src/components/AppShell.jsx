@@ -19,10 +19,6 @@ const jobsNav = [
   { to: '/jobs/resume-studio', label: 'Resume Studio', icon: FileUser },
 ]
 
-const userOnlyNav = [
-  { to: '/payments', label: 'Payments', icon: CreditCard },
-]
-
 function formatNotificationDateTime(value) {
   if (!value) return ''
 
@@ -238,7 +234,6 @@ export default function AppShell() {
           </span>
           {!collapsed && 'Chat'}
         </NavLink>
-        {!isAdmin && userOnlyNav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} onClick={() => setMobileOpen(false)} className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title={label}><Icon size={18} />{!collapsed && label}</NavLink>)}
       </nav>
       <div ref={profileRef} className="relative mt-auto shrink-0 border-t border-slate-200/80 bg-content1/95 pt-3 dark:border-white/8 dark:bg-[#101114]/95">
         <button onClick={() => setProfileOpen((open) => !open)} className={`flex w-full items-center gap-2 rounded-xl p-2 text-left transition hover:bg-slate-100/80 dark:hover:bg-white/6 ${collapsed ? 'justify-center' : ''}`} aria-expanded={profileOpen} aria-label="Open account menu">
