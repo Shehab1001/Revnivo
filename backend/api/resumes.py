@@ -1443,6 +1443,82 @@ def _resume_text(resume):
     )
 
 
+ATS_NOISE_WORDS = {
+    "ability", "abilities", "about", "across", "also", "any", "apply",
+    "applicant", "applicants", "appropriate", "background", "benefits",
+    "best", "business", "collaborate", "communication", "company",
+    "considered", "day", "days", "demonstrated", "description",
+    "detail", "details", "duties", "environment", "excellent",
+    "expected", "familiar", "highly", "ideal", "including", "industry",
+    "job", "knowledge", "looking", "minimum", "nice", "opportunity",
+    "preferred", "qualification", "qualifications", "required",
+    "requirement", "requirements", "responsibilities", "responsibility",
+    "role", "strong", "successful", "support", "team", "teams",
+    "understanding", "work", "working", "years", "year", "must",
+    "proficient", "proficiency", "familiarity", "hands", "hands-on",
+}
+
+REQUIREMENT_MARKERS = (
+    "required",
+    "requirement",
+    "requirements",
+    "must",
+    "minimum",
+    "qualification",
+    "qualifications",
+    "proficient",
+    "proficiency",
+    "experience with",
+    "experience in",
+    "knowledge of",
+    "familiarity with",
+    "hands-on",
+    "hands on",
+)
+
+KNOWN_SKILL_PHRASES = {
+    "machine learning",
+    "deep learning",
+    "natural language processing",
+    "computer vision",
+    "data analysis",
+    "data science",
+    "project management",
+    "product management",
+    "financial analysis",
+    "quality assurance",
+    "large language model",
+    "large language models",
+    "generative ai",
+    "artificial intelligence",
+    "software engineering",
+    "cloud computing",
+    "business intelligence",
+    "power bi",
+    "microsoft excel",
+    "google cloud",
+    "amazon web services",
+    "rest api",
+    "rest apis",
+    "unit testing",
+    "version control",
+    "continuous integration",
+    "continuous deployment",
+    "data engineering",
+    "data visualization",
+    "feature engineering",
+    "statistical analysis",
+    "prompt engineering",
+    "model evaluation",
+    "model training",
+    "web development",
+    "frontend development",
+    "backend development",
+    "full stack",
+    "full-stack",
+}
+
+
 def _tokens(text):
     return [
         token
@@ -1451,47 +1527,591 @@ def _tokens(text):
             str(text or "").lower(),
         )
         if token not in STOP_WORDS
+        and token not in ATS_NOISE_WORDS
         and len(token) >= 2
     ]
 
 
-def _phrases(text):
-    raw = str(text or "").lower()
-    phrases = set()
+def _requirement_segments(text):
+    segments = re.split(
+        r"[\n\r]+|(?<=[.!?;])\s+",
+        str(text or ""),
+    )
 
-    known = [
-        "machine learning",
-        "deep learning",
-        "natural language processing",
-        "computer vision",
-        "data analysis",
-        "data science",
-        "project management",
-        "product management",
-        "financial analysis",
-        "quality assurance",
-        "large language model",
-        "large language models",
-        "generative ai",
-        "artificial intelligence",
-        "software engineering",
-        "cloud computing",
-        "business intelligence",
-        "power bi",
-        "microsoft excel",
-        "google cloud",
-        "amazon web services",
-        "rest api",
-        "rest apis",
-        "unit testing",
-        "version control",
+    return [
+        segment.strip()
+        for segment in segments
+        if segment.strip()
+        and any(
+            marker in segment.lower()
+            for marker in REQUIREMENT_MARKERS
+        )
     ]
 
-    for phrase in known:
-        if phrase in raw:
-            phrases.add(phrase)
 
-    return phrases
+def _weighted_job_terms(job_description, limit=70):
+    job_counter = Counter(
+        _tokens(job_description)
+    )
+
+    required_counter = Counter()
+
+    for segment in _requirement_segments(
+        job_description
+    ):
+        required_counter.update(
+            _tokens(segment)
+        )
+
+    weighted = []
+
+    for token, frequency in job_counter.items():
+        weight = 1.0
+
+        # Repeated terms usually describe the core of the role, but cap the
+        # bonus so repeated boilerplate cannot dominate the score.
+        weight += min(
+            max(frequency - 1, 0),
+            3,
+        ) * 0.2
+
+        # Requirement language is intentionally weighted more heavily than
+        # general descriptive text.
+        if required_counter.get(token):
+            weight += 0.8
+            weight += min(
+                required_counter[token] - 1,
+                2,
+            ) * 0.15
+
+        weighted.append(
+            (token, round(weight, 3))
+        )
+
+    weighted.sort(
+        key=lambda item: (
+            -item[1],
+            -job_counter[item[0]],
+            item[0],
+        )
+    )
+
+    return weighted[:limit], required_counter
+
+
+def _weighted_coverage(
+    weighted_terms,
+    candidate_tokens,
+):
+    if not weighted_terms:
+        return 0.0
+
+    candidate_tokens = set(
+        candidate_tokens
+    )
+    total_weight = sum(
+        weight
+        for _token, weight
+        in weighted_terms
+    )
+
+    matched_weight = sum(
+        weight
+        for token, weight
+        in weighted_terms
+        if token in candidate_tokens
+    )
+
+    return round(
+        matched_weight
+        / max(total_weight, 1)
+        * 100,
+        1,
+    )
+
+
+def _resume_evidence_text(resume):
+    profile = resume.get(
+        "profile",
+        {},
+    )
+    parts = [
+        profile.get("headline", ""),
+        resume.get("summary", ""),
+    ]
+
+    for item in resume.get(
+        "experience",
+        [],
+    ):
+        parts.extend(
+            [
+                item.get("title", ""),
+                item.get("summary", ""),
+                " ".join(
+                    item.get("bullets", [])
+                ),
+            ]
+        )
+
+    for item in resume.get(
+        "projects",
+        [],
+    ):
+        parts.extend(
+            [
+                item.get("name", ""),
+                item.get("role", ""),
+                item.get("description", ""),
+                " ".join(
+                    item.get(
+                        "technologies",
+                        [],
+                    )
+                ),
+                " ".join(
+                    item.get("bullets", [])
+                ),
+            ]
+        )
+
+    return " ".join(
+        str(part)
+        for part in parts
+        if part
+    )
+
+
+def _job_phrases(job_description):
+    raw = str(
+        job_description or ""
+    ).lower()
+    phrases = {
+        phrase
+        for phrase in KNOWN_SKILL_PHRASES
+        if phrase in raw
+    }
+
+    # Pull compact bigrams/trigrams out of requirement sentences. This adds
+    # job-specific phrases without relying on a fixed technology dictionary.
+    for segment in _requirement_segments(
+        job_description
+    ):
+        words = re.findall(
+            r"[a-zA-Z][a-zA-Z0-9+#.\-]{1,}",
+            segment.lower(),
+        )
+
+        for size in (2, 3):
+            for index in range(
+                0,
+                len(words) - size + 1,
+            ):
+                window = words[
+                    index:index + size
+                ]
+
+                if any(
+                    word in STOP_WORDS
+                    or word in ATS_NOISE_WORDS
+                    for word in window
+                ):
+                    continue
+
+                phrase = " ".join(window)
+
+                if len(phrase) >= 5:
+                    phrases.add(phrase)
+
+    return sorted(
+        phrases,
+        key=lambda phrase: (
+            -len(phrase.split()),
+            phrase,
+        ),
+    )[:30]
+
+
+def _resume_match_completeness(resume):
+    profile = resume.get(
+        "profile",
+        {},
+    )
+    experience = resume.get(
+        "experience",
+        [],
+    )
+    skills = resume.get(
+        "skills",
+        [],
+    )
+
+    experience_bullets = [
+        bullet
+        for item in experience
+        for bullet in item.get(
+            "bullets",
+            [],
+        )
+        if str(bullet).strip()
+    ]
+
+    checks = {
+        "contact": bool(
+            profile.get("email")
+            and profile.get("full_name")
+        ),
+        "headline": bool(
+            profile.get("headline")
+        ),
+        "summary": 60
+        <= len(
+            resume.get(
+                "summary",
+                "",
+            )
+        )
+        <= 1200,
+        "experience": bool(
+            experience
+        ),
+        "experience_detail": (
+            len(experience_bullets)
+            >= 2
+        ),
+        "education": bool(
+            resume.get("education")
+        ),
+        "skills": (
+            5 <= len(skills) <= 50
+        ),
+        "results": any(
+            re.search(
+                r"\b\d+(?:\.\d+)?%|\b\d+[kmb]?\+?\b",
+                bullet,
+                re.IGNORECASE,
+            )
+            for bullet in experience_bullets
+        ),
+    }
+
+    weights = {
+        "contact": 8,
+        "headline": 10,
+        "summary": 14,
+        "experience": 18,
+        "experience_detail": 18,
+        "education": 8,
+        "skills": 12,
+        "results": 12,
+    }
+
+    score = round(
+        sum(
+            weights[key]
+            for key, passed
+            in checks.items()
+            if passed
+        ),
+        1,
+    )
+
+    return checks, score
+
+
+def _analyze_resume_match(
+    resume,
+    job_description,
+):
+    resume_text = _resume_text(
+        resume
+    )
+    resume_tokens = set(
+        _tokens(resume_text)
+    )
+    evidence_text = (
+        _resume_evidence_text(
+            resume
+        )
+    )
+    evidence_tokens = set(
+        _tokens(evidence_text)
+    )
+
+    weighted_terms, required_counter = (
+        _weighted_job_terms(
+            job_description
+        )
+    )
+
+    weighted_keywords = [
+        token
+        for token, _weight
+        in weighted_terms
+    ]
+
+    matched = [
+        token
+        for token
+        in weighted_keywords
+        if token in resume_tokens
+    ]
+    missing = [
+        token
+        for token
+        in weighted_keywords
+        if token not in resume_tokens
+    ]
+
+    keyword_score = (
+        _weighted_coverage(
+            weighted_terms,
+            resume_tokens,
+        )
+    )
+
+    evidence_score = (
+        _weighted_coverage(
+            weighted_terms,
+            evidence_tokens,
+        )
+    )
+
+    required_terms = [
+        (
+            token,
+            1.0
+            + min(
+                required_counter[token] - 1,
+                2,
+            )
+            * 0.25,
+        )
+        for token, _count
+        in required_counter.most_common(40)
+        if token
+        not in ATS_NOISE_WORDS
+        and token not in STOP_WORDS
+    ]
+
+    required_score = (
+        _weighted_coverage(
+            required_terms,
+            resume_tokens,
+        )
+        if required_terms
+        else keyword_score
+    )
+
+    job_phrases = _job_phrases(
+        job_description
+    )
+    resume_lower = (
+        resume_text.lower()
+    )
+
+    matched_phrases = [
+        phrase
+        for phrase in job_phrases
+        if phrase in resume_lower
+    ]
+    missing_phrases = [
+        phrase
+        for phrase in job_phrases
+        if phrase not in resume_lower
+    ]
+
+    if job_phrases:
+        phrase_score = round(
+            len(matched_phrases)
+            / len(job_phrases)
+            * 100,
+            1,
+        )
+    else:
+        # When there are no meaningful multi-word requirements, do not hand
+        # out a free 100. Use evidence coverage as the conservative fallback.
+        phrase_score = evidence_score
+
+    completeness_checks, (
+        completeness_score
+    ) = _resume_match_completeness(
+        resume
+    )
+
+    overall = round(
+        keyword_score * 0.32
+        + required_score * 0.25
+        + evidence_score * 0.23
+        + phrase_score * 0.12
+        + completeness_score * 0.08,
+        1,
+    )
+
+    # A resume that only lists keywords in a Skills section should not score
+    # like one that demonstrates those requirements in experience/projects.
+    evidence_gap = (
+        keyword_score
+        - evidence_score
+    )
+
+    stuffing_penalty = 0.0
+
+    if (
+        keyword_score >= 35
+        and evidence_gap >= 18
+    ):
+        stuffing_penalty = min(
+            15.0,
+            round(
+                (evidence_gap - 12)
+                * 0.35,
+                1,
+            ),
+        )
+        overall = round(
+            max(
+                0.0,
+                overall
+                - stuffing_penalty,
+            ),
+            1,
+        )
+
+    # 100 should mean essentially every relevant requirement is covered and
+    # evidenced. Do not round a merely strong resume up to a perfect result.
+    if overall > 99.0 and not (
+        keyword_score == 100.0
+        and required_score == 100.0
+        and evidence_score == 100.0
+        and phrase_score == 100.0
+        and completeness_score == 100.0
+    ):
+        overall = 99.0
+
+    if overall >= 85:
+        score_band = "Excellent match"
+    elif overall >= 70:
+        score_band = "Strong match"
+    elif overall >= 50:
+        score_band = "Moderate match"
+    elif overall >= 30:
+        score_band = "Weak match"
+    else:
+        score_band = "Low match"
+
+    recommendations = []
+
+    if required_score < 70:
+        recommendations.append(
+            "Several requirement-focused terms from the job description are not covered. Review the missing terms and add only skills or experience you genuinely have."
+        )
+
+    if evidence_score + 15 < keyword_score:
+        recommendations.append(
+            "Some matched terms appear mainly in skills or profile text. Strengthen relevant experience/project bullets with truthful evidence of using those skills."
+        )
+
+    if phrase_score < 60 and missing_phrases:
+        recommendations.append(
+            (
+                "Review missing job-specific phrases: "
+                + ", ".join(
+                    missing_phrases[:8]
+                )
+            )
+        )
+
+    if not completeness_checks[
+        "summary"
+    ]:
+        recommendations.append(
+            "Add a concise professional summary tailored to the target role."
+        )
+
+    if not completeness_checks[
+        "experience_detail"
+    ]:
+        recommendations.append(
+            "Add concrete experience bullets that show what you did and the outcome."
+        )
+
+    if not completeness_checks[
+        "results"
+    ]:
+        recommendations.append(
+            "Where accurate, add measurable outcomes to experience bullets."
+        )
+
+    if missing:
+        recommendations.append(
+            (
+                "Review missing high-value keywords for truthful coverage: "
+                + ", ".join(
+                    missing[:15]
+                )
+            )
+        )
+
+    critical_missing = [
+        token
+        for token, _weight
+        in weighted_terms
+        if token in missing
+    ][:12]
+
+    return {
+        "score": overall,
+        "score_band": score_band,
+        "keyword_score": keyword_score,
+        "required_score": required_score,
+        "evidence_score": evidence_score,
+        "phrase_score": phrase_score,
+        "completeness_score": (
+            completeness_score
+        ),
+        "matched_keywords": matched[:40],
+        "missing_keywords": missing[:40],
+        "critical_missing": (
+            critical_missing
+        ),
+        "matched_phrases": (
+            matched_phrases
+        ),
+        "missing_phrases": (
+            missing_phrases
+        ),
+        "completeness": (
+            completeness_checks
+        ),
+        "recommendations": (
+            recommendations
+        ),
+        "diagnostics": {
+            "job_terms_analyzed": len(
+                weighted_terms
+            ),
+            "required_terms_analyzed": len(
+                required_terms
+            ),
+            "phrases_analyzed": len(
+                job_phrases
+            ),
+            "matched_job_terms": len(
+                matched
+            ),
+            "evidence_gap": round(
+                evidence_gap,
+                1,
+            ),
+            "keyword_stuffing_penalty": (
+                stuffing_penalty
+            ),
+        },
+        "disclaimer": (
+            "Revnivo calculates a deterministic resume-to-job relevance score from requirement, keyword, phrase, and evidence coverage. It does not reproduce a proprietary employer ATS or predict hiring outcomes."
+        ),
+    }
 
 
 @api_view(["POST"])
@@ -1517,221 +2137,33 @@ def resume_analyze(request, resume_id):
         40000,
     )
 
-    if len(job_description) < 50:
+    meaningful_tokens = _tokens(
+        job_description
+    )
+
+    if (
+        len(job_description) < 100
+        or len(
+            set(
+                meaningful_tokens
+            )
+        ) < 15
+    ):
         return Response(
             {
                 "detail": (
-                    "Paste a fuller job description "
-                    "to run the match analysis."
+                    "Paste a fuller job description with at least "
+                    "15 meaningful terms so the match score is reliable."
                 )
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    resume_text = _resume_text(resume)
-
-    job_tokens = Counter(
-        _tokens(job_description)
-    )
-    resume_tokens = set(
-        _tokens(resume_text)
-    )
-
-    weighted_keywords = [
-        token
-        for token, _count
-        in job_tokens.most_common(80)
-        if token not in STOP_WORDS
-    ]
-
-    job_phrases = _phrases(
-        job_description
-    )
-    resume_lower = (
-        resume_text.lower()
-    )
-
-    matched_phrases = sorted(
-        phrase
-        for phrase in job_phrases
-        if phrase in resume_lower
-    )
-    missing_phrases = sorted(
-        phrase
-        for phrase in job_phrases
-        if phrase not in resume_lower
-    )
-
-    matched = [
-        keyword
-        for keyword in weighted_keywords
-        if keyword in resume_tokens
-    ]
-    missing = [
-        keyword
-        for keyword in weighted_keywords
-        if keyword not in resume_tokens
-    ]
-
-    keyword_score = round(
-        (
-            len(matched)
-            / max(
-                len(weighted_keywords),
-                1,
-            )
-        )
-        * 100,
-        1,
-    )
-
-    phrase_score = (
-        round(
-            len(matched_phrases)
-            / max(
-                len(job_phrases),
-                1,
-            )
-            * 100,
-            1,
-        )
-        if job_phrases
-        else keyword_score
-    )
-
-    completeness_checks = {
-        "contact": bool(
-            resume.get("profile", {}).get(
-                "email"
-            )
-            and resume.get(
-                "profile",
-                {},
-            ).get("full_name")
-        ),
-        "headline": bool(
-            resume.get("profile", {}).get(
-                "headline"
-            )
-        ),
-        "summary": len(
-            resume.get(
-                "summary",
-                "",
-            )
-        )
-        >= 80,
-        "experience": bool(
-            resume.get("experience")
-        ),
-        "education": bool(
-            resume.get("education")
-        ),
-        "skills": len(
-            resume.get(
-                "skills",
-                [],
-            )
-        )
-        >= 5,
-        "results": any(
-            re.search(
-                r"\b\d+(?:\.\d+)?%|\b\d+[kmb]?\+?\b",
-                " ".join(
-                    item.get(
-                        "bullets",
-                        [],
-                    )
-                ),
-                re.IGNORECASE,
-            )
-            for item in resume.get(
-                "experience",
-                [],
-            )
-        ),
-    }
-
-    completeness_score = round(
-        sum(
-            1
-            for value
-            in completeness_checks.values()
-            if value
-        )
-        / len(completeness_checks)
-        * 100,
-        1,
-    )
-
-    overall = round(
-        keyword_score * 0.55
-        + phrase_score * 0.2
-        + completeness_score * 0.25,
-        1,
-    )
-
-    recommendations = []
-
-    if not completeness_checks[
-        "summary"
-    ]:
-        recommendations.append(
-            "Add a concise professional summary tailored to the target role."
-        )
-
-    if not completeness_checks[
-        "results"
-    ]:
-        recommendations.append(
-            "Add measurable outcomes to experience bullets where they are accurate."
-        )
-
-    if missing_phrases:
-        recommendations.append(
-            (
-                "Review these multi-word job requirements "
-                "and include only the ones you genuinely have: "
-                + ", ".join(
-                    missing_phrases[:8]
-                )
-            )
-        )
-
-    if missing:
-        recommendations.append(
-            (
-                "Review missing keywords for truthful coverage: "
-                + ", ".join(missing[:15])
-            )
-        )
-
-    if len(
-        resume.get("skills", [])
-    ) < 8:
-        recommendations.append(
-            "Expand the skills section with relevant tools and capabilities you actually use."
-        )
-
     return Response(
-        {
-            "score": overall,
-            "keyword_score": keyword_score,
-            "phrase_score": phrase_score,
-            "completeness_score": (
-                completeness_score
-            ),
-            "matched_keywords": matched[:40],
-            "missing_keywords": missing[:40],
-            "matched_phrases": matched_phrases,
-            "missing_phrases": missing_phrases,
-            "completeness": completeness_checks,
-            "recommendations": recommendations,
-            "disclaimer": (
-                "This is a heuristic keyword and completeness analysis, "
-                "not a prediction of any employer ATS score or hiring outcome."
-            ),
-        }
+        _analyze_resume_match(
+            resume,
+            job_description,
+        )
     )
 
 
@@ -3004,7 +3436,6 @@ def _ats_readiness_report(
         "profile",
         {},
     )
-
     experience = resume.get(
         "experience",
         [],
@@ -3017,23 +3448,54 @@ def _ats_readiness_report(
         "skills",
         [],
     )
+    projects = resume.get(
+        "projects",
+        [],
+    )
+    certifications = resume.get(
+        "certifications",
+        [],
+    )
+
+    email = str(
+        profile.get("email") or ""
+    ).strip()
+    phone = str(
+        profile.get("phone") or ""
+    ).strip()
+    phone_digits = re.sub(
+        r"\D",
+        "",
+        phone,
+    )
+
+    experience_bullets = [
+        str(bullet).strip()
+        for item in experience
+        for bullet in item.get(
+            "bullets",
+            [],
+        )
+        if str(bullet).strip()
+    ]
 
     experience_text = " ".join(
-        " ".join(
-            [
+        [
+            str(
                 item.get(
                     "summary",
                     "",
-                ),
-                " ".join(
-                    item.get(
-                        "bullets",
-                        [],
-                    )
-                ),
-            ]
-        )
-        for item in experience
+                )
+            )
+            + " "
+            + " ".join(
+                item.get(
+                    "bullets",
+                    [],
+                )
+            )
+            for item in experience
+        ]
     )
 
     quantified = bool(
@@ -3044,63 +3506,158 @@ def _ats_readiness_report(
         )
     )
 
+    raw_word_count = len(
+        re.findall(
+            r"\b\w+\b",
+            str(raw_text or ""),
+        )
+    )
+
+    structured_experience = any(
+        str(
+            item.get("title") or ""
+        ).strip()
+        and str(
+            item.get("company") or ""
+        ).strip()
+        for item in experience
+    )
+
+    structured_education = any(
+        str(
+            item.get("school") or ""
+        ).strip()
+        and (
+            str(
+                item.get("degree") or ""
+            ).strip()
+            or str(
+                item.get("field") or ""
+            ).strip()
+        )
+        for item in education
+    )
+
+    populated_sections = sum(
+        [
+            bool(experience),
+            bool(education),
+            bool(skills),
+            bool(projects),
+            bool(certifications),
+        ]
+    )
+
     checks = {
         "name": bool(
-            profile.get("full_name")
+            str(
+                profile.get(
+                    "full_name"
+                )
+                or ""
+            ).strip()
         ),
         "email": bool(
-            profile.get("email")
-        ),
-        "phone": bool(
-            profile.get("phone")
-        ),
-        "headline": bool(
-            profile.get("headline")
-        ),
-        "summary": len(
-            resume.get(
-                "summary",
-                "",
+            re.fullmatch(
+                r"[^\s@]+@[^\s@]+\.[^\s@]+",
+                email,
             )
-        ) >= 80,
-        "experience": bool(experience),
-        "education": bool(education),
-        "skills": len(skills) >= 5,
-        "quantified_results": quantified,
-        "parseable_text": len(
-            raw_text.strip()
-        ) >= 300,
+        ),
+        "phone": (
+            8 <= len(phone_digits) <= 16
+        ),
+        "headline": (
+            8
+            <= len(
+                str(
+                    profile.get(
+                        "headline"
+                    )
+                    or ""
+                ).strip()
+            )
+            <= 180
+        ),
+        "summary": (
+            60
+            <= len(
+                str(
+                    resume.get(
+                        "summary"
+                    )
+                    or ""
+                ).strip()
+            )
+            <= 1200
+        ),
+        "experience": (
+            structured_experience
+        ),
+        "experience_detail": (
+            len(
+                experience_bullets
+            )
+            >= 3
+        ),
+        "education": (
+            structured_education
+        ),
+        "skills": (
+            5 <= len(skills) <= 40
+        ),
+        "quantified_results": (
+            quantified
+        ),
+        "parseable_text": (
+            180
+            <= raw_word_count
+            <= 1800
+        ),
+        "section_balance": (
+            populated_sections >= 3
+        ),
     }
 
     weights = {
-        "name": 5,
-        "email": 8,
-        "phone": 5,
-        "headline": 8,
-        "summary": 12,
-        "experience": 20,
-        "education": 8,
-        "skills": 12,
-        "quantified_results": 12,
-        "parseable_text": 10,
+        "name": 4,
+        "email": 7,
+        "phone": 4,
+        "headline": 7,
+        "summary": 10,
+        "experience": 14,
+        "experience_detail": 14,
+        "education": 7,
+        "skills": 10,
+        "quantified_results": 8,
+        "parseable_text": 8,
+        "section_balance": 7,
     }
 
-    score = sum(
+    raw_score = sum(
         weights[key]
-        for key, passed in checks.items()
+        for key, passed
+        in checks.items()
         if passed
+    )
+
+    # This is intentionally not presented as an employer ATS score. Without a
+    # target job description, the highest meaningful result is general resume
+    # readiness, so cap it below 100 to prevent a misleading "perfect ATS" UI.
+    score = min(
+        95,
+        raw_score,
     )
 
     warnings = []
 
     if not checks["email"]:
         warnings.append(
-            "Add an email address."
+            "Add a valid email address."
         )
 
     if not checks["phone"]:
         warnings.append(
-            "Add a phone number."
+            "Add a valid phone number."
         )
 
     if not checks["headline"]:
@@ -3110,17 +3667,29 @@ def _ats_readiness_report(
 
     if not checks["summary"]:
         warnings.append(
-            "Add a concise professional summary of at least a few sentences."
+            "Use a concise professional summary of roughly 60–1200 characters."
         )
 
     if not checks["experience"]:
         warnings.append(
-            "Review the imported Experience section; no structured experience was detected."
+            "Review Experience: at least one role should include both a job title and company."
+        )
+
+    if not checks[
+        "experience_detail"
+    ]:
+        warnings.append(
+            "Add at least three concrete experience bullets so the resume contains enough evidence."
+        )
+
+    if not checks["education"]:
+        warnings.append(
+            "Review Education: include a school plus a degree or field where applicable."
         )
 
     if not checks["skills"]:
         warnings.append(
-            "Add at least five relevant skills."
+            "Keep the skills section focused: about 5–40 relevant skills."
         )
 
     if not checks[
@@ -3130,13 +3699,32 @@ def _ats_readiness_report(
             "Where accurate, add measurable outcomes to experience bullets."
         )
 
+    if not checks[
+        "parseable_text"
+    ]:
+        warnings.append(
+            "The resume text looks unusually short or long; review parsing and overall length."
+        )
+
+    if not checks[
+        "section_balance"
+    ]:
+        warnings.append(
+            "Add enough structured sections for a balanced resume."
+        )
+
     return {
         "score": score,
+        "raw_score": raw_score,
+        "max_general_score": 95,
+        "kind": "resume_readiness",
         "checks": checks,
         "warnings": warnings,
+        "word_count": raw_word_count,
         "disclaimer": (
-            "ATS Readiness is a heuristic formatting/content completeness "
-            "check. It is not an employer ATS score or hiring prediction."
+            "Resume Readiness measures general structure and parseability only. "
+            "It is capped at 95 because no target job description is involved. "
+            "Use Job-specific ATS Match for resume-to-role relevance."
         ),
     }
 
