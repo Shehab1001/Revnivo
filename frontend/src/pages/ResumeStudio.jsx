@@ -38,7 +38,6 @@ const EDITOR_TABS = [
   { key: 'cover', label: 'Cover Letters', icon: FileCheck2 },
   { key: 'ats', label: 'ATS Match', icon: SearchCheck },
   { key: 'matches', label: 'Job Matches', icon: WandSparkles },
-  { key: 'versions', label: 'Versions', icon: History },
 ]
 
 const TEMPLATES = [

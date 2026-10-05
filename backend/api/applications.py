@@ -144,6 +144,41 @@ def _clean_datetime(value):
     return dt.astimezone(timezone.utc)
 
 
+
+def _stored_datetime(value):
+    """Normalize legacy/current Mongo date values for reads and comparisons."""
+    if not value:
+        return None
+
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        raw = str(value).strip()
+        if not raw:
+            return None
+
+        try:
+            if len(raw) == 10:
+                dt = datetime.fromisoformat(
+                    raw + "T00:00:00"
+                )
+            else:
+                dt = datetime.fromisoformat(
+                    raw.replace("Z", "+00:00")
+                )
+        except (TypeError, ValueError):
+            return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    return dt.astimezone(timezone.utc)
+
+
+def _serialize_application_datetime(value):
+    dt = _stored_datetime(value)
+    return serialize_datetime(dt) if dt else None
+
 def _clean_tags(value):
     if value is None:
         return []
@@ -183,7 +218,7 @@ def _serialize_event(doc):
         "message": doc.get("message", ""),
         "from_status": doc.get("from_status", ""),
         "to_status": doc.get("to_status", ""),
-        "created_at": serialize_datetime(doc.get("created_at")),
+        "created_at": _serialize_application_datetime(doc.get("created_at")),
     }
 
 
@@ -205,9 +240,9 @@ def _serialize_application(doc):
         "currency": doc.get("currency", "USD"),
         "status": doc.get("status", "saved"),
         "priority": doc.get("priority", "medium"),
-        "applied_at": serialize_datetime(doc.get("applied_at")),
-        "deadline_at": serialize_datetime(doc.get("deadline_at")),
-        "interview_at": serialize_datetime(doc.get("interview_at")),
+        "applied_at": _serialize_application_datetime(doc.get("applied_at")),
+        "deadline_at": _serialize_application_datetime(doc.get("deadline_at")),
+        "interview_at": _serialize_application_datetime(doc.get("interview_at")),
         "recruiter_name": doc.get("recruiter_name", ""),
         "recruiter_email": doc.get("recruiter_email", ""),
         "recruiter_linkedin": doc.get("recruiter_linkedin", ""),
@@ -216,9 +251,9 @@ def _serialize_application(doc):
         "resume_id": str(doc.get("resume_id") or ""),
         "cover_letter_id": str(doc.get("cover_letter_id") or ""),
         "archived": bool(doc.get("archived")),
-        "created_at": serialize_datetime(doc.get("created_at")),
-        "updated_at": serialize_datetime(doc.get("updated_at")),
-        "status_changed_at": serialize_datetime(doc.get("status_changed_at")),
+        "created_at": _serialize_application_datetime(doc.get("created_at")),
+        "updated_at": _serialize_application_datetime(doc.get("updated_at")),
+        "status_changed_at": _serialize_application_datetime(doc.get("status_changed_at")),
     }
 
 
@@ -862,15 +897,23 @@ def application_stats(request):
         if status_key in by_status:
             by_status[status_key] += 1
 
-        company = doc.get("company", "").strip()
+        company = _clean_text(
+            doc.get("company"),
+            160,
+        )
         if company:
             by_company[company] = by_company.get(company, 0) + 1
 
-        source = doc.get("source_platform", "").strip()
+        source = _clean_text(
+            doc.get("source_platform"),
+            120,
+        )
         if source:
             by_source[source] = by_source.get(source, 0) + 1
 
-        interview_at = doc.get("interview_at")
+        interview_at = _stored_datetime(
+            doc.get("interview_at")
+        )
         if interview_at and interview_at >= now:
             upcoming_interviews.append(
                 {
@@ -881,7 +924,9 @@ def application_stats(request):
                 }
             )
 
-        deadline_at = doc.get("deadline_at")
+        deadline_at = _stored_datetime(
+            doc.get("deadline_at")
+        )
         if deadline_at and deadline_at >= now:
             upcoming_deadlines.append(
                 {
