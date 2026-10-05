@@ -4,7 +4,7 @@ Revnivo uses a React/Vite frontend and a Django backend. The recommended
 production layout is:
 
 - Frontend: Netlify
-- Backend: Render at `https://revnivo.onrender.com`
+- Backend: Railway at `https://revnivo-production.up.railway.app`
 - Database: MongoDB Atlas
 - Production media: Cloudinary
 
@@ -35,10 +35,10 @@ VITE_GOOGLE_CLIENT_ID=<your Google OAuth web client id>
 Do not set `VITE_API_URL` for the Netlify deployment.
 
 When `VITE_API_URL` is unset, the frontend calls `/api` on its own Netlify
-origin. Netlify then proxies those requests to the Render backend. This keeps
+origin. Netlify then proxies those requests to the Railway backend. This keeps
 the browser-side authentication cookies same-origin.
 
-## 3. Render backend environment
+## 3. Railway backend environment
 
 After Netlify gives the site its production URL, for example:
 
@@ -46,7 +46,7 @@ After Netlify gives the site its production URL, for example:
 https://revnivo.netlify.app
 ```
 
-set/update these variables on Render:
+set/update these variables on Railway:
 
 ```text
 DJANGO_DEBUG=false
@@ -76,7 +76,7 @@ https://revnivo.netlify.app
 Use the same Google client ID in:
 
 - Netlify: `VITE_GOOGLE_CLIENT_ID`
-- Render: `GOOGLE_CLIENT_ID`
+- Railway: `GOOGLE_CLIENT_ID`
 
 ## 5. SPA routing
 
@@ -89,8 +89,8 @@ do not return a Netlify 404.
 These browser paths stay on the Netlify domain:
 
 ```text
-/api/*   -> https://revnivo.onrender.com/api/*
-/media/* -> https://revnivo.onrender.com/media/*
+/api/*   -> https://revnivo-production.up.railway.app/api/*
+/media/* -> https://revnivo-production.up.railway.app/media/*
 ```
 
 The frontend should therefore leave `VITE_API_URL` unset on Netlify.
