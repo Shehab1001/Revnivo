@@ -3489,13 +3489,6 @@ def _parse_import_experience(lines):
             _pick_role_and_company(role_lines)
         )
 
-        summary_lines = [
-            line
-            for line in remaining
-            if line
-            and line not in bullets
-        ]
-
         output.append(
             {
                 "id": (
@@ -3507,9 +3500,7 @@ def _parse_import_experience(lines):
                 "start_date": start_date,
                 "end_date": end_date,
                 "current": current,
-                "summary": " ".join(
-                    summary_lines
-                ),
+                "summary": "",
                 "bullets": bullets,
             }
         )
