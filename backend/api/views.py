@@ -3322,10 +3322,7 @@ def export_earnings_csv(request):
     writer = csv.writer(response)
     writer.writerow([
         "Platform",
-        "Gross amount",
-        "Platform fee",
-        "Payment fee",
-        "Net amount",
+        "Amount",
         "Currency",
         "Status",
         "Date earned",
@@ -3338,10 +3335,7 @@ def export_earnings_csv(request):
         item = serialize_earning(doc, pmap.get(doc.get("platform_id")), rates)
         writer.writerow([
             item["platform_name"],
-            item["gross_amount"],
-            item["platform_fee"],
-            item["payment_fee"],
-            item["net_amount"],
+            item["amount"],
             item["currency"],
             item["status"],
             item["earned_at"],
@@ -3371,10 +3365,18 @@ def import_earnings_csv(request):
         return Response({"detail": "CSV must use UTF-8 encoding."}, status=status.HTTP_400_BAD_REQUEST)
 
     reader = csv.DictReader(StringIO(raw))
-    required = {"Platform", "Gross amount", "Currency", "Date earned", "Category"}
-    if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
+    fieldnames = set(reader.fieldnames or [])
+    amount_column = (
+        "Amount"
+        if "Amount" in fieldnames
+        else "Gross amount"
+        if "Gross amount" in fieldnames
+        else None
+    )
+    required = {"Platform", "Currency", "Date earned", "Category"}
+    if not amount_column or not required.issubset(fieldnames):
         return Response(
-            {"detail": "CSV columns must include Platform, Gross amount, Currency, Date earned, and Category."},
+            {"detail": "CSV columns must include Platform, Amount, Currency, Date earned, and Category."},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -3398,9 +3400,9 @@ def import_earnings_csv(request):
 
         payload = {
             "platform_id": str(platform["_id"]),
-            "amount": row.get("Gross amount", ""),
-            "platform_fee": row.get("Platform fee") or 0,
-            "payment_fee": row.get("Payment fee") or 0,
+            "amount": row.get(amount_column, ""),
+            "platform_fee": 0,
+            "payment_fee": 0,
             "currency": row.get("Currency", ""),
             "status": "pending" if str(row.get("Status", "")).strip().lower() in {"pending", "overdue"} else "paid",
             "earned_at": row.get("Date earned", ""),
