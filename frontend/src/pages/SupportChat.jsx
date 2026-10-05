@@ -431,6 +431,7 @@ export default function SupportChat() {
   const recorderRef = useRef(null)
   const audioChunksRef = useRef([])
   const recordingStartedAtRef = useRef(0)
+  const messageInputRef = useRef(null)
 
   /*
    * Chat scrolling refs.
@@ -1756,13 +1757,20 @@ export default function SupportChat() {
                         className="hidden"
                         onChange={(
                           event
-                        ) =>
-                          setAttachment(
-                            event
-                              .target
+                        ) => {
+                          const file =
+                            event.target
                               .files?.[0] ||
-                              null
-                          )
+                            null
+
+                          setAttachment(file)
+
+                          if (file) {
+                            window.requestAnimationFrame(
+                              () =>
+                                messageInputRef.current?.focus?.()
+                            )
+                          }
                         }
                       />
                     </label>
@@ -1786,6 +1794,7 @@ export default function SupportChat() {
                   </div>
 
                   <Textarea
+                    ref={messageInputRef}
                     aria-label="Message"
                     value={content}
                     onValueChange={
@@ -1797,12 +1806,19 @@ export default function SupportChat() {
                       if (
                         event.key ===
                           'Enter' &&
-                        !event.shiftKey
+                        !event.shiftKey &&
+                        (content.trim() ||
+                          attachment)
                       ) {
                         event.preventDefault()
-                        send(event)
+                        send(
+                          event,
+                          content,
+                          'text',
+                          attachment
+                        )
                       }
-                    }}
+                    }
                     placeholder={
                       recording
                         ? 'Recording voice message...'
