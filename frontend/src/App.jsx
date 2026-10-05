@@ -31,6 +31,23 @@ function Protected({ children }) {
     : <Navigate to="/login" replace />
 }
 
+function AdminOnly({ children }) {
+  const { user, sessionChecked } = useAuth()
+
+  if (!sessionChecked) {
+    return null
+  }
+
+  const isAdmin =
+    user?.role === 'admin' ||
+    user?.email?.toLowerCase() ===
+      'dev.shehabsaid@gmail.com'
+
+  return isAdmin
+    ? children
+    : <Navigate to="/dashboard" replace />
+}
+
 function PublicOnly({ children }) {
   const { isAuthenticated, sessionChecked } = useAuth()
 
@@ -63,8 +80,8 @@ export default function App() {
         <Route path="/applications" element={<Navigate to="/jobs/applications" replace/>}/>
         <Route path="/applications/:applicationId" element={<ApplicationWorkspace/>}/>
         <Route path="/settings" element={<Settings/>}/>
-        <Route path="/admin/users" element={<AdminUsers/>}/>
-        <Route path="/admin/subscriptions" element={<Subscriptions/>}/>
+        <Route path="/admin/users" element={<AdminOnly><AdminUsers/></AdminOnly>}/>
+        <Route path="/admin/subscriptions" element={<AdminOnly><Subscriptions/></AdminOnly>}/>
         <Route path="/support-chat" element={<SupportChat/>}/>
       </Route>
       <Route path="*" element={<Navigate to="/" replace/>}/>
