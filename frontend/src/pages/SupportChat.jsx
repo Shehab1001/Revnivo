@@ -842,6 +842,43 @@ export default function SupportChat() {
     await loadContacts().catch(() => {})
   }
 
+  const handleAttachmentChange = (event) => {
+    const file =
+      event.target.files?.[0] || null
+
+    setAttachment(file)
+
+    if (file) {
+      window.requestAnimationFrame(() => {
+        messageInputRef.current?.focus?.()
+      })
+    }
+  }
+
+  const handleComposerKeyDown = (event) => {
+    if (
+      event.key !== 'Enter' ||
+      event.shiftKey
+    ) {
+      return
+    }
+
+    if (
+      !content.trim() &&
+      !attachment
+    ) {
+      return
+    }
+
+    event.preventDefault()
+    send(
+      event,
+      content,
+      'text',
+      attachment
+    )
+  }
+
   const clearRecordingPresence = () => {
     if (recordingPresenceTimer.current) {
       window.clearInterval(recordingPresenceTimer.current)
@@ -1755,23 +1792,7 @@ export default function SupportChat() {
                         type="file"
                         accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,application/pdf,audio/webm,audio/ogg,audio/mpeg,audio/mp4,text/plain,text/csv"
                         className="hidden"
-                        onChange={(
-                          event
-                        ) => {
-                          const file =
-                            event.target
-                              .files?.[0] ||
-                            null
-
-                          setAttachment(file)
-
-                          if (file) {
-                            window.requestAnimationFrame(
-                              () =>
-                                messageInputRef.current?.focus?.()
-                            )
-                          }
-                        }
+                        onChange={handleAttachmentChange}
                       />
                     </label>
 
@@ -1800,25 +1821,7 @@ export default function SupportChat() {
                     onValueChange={
                       updateTyping
                     }
-                    onKeyDown={(
-                      event
-                    ) => {
-                      if (
-                        event.key ===
-                          'Enter' &&
-                        !event.shiftKey &&
-                        (content.trim() ||
-                          attachment)
-                      ) {
-                        event.preventDefault()
-                        send(
-                          event,
-                          content,
-                          'text',
-                          attachment
-                        )
-                      }
-                    }}
+                    onKeyDown={handleComposerKeyDown}
                     placeholder={
                       recording
                         ? 'Recording voice message...'
