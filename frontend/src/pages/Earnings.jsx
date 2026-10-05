@@ -37,8 +37,6 @@ const today = () => localDateInputValue()
 const emptyForm = {
   platform_id: '',
   amount: '',
-  platform_fee: '0',
-  payment_fee: '0',
   currency: 'USD',
   status: 'paid',
   earned_at: today(),
@@ -164,9 +162,7 @@ export default function Earnings() {
     setEditing(earning)
     setForm({
       platform_id: earning.platform_id,
-      amount: String(earning.gross_amount ?? earning.amount ?? ''),
-      platform_fee: String(earning.platform_fee || 0),
-      payment_fee: String(earning.payment_fee || 0),
+      amount: String(earning.amount ?? earning.gross_amount ?? ''),
       currency: earning.currency,
       status:
         earning.status === 'overdue'
@@ -202,6 +198,8 @@ export default function Earnings() {
     try {
       const payload = {
         ...form,
+        platform_fee: 0,
+        payment_fee: 0,
         expected_at:
           form.status === 'pending'
             ? form.expected_at
@@ -351,8 +349,7 @@ export default function Earnings() {
           </h1>
 
           <p className="mt-1 text-sm text-default-500">
-            Track paid and expected income,
-            fees, and what you actually keep.
+            Track paid and expected income in one simple amount.
           </p>
         </div>
 
@@ -460,20 +457,14 @@ export default function Earnings() {
 
         {items.length ? (
           <div className="overflow-x-auto scrollbar-thin">
-            <table className="w-full min-w-[1180px] table-auto text-left text-[12px]">
+            <table className="w-full min-w-[920px] table-auto text-left text-[12px]">
               <thead className="bg-content2/60 text-[10px] font-bold uppercase tracking-wide text-default-500">
                 <tr>
                   <th className="whitespace-nowrap px-3 py-2.5">
                     Platform
                   </th>
                   <th className="whitespace-nowrap px-3 py-2.5">
-                    Gross
-                  </th>
-                  <th className="whitespace-nowrap px-3 py-2.5">
-                    Fees
-                  </th>
-                  <th className="whitespace-nowrap px-3 py-2.5">
-                    Net
+                    Amount
                   </th>
                   <th className="whitespace-nowrap px-3 py-2.5">
                     Status
@@ -499,14 +490,6 @@ export default function Earnings() {
                     statusChip[
                       earning.status || 'paid'
                     ] || statusChip.paid
-
-                  const feeTotal =
-                    Number(
-                      earning.platform_fee || 0
-                    ) +
-                    Number(
-                      earning.payment_fee || 0
-                    )
 
                   return (
                     <tr
@@ -542,25 +525,8 @@ export default function Earnings() {
 
                       <td className="whitespace-nowrap px-3 py-2.5 font-semibold text-foreground">
                         {formatMoney(
-                          earning.gross_amount ??
-                            earning.amount,
-                          earning.currency
-                        )}
-                      </td>
-
-                      <td className="whitespace-nowrap px-3 py-2.5 text-default-500">
-                        {feeTotal
-                          ? `-${formatMoney(
-                              feeTotal,
-                              earning.currency
-                            )}`
-                          : '—'}
-                      </td>
-
-                      <td className="whitespace-nowrap px-3 py-2.5 font-bold text-success">
-                        {formatMoney(
-                          earning.net_amount ??
-                            earning.amount,
+                          earning.amount ??
+                            earning.gross_amount,
                           earning.currency
                         )}
                       </td>
@@ -700,10 +666,7 @@ export default function Earnings() {
 
             <div className="grid gap-3 sm:grid-cols-2">
               {[
-                ['Gross amount', formatMoney(selectedEarning.gross_amount ?? selectedEarning.amount, selectedEarning.currency)],
-                ['Platform fee', formatMoney(selectedEarning.platform_fee || 0, selectedEarning.currency)],
-                ['Payment fee', formatMoney(selectedEarning.payment_fee || 0, selectedEarning.currency)],
-                ['Net amount', formatMoney(selectedEarning.net_amount ?? selectedEarning.amount, selectedEarning.currency)],
+                ['Amount', formatMoney(selectedEarning.amount ?? selectedEarning.gross_amount, selectedEarning.currency)],
                 ['Currency', selectedEarning.currency || '—'],
                 ['Date earned', selectedEarning.earned_at || '—'],
                 ['Expected date', selectedEarning.expected_at || '—'],
@@ -761,7 +724,7 @@ export default function Earnings() {
         onConfirm={remove}
         loading={deleting}
         title="Delete income entry?"
-        message={`Delete ${deleteTarget?.platform_name || 'this income entry'} for ${deleteTarget ? formatMoney(deleteTarget.gross_amount ?? deleteTarget.amount, deleteTarget.currency) : ''}? This action cannot be undone.`}
+        message={`Delete ${deleteTarget?.platform_name || 'this income entry'} for ${deleteTarget ? formatMoney(deleteTarget.amount ?? deleteTarget.gross_amount, deleteTarget.currency) : ''}? This action cannot be undone.`}
       />
 
       <Modal
@@ -812,7 +775,7 @@ export default function Earnings() {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Input
-              label="Gross amount"
+              label="Amount"
               isRequired
               type="number"
               min="0.01"
@@ -869,36 +832,6 @@ export default function Earnings() {
                 </AutocompleteItem>
               ))}
             </Autocomplete>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Input
-              label="Platform fee"
-              type="number"
-              min="0"
-              step="0.01"
-              value={form.platform_fee}
-              onValueChange={(value) =>
-                setForm({
-                  ...form,
-                  platform_fee: value,
-                })
-              }
-            />
-
-            <Input
-              label="Payment fee"
-              type="number"
-              min="0"
-              step="0.01"
-              value={form.payment_fee}
-              onValueChange={(value) =>
-                setForm({
-                  ...form,
-                  payment_fee: value,
-                })
-              }
-            />
           </div>
 
           <Select
@@ -987,25 +920,6 @@ export default function Earnings() {
             }
             placeholder="Optional details"
           />
-
-          <div className="rounded-xl border border-default-200 bg-default-50/60 p-3 text-xs text-default-500 dark:border-white/8 dark:bg-white/[0.02]">
-            Estimated net:{' '}
-            <span className="font-semibold text-foreground">
-              {formatMoney(
-                Math.max(
-                  Number(form.amount || 0) -
-                    Number(
-                      form.platform_fee || 0
-                    ) -
-                    Number(
-                      form.payment_fee || 0
-                    ),
-                  0
-                ),
-                form.currency
-              )}
-            </span>
-          </div>
 
           <div className="flex justify-end gap-2 pt-2">
             <Button
