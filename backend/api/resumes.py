@@ -1958,14 +1958,14 @@ def _analyze_resume_match(
     stuffing_penalty = 0.0
 
     if (
-        keyword_score >= 70
-        and evidence_gap >= 35
+        keyword_score >= 35
+        and evidence_gap >= 18
     ):
         stuffing_penalty = min(
-            12.0,
+            15.0,
             round(
-                (evidence_gap - 30)
-                * 0.3,
+                (evidence_gap - 12)
+                * 0.35,
                 1,
             ),
         )
