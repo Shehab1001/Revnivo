@@ -13,6 +13,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import GoogleAuthButton from '../components/GoogleAuthButton'
+import { getApiErrorMessage } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
 
@@ -44,15 +45,7 @@ export default function Register() {
       )
       navigate('/dashboard')
     } catch (err) {
-      const data = err.response?.data
-
-      setError(
-        data?.detail ||
-          Object.values(data || {})
-            .flat()
-            .join(' ') ||
-          'Registration failed.'
-      )
+      setError(getApiErrorMessage(err, 'Registration failed.'))
     } finally {
       setLoading(false)
     }
