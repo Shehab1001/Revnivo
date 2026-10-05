@@ -180,22 +180,108 @@ function ListItemShell({
   )
 }
 
-function ScoreGauge({ score = 0 }) {
+function scorePresentation(score = 0) {
   const normalized = Math.max(
     0,
     Math.min(100, Number(score) || 0)
   )
 
+  if (normalized >= 90) {
+    return {
+      label: 'Excellent',
+      ring: 'border-success',
+      text: 'text-success',
+      badge: 'bg-success/10 text-success',
+    }
+  }
+
+  if (normalized >= 75) {
+    return {
+      label: 'Strong',
+      ring: 'border-lime-500',
+      text: 'text-lime-600 dark:text-lime-400',
+      badge:
+        'bg-lime-500/10 text-lime-700 dark:text-lime-400',
+    }
+  }
+
+  if (normalized >= 60) {
+    return {
+      label: 'Fair',
+      ring: 'border-warning',
+      text: 'text-warning',
+      badge: 'bg-warning/10 text-warning',
+    }
+  }
+
+  if (normalized >= 40) {
+    return {
+      label: 'Needs work',
+      ring: 'border-orange-500',
+      text: 'text-orange-600 dark:text-orange-400',
+      badge:
+        'bg-orange-500/10 text-orange-700 dark:text-orange-400',
+    }
+  }
+
+  return {
+    label: 'Weak',
+    ring: 'border-danger',
+    text: 'text-danger',
+    badge: 'bg-danger/10 text-danger',
+  }
+}
+
+function ScoreGauge({
+  score = 0,
+  caption = 'Match score',
+  size = 'large',
+}) {
+  const normalized = Math.max(
+    0,
+    Math.min(100, Number(score) || 0)
+  )
+  const presentation = scorePresentation(
+    normalized
+  )
+  const sizing =
+    size === 'small'
+      ? {
+          outer: 'h-24 w-24 border-[7px]',
+          value: 'text-2xl',
+          caption:
+            'text-[8px] tracking-[0.12em]',
+          badge: 'text-[8px]',
+        }
+      : {
+          outer: 'h-36 w-36 border-[10px]',
+          value: 'text-3xl',
+          caption:
+            'text-[10px] tracking-[0.14em]',
+          badge: 'text-[9px]',
+        }
+
   return (
-    <div className="grid h-36 w-36 place-items-center rounded-full bg-default-100 p-3">
-      <div className="grid h-full w-full place-items-center rounded-full bg-content1 text-center shadow-sm">
-        <div>
-          <div className="text-3xl font-semibold tracking-tight text-primary">
-            {normalized.toFixed(0)}
-          </div>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-default-400">
-            Match score
-          </div>
+    <div
+      className={`grid shrink-0 place-items-center rounded-full bg-content1 shadow-sm ${presentation.ring} ${sizing.outer}`}
+      role="img"
+      aria-label={`${caption}: ${normalized.toFixed(0)}%, ${presentation.label}`}
+    >
+      <div className="text-center">
+        <div
+          className={`font-bold tracking-tight ${presentation.text} ${sizing.value}`}
+        >
+          {normalized.toFixed(0)}%
+        </div>
+        <div
+          className={`mt-0.5 font-semibold uppercase text-default-400 ${sizing.caption}`}
+        >
+          {caption}
+        </div>
+        <div
+          className={`mx-auto mt-2 w-fit rounded-full px-2 py-0.5 font-semibold uppercase tracking-[0.08em] ${presentation.badge} ${sizing.badge}`}
+        >
+          {presentation.label}
         </div>
       </div>
     </div>
@@ -1143,16 +1229,11 @@ export default function ResumeStudio() {
           <CardBody className="gap-4 p-4 sm:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex items-center gap-4">
-                <div className="grid h-20 w-20 shrink-0 place-items-center rounded-2xl bg-primary/10 text-center">
-                  <div>
-                    <div className="text-2xl font-semibold text-primary">
-                      {readiness.score}%
-                    </div>
-                    <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-default-400">
-                      General
-                    </div>
-                  </div>
-                </div>
+                <ScoreGauge
+                  score={readiness.score}
+                  caption="Readiness"
+                  size="small"
+                />
 
                 <div>
                   <h2 className="text-sm font-semibold">
