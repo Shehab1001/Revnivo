@@ -431,6 +431,7 @@ export default function SupportChat() {
   const recorderRef = useRef(null)
   const audioChunksRef = useRef([])
   const recordingStartedAtRef = useRef(0)
+  const messageInputRef = useRef(null)
 
   /*
    * Chat scrolling refs.
@@ -839,6 +840,43 @@ export default function SupportChat() {
 
     await loadMessages()
     await loadContacts().catch(() => {})
+  }
+
+  const handleAttachmentChange = (event) => {
+    const file =
+      event.target.files?.[0] || null
+
+    setAttachment(file)
+
+    if (file) {
+      window.requestAnimationFrame(() => {
+        messageInputRef.current?.focus?.()
+      })
+    }
+  }
+
+  const handleComposerKeyDown = (event) => {
+    if (
+      event.key !== 'Enter' ||
+      event.shiftKey
+    ) {
+      return
+    }
+
+    if (
+      !content.trim() &&
+      !attachment
+    ) {
+      return
+    }
+
+    event.preventDefault()
+    send(
+      event,
+      content,
+      'text',
+      attachment
+    )
   }
 
   const clearRecordingPresence = () => {
@@ -1754,16 +1792,7 @@ export default function SupportChat() {
                         type="file"
                         accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,application/pdf,audio/webm,audio/ogg,audio/mpeg,audio/mp4,text/plain,text/csv"
                         className="hidden"
-                        onChange={(
-                          event
-                        ) =>
-                          setAttachment(
-                            event
-                              .target
-                              .files?.[0] ||
-                              null
-                          )
-                        }
+                        onChange={handleAttachmentChange}
                       />
                     </label>
 
@@ -1786,23 +1815,13 @@ export default function SupportChat() {
                   </div>
 
                   <Textarea
+                    ref={messageInputRef}
                     aria-label="Message"
                     value={content}
                     onValueChange={
                       updateTyping
                     }
-                    onKeyDown={(
-                      event
-                    ) => {
-                      if (
-                        event.key ===
-                          'Enter' &&
-                        !event.shiftKey
-                      ) {
-                        event.preventDefault()
-                        send(event)
-                      }
-                    }}
+                    onKeyDown={handleComposerKeyDown}
                     placeholder={
                       recording
                         ? 'Recording voice message...'
