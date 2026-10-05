@@ -1039,19 +1039,20 @@ export default function ResumeStudio() {
                       {readiness.score}%
                     </div>
                     <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-default-400">
-                      ATS ready
+                      General
                     </div>
                   </div>
                 </div>
 
                 <div>
                   <h2 className="text-sm font-semibold">
-                    ATS Readiness
+                    Resume Readiness
                   </h2>
                   <p className="mt-1 max-w-xl text-xs leading-5 text-default-500">
-                    General CV structure/content readiness. For a
-                    job-specific percentage, open the ATS Match tab
-                    and paste that job description.
+                    General structure and parseability only. This is
+                    intentionally not an ATS match score. For a
+                    job-specific result, open ATS Match and paste the
+                    target job description.
                   </p>
 
                   {importReport && (
@@ -1082,7 +1083,7 @@ export default function ResumeStudio() {
                 startContent={<SearchCheck size={15} />}
                 onPress={() => setTab('ats')}
               >
-                Run job-specific ATS
+                Run job-specific match
               </Button>
             </div>
 
@@ -2264,13 +2265,33 @@ export default function ResumeStudio() {
                       score={analysis.score}
                     />
 
-                    <div className="grid w-full grid-cols-3 gap-2 text-center">
+                    <div className="text-sm font-semibold text-foreground">
+                      {analysis.score_band || 'Job match'}
+                    </div>
+
+                    <div className="grid w-full grid-cols-2 gap-2 text-center sm:grid-cols-5">
                       <div className="rounded-xl bg-default-50 p-3">
                         <div className="text-lg font-semibold">
                           {analysis.keyword_score}%
                         </div>
                         <div className="text-[10px] text-default-400">
                           Keywords
+                        </div>
+                      </div>
+                      <div className="rounded-xl bg-default-50 p-3">
+                        <div className="text-lg font-semibold">
+                          {analysis.required_score ?? 0}%
+                        </div>
+                        <div className="text-[10px] text-default-400">
+                          Requirements
+                        </div>
+                      </div>
+                      <div className="rounded-xl bg-default-50 p-3">
+                        <div className="text-lg font-semibold">
+                          {analysis.evidence_score ?? 0}%
+                        </div>
+                        <div className="text-[10px] text-default-400">
+                          Evidence
                         </div>
                       </div>
                       <div className="rounded-xl bg-default-50 p-3">
@@ -2288,16 +2309,45 @@ export default function ResumeStudio() {
                           }%
                         </div>
                         <div className="text-[10px] text-default-400">
-                          Complete
+                          Resume quality
                         </div>
                       </div>
                     </div>
+
+                    {analysis.diagnostics && (
+                      <div className="text-center text-[10px] leading-4 text-default-400">
+                        Compared {analysis.diagnostics.job_terms_analyzed || 0} weighted job terms
+                        {analysis.diagnostics.required_terms_analyzed
+                          ? ` · ${analysis.diagnostics.required_terms_analyzed} requirement-focused terms`
+                          : ''}
+                        {analysis.diagnostics.keyword_stuffing_penalty > 0
+                          ? ` · ${analysis.diagnostics.keyword_stuffing_penalty}% anti-stuffing penalty`
+                          : ''}
+                      </div>
+                    )}
 
                     <p className="text-center text-[10px] leading-4 text-default-400">
                       {analysis.disclaimer}
                     </p>
                   </CardBody>
                 </Card>
+
+                {(analysis.critical_missing || []).length > 0 && (
+                  <SectionCard title="Highest-priority missing terms">
+                    <div className="flex flex-wrap gap-1.5">
+                      {(analysis.critical_missing || []).map((keyword) => (
+                        <Chip
+                          key={keyword}
+                          size="sm"
+                          variant="flat"
+                          color="danger"
+                        >
+                          {keyword}
+                        </Chip>
+                      ))}
+                    </div>
+                  </SectionCard>
+                )}
 
                 <SectionCard title="Matched keywords">
                   <div className="flex flex-wrap gap-1.5">
