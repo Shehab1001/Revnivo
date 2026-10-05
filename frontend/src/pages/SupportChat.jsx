@@ -446,6 +446,11 @@ export default function SupportChat() {
   const [clearChatOpen, setClearChatOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
+  const localClearStorageKey =
+    user?.role !== 'admin' && user?.id
+      ? `revnivo_support_chat_cleared_at_${user.id}`
+      : ''
+
   const typingTimer = useRef(null)
   const recordingPresenceTimer = useRef(null)
   const recorderRef = useRef(null)
@@ -551,8 +556,36 @@ export default function SupportChat() {
         }
       )
 
+      const visibleData =
+        user?.role === 'admin' || !localClearStorageKey
+          ? data
+          : (() => {
+              const clearedAt =
+                localStorage.getItem(
+                  localClearStorageKey
+                )
+
+              if (!clearedAt) {
+                return data
+              }
+
+              const cutoff =
+                new Date(clearedAt).getTime()
+
+              if (!Number.isFinite(cutoff)) {
+                return data
+              }
+
+              return data.filter(
+                (message) =>
+                  new Date(
+                    message.created_at
+                  ).getTime() > cutoff
+              )
+            })()
+
       const incomingLastMessageId =
-        data.at(-1)?.id ?? null
+        visibleData.at(-1)?.id ?? null
 
       const hasNewLastMessage =
         incomingLastMessageId !==
@@ -565,10 +598,11 @@ export default function SupportChat() {
         scrollToLatestRef.current = true
       }
 
-      setMessages(data)
+      setMessages(visibleData)
 
       if (user?.role !== 'admin') {
-        const latestVisibleMessage = data.at(-1)
+        const latestVisibleMessage =
+          visibleData.at(-1)
 
         setContacts((items) =>
           items.map((item) => ({
@@ -1114,7 +1148,38 @@ export default function SupportChat() {
   }
 
   const clearConversation = async () => {
-    if (!selectedUser || user?.role !== 'admin') return
+    if (user?.role !== 'admin') {
+      if (!localClearStorageKey) return
+
+      const latestMessage =
+        messages.at(-1)
+
+      const clearedAt =
+        latestMessage?.created_at ||
+        new Date().toISOString()
+
+      localStorage.setItem(
+        localClearStorageKey,
+        clearedAt
+      )
+
+      setMessages([])
+      lastMessageIdRef.current = null
+      setClearChatOpen(false)
+
+      setContacts((items) =>
+        items.map((item) => ({
+          ...item,
+          last_message: '',
+          last_message_at: null,
+          unread_count: 0,
+        }))
+      )
+
+      return
+    }
+
+    if (!selectedUser) return
 
     setDeleting(true)
 
@@ -1509,20 +1574,26 @@ export default function SupportChat() {
                   </div>
                 </div>
 
-                {user?.role === 'admin' && (
-                  <Button
-                    isIconOnly
-                    size="sm"
-                    variant="light"
-                    color="danger"
-                    className="ml-1 shrink-0"
-                    onPress={() => setClearChatOpen(true)}
-                    aria-label="Delete chat"
-                    title="Delete chat"
-                  >
-                    <Trash2 size={17} />
-                  </Button>
-                )}
+                <Button
+                  isIconOnly
+                  size="sm"
+                  variant="light"
+                  color="danger"
+                  className="ml-1 shrink-0"
+                  onPress={() => setClearChatOpen(true)}
+                  aria-label={
+                    user?.role === 'admin'
+                      ? 'Delete chat'
+                      : 'Clear chat from my view'
+                  }
+                  title={
+                    user?.role === 'admin'
+                      ? 'Delete chat'
+                      : 'Clear chat from my view'
+                  }
+                >
+                  <Trash2 size={17} />
+                </Button>
               </div>
 
               {/* Messages */}
@@ -1984,8 +2055,16 @@ export default function SupportChat() {
         onClose={() => setClearChatOpen(false)}
         onConfirm={clearConversation}
         loading={deleting}
-        title="Delete this chat?"
-        message={`Delete the entire conversation with ${active?.name || 'this user'}? All messages and chat attachments will be removed from the database.`}
+        title={
+          user?.role === 'admin'
+            ? 'Delete this chat?'
+            : 'Clear this chat?'
+        }
+        message={
+          user?.role === 'admin'
+            ? `Delete the entire conversation with ${active?.name || 'this user'}? All messages and chat attachments will be removed from the database.`
+            : 'This will hide the current conversation only from your view on this device. It will not remove anything for support or from the database. New messages will appear normally.'
+        }
       />
 
       <ConfirmDeleteModal
