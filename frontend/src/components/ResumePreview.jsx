@@ -89,12 +89,6 @@ export default function ResumePreview({
                   />
                 </div>
 
-                {item.summary && (
-                  <p className="mt-1 text-[10.5px] leading-4 text-slate-700">
-                    {item.summary}
-                  </p>
-                )}
-
                 <BulletList items={item.bullets} />
               </div>
             ))}
