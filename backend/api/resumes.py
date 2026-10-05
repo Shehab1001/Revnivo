@@ -2907,21 +2907,29 @@ def _profile_from_import(sections, full_text):
 
     website = ""
 
-    for url in re.findall(
-        r"(?:https?://)?(?:www\.)?"
-        r"[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-        r"(?:/[^\s,;]*)?",
-        full_text,
-        flags=re.IGNORECASE,
-    ):
-        lower = url.lower()
-        if (
-            "linkedin." not in lower
-            and "github." not in lower
-            and "@" not in lower
-        ):
-            website = url.rstrip(").,;")
-            break
+    for line in header_lines:
+        website_match = re.match(
+            r"^(?:website|portfolio|personal\s+(?:site|website))"
+            r"\s*[:\-]\s*(.+)$",
+            line,
+            flags=re.IGNORECASE,
+        )
+
+        if not website_match:
+            continue
+
+        candidate = _first_url(
+            website_match.group(1)
+        )
+
+        if candidate:
+            lower = candidate.lower()
+            if (
+                "linkedin." not in lower
+                and "github." not in lower
+            ):
+                website = candidate
+                break
 
     location = ""
 
@@ -3092,6 +3100,331 @@ def _import_bullets(lines):
     return bullets
 
 
+def _expand_import_lines(lines):
+    expanded = []
+
+    for raw in lines:
+        text = str(raw or "").strip()
+
+        if not text:
+            expanded.append("")
+            continue
+
+        # CVs often keep title, company, location and dates on one line
+        # separated by pipes. Split those fields before classifying them.
+        if "|" in text and not re.search(
+            r"https?://",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            parts = [
+                part.strip()
+                for part in text.split("|")
+                if part.strip()
+            ]
+            expanded.extend(parts)
+        else:
+            expanded.append(text)
+
+    return expanded
+
+
+def _strip_import_label(value):
+    text = str(value or "").strip()
+    return re.sub(
+        r"^(?:company|employer|organization|organisation|"
+        r"position|job title|title|role|location|dates?|period|"
+        r"school|university|college|degree|field|major|issuer)"
+        r"\s*[:\-]\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+
+
+def _looks_like_date_line(value):
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+
+    month_words = (
+        "jan", "feb", "mar", "apr", "may", "jun",
+        "jul", "aug", "sep", "oct", "nov", "dec",
+        "present", "current", "now",
+    )
+
+    return bool(
+        re.search(r"\b(?:19|20)\d{2}\b", text)
+        or any(word in text for word in month_words)
+    )
+
+
+def _split_import_date_range(value):
+    text = str(value or "").strip()
+    if not text:
+        return "", "", False
+
+    current = bool(
+        re.search(
+            r"\b(?:present|current|now)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+    normalized = re.sub(
+        r"\s+(?:to|until|through)\s+",
+        " - ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    parts = re.split(
+        r"\s*[–—-]\s*",
+        normalized,
+        maxsplit=1,
+    )
+
+    start_date = parts[0].strip()
+    end_date = (
+        parts[1].strip()
+        if len(parts) > 1
+        else ""
+    )
+
+    if current and not end_date:
+        end_date = "Present"
+
+    return start_date, end_date, current
+
+
+def _looks_like_location(value):
+    text = str(value or "").strip()
+    if not text or len(text) > 100:
+        return False
+
+    if _looks_like_date_line(text):
+        return False
+
+    if re.search(
+        r"\b(remote|hybrid|onsite|on-site)\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return True
+
+    return bool(
+        "," in text
+        and not re.search(r"\d{3,}", text)
+    )
+
+
+def _looks_like_company(value):
+    text = str(value or "").strip()
+    if not text or len(text) > 140:
+        return False
+
+    company_terms = (
+        "inc", "llc", "ltd", "limited", "corp",
+        "corporation", "company", "co.", "group",
+        "technologies", "technology", "systems",
+        "solutions", "consulting", "services",
+        "university", "institute", "bank",
+        "hospital", "agency", "studio", "labs",
+    )
+
+    lower = text.lower()
+    return any(
+        re.search(
+            rf"\b{re.escape(term)}\b",
+            lower,
+        )
+        for term in company_terms
+    )
+
+
+def _looks_like_job_title(value):
+    text = str(value or "").strip()
+    if not text or len(text) > 140:
+        return False
+
+    title_terms = (
+        "engineer", "developer", "manager", "analyst",
+        "scientist", "designer", "consultant",
+        "specialist", "assistant", "intern",
+        "director", "lead", "officer", "coordinator",
+        "researcher", "architect", "administrator",
+        "supervisor", "technician", "accountant",
+        "sales", "marketing", "recruiter", "teacher",
+        "professor", "nurse", "doctor",
+    )
+
+    lower = text.lower()
+    return any(
+        re.search(
+            rf"\b{re.escape(term)}\b",
+            lower,
+        )
+        for term in title_terms
+    )
+
+
+def _labelled_import_value(lines, labels):
+    pattern = (
+        r"^(?:"
+        + "|".join(
+            re.escape(label)
+            for label in labels
+        )
+        + r")\s*[:\-]\s*(.+)$"
+    )
+
+    for raw in lines:
+        text = str(raw or "").strip()
+        match = re.match(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            return match.group(1).strip()
+
+    return ""
+
+
+def _pick_role_and_company(lines):
+    raw_lines = [
+        str(line or "").strip()
+        for line in lines
+        if str(line or "").strip()
+    ]
+
+    labelled_title = _labelled_import_value(
+        raw_lines,
+        (
+            "position",
+            "job title",
+            "title",
+            "role",
+        ),
+    )
+    labelled_company = _labelled_import_value(
+        raw_lines,
+        (
+            "company",
+            "employer",
+            "organization",
+            "organisation",
+        ),
+    )
+
+    candidates = [
+        _strip_import_label(line)
+        for line in raw_lines
+        if not _looks_like_date_line(line)
+        and not _looks_like_location(line)
+        and not re.match(
+            r"^[•·▪◦*-]\s+",
+            line,
+        )
+    ]
+
+    title = labelled_title
+    company = labelled_company
+
+    if not title:
+        title = next(
+            (
+                line
+                for line in candidates[:4]
+                if _looks_like_job_title(line)
+            ),
+            "",
+        )
+
+    if not company:
+        company = next(
+            (
+                line
+                for line in candidates[:4]
+                if _looks_like_company(line)
+            ),
+            "",
+        )
+
+    # Common CV layout:
+    # Job title
+    # Company name
+    # Location / dates
+    # If a title is confidently identified, the adjacent descriptive
+    # line is the company. This uses text that actually exists in the CV
+    # and does not synthesize a company name.
+    if title and not company:
+        try:
+            title_index = candidates.index(title)
+        except ValueError:
+            title_index = -1
+
+        if title_index >= 0:
+            adjacent = []
+
+            if title_index + 1 < len(candidates):
+                adjacent.append(
+                    candidates[title_index + 1]
+                )
+            if title_index > 0:
+                adjacent.append(
+                    candidates[title_index - 1]
+                )
+
+            for line in adjacent:
+                if (
+                    line != title
+                    and not _looks_like_job_title(line)
+                    and len(line) <= 140
+                ):
+                    company = line
+                    break
+
+    # Also support the inverse layout:
+    # Company
+    # Job title
+    if company and not title:
+        try:
+            company_index = candidates.index(
+                company
+            )
+        except ValueError:
+            company_index = -1
+
+        if company_index >= 0:
+            adjacent = []
+
+            if company_index + 1 < len(candidates):
+                adjacent.append(
+                    candidates[company_index + 1]
+                )
+            if company_index > 0:
+                adjacent.append(
+                    candidates[company_index - 1]
+                )
+
+            title = next(
+                (
+                    line
+                    for line in adjacent
+                    if _looks_like_job_title(line)
+                ),
+                "",
+            )
+
+    remaining = [
+        line
+        for line in candidates
+        if line not in {title, company}
+    ]
+
+    return title, company, remaining
+
 def _parse_import_experience(lines):
     blocks = _blocks_from_lines(lines)
     output = []
@@ -3099,10 +3432,13 @@ def _parse_import_experience(lines):
     for index, block in enumerate(
         blocks[:20]
     ):
+        expanded = _expand_import_lines(
+            block
+        )
         clean = [
-            line
-            for line in block
-            if line
+            str(line or "").strip()
+            for line in expanded
+            if str(line or "").strip()
         ]
 
         if not clean:
@@ -3112,42 +3448,46 @@ def _parse_import_experience(lines):
         non_bullets = [
             line
             for line in clean
-            if line
-            and line not in bullets
-            and not re.match(
+            if not re.match(
                 r"^[•·▪◦*-]\s+",
                 line,
             )
         ]
 
-        title = (
-            non_bullets[0]
-            if non_bullets
-            else "Imported role"
-        )
-        company = (
-            non_bullets[1]
-            if len(non_bullets) > 1
-            else ""
-        )
-
         date_line = next(
             (
                 line
                 for line in non_bullets
-                if re.search(
-                    r"\b(?:19|20)\d{2}\b",
-                    line,
-                )
+                if _looks_like_date_line(line)
+            ),
+            "",
+        )
+        start_date, end_date, current = (
+            _split_import_date_range(date_line)
+        )
+
+        location = next(
+            (
+                line
+                for line in non_bullets
+                if line != date_line
+                and _looks_like_location(line)
             ),
             "",
         )
 
-        summary_lines = [
+        role_lines = [
             line
-            for line in non_bullets[2:]
-            if line != date_line
+            for line in non_bullets
+            if line not in {
+                date_line,
+                location,
+            }
         ]
+
+        title, company, remaining = (
+            _pick_role_and_company(role_lines)
+        )
 
         output.append(
             {
@@ -3156,21 +3496,51 @@ def _parse_import_experience(lines):
                 ),
                 "company": company,
                 "title": title,
-                "location": "",
-                "start_date": date_line,
-                "end_date": "",
-                "current": (
-                    "present"
-                    in date_line.lower()
-                ),
-                "summary": " ".join(
-                    summary_lines
-                ),
+                "location": location,
+                "start_date": start_date,
+                "end_date": end_date,
+                "current": current,
+                "summary": "",
                 "bullets": bullets,
             }
         )
 
     return output
+
+
+def _looks_like_degree(value):
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+
+    degree_terms = (
+        "bachelor", "b.sc", "bsc", "b.eng", "beng",
+        "master", "m.sc", "msc", "mba", "phd",
+        "doctorate", "diploma", "associate",
+        "degree", "certificate",
+    )
+
+    return any(
+        term in text
+        for term in degree_terms
+    )
+
+
+def _looks_like_school(value):
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+
+    school_terms = (
+        "university", "college", "institute",
+        "academy", "school", "faculty",
+        "polytechnic",
+    )
+
+    return any(
+        term in text
+        for term in school_terms
+    )
 
 
 def _parse_import_education(lines):
@@ -3180,38 +3550,142 @@ def _parse_import_education(lines):
     for index, block in enumerate(
         blocks[:15]
     ):
+        expanded = _expand_import_lines(
+            block
+        )
+        raw_clean = [
+            str(line or "").strip()
+            for line in expanded
+            if str(line or "").strip()
+        ]
         clean = [
-            line
-            for line in block
-            if line
+            _strip_import_label(line)
+            for line in raw_clean
         ]
 
         if not clean:
             continue
+
+        date_value = _labelled_import_value(
+            raw_clean,
+            ("date", "dates", "period"),
+        )
+        date_line = (
+            date_value
+            or next(
+                (
+                    line
+                    for line in clean
+                    if _looks_like_date_line(line)
+                ),
+                "",
+            )
+        )
+        start_date, end_date, _ = (
+            _split_import_date_range(date_line)
+        )
+
+        location = _labelled_import_value(
+            raw_clean,
+            ("location",),
+        )
+        if not location:
+            location = next(
+                (
+                    line
+                    for line in clean
+                    if line != date_line
+                    and _looks_like_location(line)
+                ),
+                "",
+            )
+
+        school = _labelled_import_value(
+            raw_clean,
+            (
+                "school",
+                "university",
+                "college",
+                "institution",
+                "institute",
+            ),
+        )
+        if not school:
+            school = next(
+                (
+                    line
+                    for line in clean
+                    if _looks_like_school(line)
+                ),
+                "",
+            )
+
+        degree = _labelled_import_value(
+            raw_clean,
+            ("degree", "qualification"),
+        )
+        if not degree:
+            degree = next(
+                (
+                    line
+                    for line in clean
+                    if line != school
+                    and _looks_like_degree(line)
+                ),
+                "",
+            )
+
+        field = _labelled_import_value(
+            raw_clean,
+            ("field", "major", "specialization"),
+        )
+        if not field and degree:
+            degree_match = re.search(
+                r"\b(?:in|of)\s+(.+)$",
+                degree,
+                flags=re.IGNORECASE,
+            )
+            if degree_match:
+                field = (
+                    degree_match.group(1).strip()
+                )
+
+        used = {
+            value
+            for value in (
+                school,
+                degree,
+                field,
+                location,
+                date_line,
+            )
+            if value
+        }
+        details = [
+            line
+            for line in clean
+            if line not in used
+            and not _looks_like_date_line(line)
+        ]
 
         output.append(
             {
                 "id": (
                     f"imported-edu-{index + 1}"
                 ),
-                "school": clean[0],
-                "degree": (
-                    clean[1]
-                    if len(clean) > 1
-                    else ""
-                ),
-                "field": "",
-                "location": "",
-                "start_date": "",
-                "end_date": "",
+                "school": school,
+                "degree": degree,
+                "field": field,
+                "location": location,
+                "start_date": start_date,
+                "end_date": end_date,
                 "details": " ".join(
-                    clean[2:]
+                    details
                 ),
             }
         )
 
     return output
-
 
 def _parse_import_projects(lines):
     blocks = _blocks_from_lines(lines)
@@ -3221,39 +3695,68 @@ def _parse_import_projects(lines):
         blocks[:20]
     ):
         clean = [
-            line
-            for line in block
-            if line
+            _strip_import_label(line)
+            for line in _expand_import_lines(block)
+            if str(line or "").strip()
         ]
 
         if not clean:
             continue
+
+        url = next(
+            (
+                item
+                for item in clean
+                if re.search(
+                    r"(?:https?://|www\.)",
+                    item,
+                    re.IGNORECASE,
+                )
+            ),
+            "",
+        )
+        bullets = _import_bullets(clean)
+        non_bullets = [
+            line
+            for line in clean
+            if line != url
+            and not re.match(
+                r"^[•·▪◦*-]\s+",
+                line,
+            )
+        ]
+
+        name = (
+            non_bullets[0]
+            if non_bullets
+            else "Imported project"
+        )
+        role = next(
+            (
+                item
+                for item in non_bullets[1:]
+                if _looks_like_job_title(item)
+            ),
+            "",
+        )
+        description_parts = [
+            item
+            for item in non_bullets[1:]
+            if item != role
+        ]
 
         output.append(
             {
                 "id": (
                     f"imported-project-{index + 1}"
                 ),
-                "name": clean[0],
-                "role": "",
-                "url": next(
-                    (
-                        item
-                        for item in clean
-                        if re.search(
-                            r"(?:https?://|www\.)",
-                            item,
-                            re.IGNORECASE,
-                        )
-                    ),
-                    "",
-                ),
+                "name": name,
+                "role": role,
+                "url": url,
                 "description": " ".join(
-                    clean[1:]
+                    description_parts
                 ),
-                "bullets": _import_bullets(
-                    clean
-                ),
+                "bullets": bullets,
                 "technologies": [],
             }
         )
@@ -3262,29 +3765,72 @@ def _parse_import_projects(lines):
 
 
 def _parse_import_certifications(lines):
+    blocks = _blocks_from_lines(lines)
     output = []
 
-    for index, line in enumerate(
-        [
-            item
-            for item in lines
-            if item
-        ][:40]
+    for index, block in enumerate(
+        blocks[:30]
     ):
+        clean = [
+            _strip_import_label(line)
+            for line in _expand_import_lines(block)
+            if str(line or "").strip()
+        ]
+
+        if not clean:
+            continue
+
+        url = next(
+            (
+                item
+                for item in clean
+                if re.search(
+                    r"(?:https?://|www\.)",
+                    item,
+                    re.IGNORECASE,
+                )
+            ),
+            "",
+        )
+        date = next(
+            (
+                item
+                for item in clean
+                if _looks_like_date_line(item)
+            ),
+            "",
+        )
+
+        remaining = [
+            item
+            for item in clean
+            if item not in {url, date}
+        ]
+
+        name = (
+            remaining[0]
+            if remaining
+            else clean[0]
+        )
+        issuer = (
+            remaining[1]
+            if len(remaining) > 1
+            else ""
+        )
+
         output.append(
             {
                 "id": (
                     f"imported-cert-{index + 1}"
                 ),
-                "name": line,
-                "issuer": "",
-                "date": "",
-                "url": "",
+                "name": name,
+                "issuer": issuer,
+                "date": date,
+                "url": url,
             }
         )
 
     return output
-
 
 def _parse_import_languages(lines):
     output = []
@@ -3337,30 +3883,6 @@ def _resume_from_imported_text(
             [],
         )
     )
-
-    if not summary:
-        header_candidates = [
-            line
-            for line in sections.get(
-                "header",
-                [],
-            )
-            if line
-            and line
-            not in {
-                profile.get("full_name"),
-                profile.get("headline"),
-            }
-        ]
-
-        descriptive = [
-            line
-            for line in header_candidates
-            if len(line) >= 70
-        ]
-
-        if descriptive:
-            summary = descriptive[0]
 
     stem = re.sub(
         r"\.(pdf|docx|txt|md)$",
