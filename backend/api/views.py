@@ -3453,7 +3453,6 @@ DASHBOARD_WIDGET_IDS = [
     "income_by_platform",
     "platform_mix",
     "recent_earnings",
-    "goals",
 ]
 
 
