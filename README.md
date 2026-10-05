@@ -4,207 +4,187 @@
 
 # Revnivo
 
-**A full-stack workspace for income tracking, AI job discovery, application management, and career tools.**
+**Income tracking, job discovery, application management, and career tools in one workspace.**
 
-[![Security checks](https://github.com/Shehab1001/Revnivo/actions/workflows/security.yml/badge.svg?branch=V1.1)](https://github.com/Shehab1001/Revnivo/actions/workflows/security.yml)
+[![Security checks](https://github.com/Shehab1001/Revnivo/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/Shehab1001/Revnivo/actions/workflows/security.yml)
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)
 ![Django](https://img.shields.io/badge/Django-5.2-092E20?logo=django&logoColor=white)
 ![MongoDB](https://img.shields.io/badge/MongoDB-PyMongo-47A248?logo=mongodb&logoColor=white)
 ![Vite](https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white)
+![Vercel](https://img.shields.io/badge/Frontend-Vercel-000000?logo=vercel)
+![Railway](https://img.shields.io/badge/Backend-Railway-0B0D0E?logo=railway)
 
 </div>
 
-> **Active development branch:** `V1.1`  
-> The default `main` branch is kept as the stable branch. The feature set described below reflects the current `V1.1` development branch.
+## Overview
+
+Revnivo is a full-stack productivity platform for freelancers, remote workers, AI-training contributors, and professionals who manage income and career activity across multiple platforms.
+
+The current production branch is **`main`**.
+
+Production architecture:
+
+```text
+Browser
+  │
+  ▼
+Vercel — React / Vite frontend
+  │
+  │ same-origin API proxy
+  ▼
+Railway — Django REST API
+  │
+  ├── MongoDB Atlas
+  └── Cloudinary
+```
+
+Production frontend:
+
+```text
+https://revnivo.vercel.app
+```
+
+Production backend:
+
+```text
+https://revnivo-production.up.railway.app
+```
 
 ---
 
-## Overview
+## Main Features
 
-Revnivo is a full-stack productivity platform that combines personal revenue tracking with a career workflow for people working across online platforms, freelance marketplaces, AI-training platforms, and remote opportunities.
+### Dashboard
 
-The project started as an income dashboard and has grown into a broader workspace with earnings analytics, platform management, job aggregation, application tracking, resume tooling, private notes, support chat, subscriptions, and administrative controls.
+- Income overview cards
+- Multi-currency display
+- Platform and date filters
+- Hide/unhide sensitive financial data
+- Customizable widget order and visibility
+- Sales-performance chart
+- Income-by-platform chart
+- Platform mix
+- Recent earnings
+- Monthly and yearly income goals
 
-## Highlights
+For new accounts, the default dashboard layout places the amount cards first, charts directly below them, recent earnings after the charts, and **Income Goals at the bottom**.
 
-### Income & Platform Management
+### Earnings
 
-- Multi-platform earnings tracking
-- Dashboard cards and configurable layouts
-- MTD / YTD style reporting and period filters
-- Currency-aware earnings views
-- Platform status management
-- Material price / revenue-style trend visualizations
-- CSV import and export support
-- Income goals and dashboard preferences
+Earnings use a simplified **Amount** model.
+
+The Add Income form includes:
+
+- Platform
+- Amount
+- Currency
+- Payment status
+- Date earned
+- Expected payment date for pending income
+- Category
+- Description
+
+The current UI no longer asks users for separate gross amount, platform fee, or payment fee values.
+
+CSV export uses an `Amount` column. CSV import remains backward-compatible with older files that used `Gross amount`.
+
+### Platforms
+
+- Add and manage income platforms
+- Default currency
+- Platform status
+- Logos
+- Ordering and archival
 
 ### Jobs Hub
 
-The Jobs workspace combines public opportunities from multiple AI-training, expert, and remote-work platforms.
+The Jobs workspace aggregates and organizes opportunities from multiple remote-work, AI-training, and expert platforms.
 
-Current integrations include sources such as:
+Features include:
 
-- AlignList
-- Alignerr
-- Mercor
-- Turing
-- micro1
-- Outlier
-- AfterQuery Experts
-- AfterQuery Careers
-- DataAnnotation
-- Mindrift
-- CrowdGen by Appen
-- TELUS Digital AI
-- Stellar AI
-- OneForma
-- Prolific
-- LXT
-
-The Jobs UI includes:
-
-- Search
-- Platform filtering
-- Category filtering
+- Search and filtering
 - Remote-only filtering
+- Categories
 - Sorting
 - Pagination
 - Source status indicators
-- Platform logos
-- Progressive background refresh
-- Direct tracking of a job into the Application Tracker
+- Platform branding
+- Job tracking into the Application Tracker
 
-> Job availability and counts are dynamic because Revnivo reads public listings from external sources. A source may temporarily expose fewer listings, require authentication, or change its public interface.
+Public integrations may change when external sites change their APIs, pages, or access policies.
 
 ### Application Tracker
 
-Applications are managed as a career CRM directly under the Jobs workspace.
-
-Pipeline stages:
+Career CRM with:
 
 ```text
 Saved → Applied → Screening → Interview → Offer → Rejected
 ```
 
-Features include:
+Includes:
 
-- Kanban board
-- Drag-and-drop stage changes
-- Application priority
-- Recruiter details
-- Salary / rate tracking
+- Kanban workflow
+- Drag-and-drop stages
+- Priority
+- Recruiter information
+- Compensation
 - Deadlines
-- Interview dates
-- Tags and notes
-- Archive and restore workflows
-- Activity timeline
-- Application-level tasks
-- Follow-up reminders
 - Interview rounds
-- Private application documents
-- Career analytics
-- Upcoming agenda
-- Response and offer metrics
+- Tags
+- Notes
+- Tasks
+- Follow-up reminders
+- Documents
+- Timeline
+- Analytics
+- Archive / restore
 
 ### Resume Studio
 
-Resume Studio is built into the Jobs section and supports multiple career documents per user.
-
-#### Resume Builder
-
 - Multiple resumes
-- Modern, Classic, Compact, and Minimal layouts
-- Contact and headline editor
-- Professional summary
-- Experience
-- Education
-- Skills
-- Projects
-- Certifications
-- Languages
-- Section ordering
+- Multiple templates
+- PDF, DOCX, and TXT import
+- Editable resume sections
 - Live preview
-- Browser Print / Save as PDF
+- Print / Save as PDF
 - Resume duplication
-- Version snapshots
+- Version history
 - Version restore
+- ATS readiness analysis
+- Job-description matching
+- Resume-based job recommendations
 
-#### CV Import
-
-Existing CVs can be imported from:
-
-- PDF
-- DOCX
-- TXT
-
-Revnivo extracts text and attempts to convert recognized sections into editable Resume Studio fields.
-
-Text-based PDFs are supported. Scanned image-only PDFs currently need to be converted to a text-based PDF or DOCX first.
-
-#### ATS Readiness & Job Match
-
-Resume Studio includes two separate analyses:
-
-**ATS Readiness** checks general resume structure and content completeness, including contact information, summary, skills, experience, education, parseability, and measurable results.
-
-**Job-specific ATS Match** compares the selected resume with a supplied job description and reports:
-
-- Match percentage
-- Keyword coverage
-- Multi-word phrase coverage
-- Missing keywords
-- Missing phrases
-- Resume completeness
-- Improvement recommendations
-
-These scores are heuristic analysis tools. They are **not** predictions of an employer's ATS score, interview decision, or hiring outcome.
-
-#### Smart Job Recommendations
-
-A resume can also be compared against the jobs currently loaded in Revnivo.
-
-The matching engine uses resume/job keyword and skill overlap to surface potentially relevant roles and displays:
-
-- Relevance score
-- Matching skills
-- Matching keywords
-- Company / platform
-- Compensation when available
-- Location
-- Original job link
+ATS and relevance scores are heuristic decision-support tools and are not employer-side ATS scores or hiring predictions.
 
 ### Notes
 
-- Notion-style personal notes
-- Rich content workflow
+- Personal notes
 - Search
 - Attachments
-- Image and document support
-- Private attachment storage
+- Images and documents
+- Private file delivery
 - RTL-friendly content
 
 ### Support Chat
 
-- User ↔ support conversations
-- Admin ↔ admin direct messages
-- Private per-admin conversations
-- Image attachments
-- Voice recording
-- Online presence
-- Last-message previews
-- Delete-for-me / delete-for-everyone behavior
-- Real user avatars for staff-to-staff conversations
-- Branded Revnivo Support identity for end users
+- User ↔ support chat
+- Admin ↔ admin conversations
+- Images
+- Voice messages
+- Presence
+- Conversation previews
+- User avatars
+- Branded support identity
 
 ### Payments & Administration
 
 - Subscription plans
 - Coupons
 - Payment methods
-- Paymob Unified Checkout integration
-- Admin user management
+- Paymob integration
+- User administration
 - Subscription administration
-- Notification system
+- Notifications
 - Role-aware navigation
 
 ---
@@ -214,24 +194,22 @@ The matching engine uses resume/job keyword and skill overlap to surface potenti
 | Layer | Technology |
 | --- | --- |
 | Frontend | React 18 |
-| Build Tool | Vite 7 |
+| Build | Vite 7 |
 | UI | HeroUI |
 | Styling | Tailwind CSS 4 |
 | Routing | React Router |
 | Charts | Recharts |
-| Icons | Lucide React |
-| HTTP Client | Axios |
+| HTTP | Axios |
 | Backend | Django 5.2 |
 | REST API | Django REST Framework |
-| Database | MongoDB via PyMongo |
-| Authentication | JWT session cookie |
+| Database | MongoDB / PyMongo |
+| Authentication | HttpOnly JWT session cookies |
 | OAuth | Google Sign-In |
-| Media | Cloudinary / local private media |
-| PDF Parsing | pypdf |
-| DOCX Parsing | python-docx |
-| HTML Parsing | Beautiful Soup |
+| Production frontend | Vercel |
+| Production backend | Railway |
+| Media | Cloudinary |
 | Payments | Paymob |
-| Production Server | Gunicorn |
+| Production server | Gunicorn |
 
 ---
 
@@ -239,20 +217,25 @@ The matching engine uses resume/job keyword and skill overlap to surface potenti
 
 ```text
 Revnivo/
+├── api/
+│   └── proxy.mjs
 ├── backend/
 │   ├── api/
 │   │   ├── applications.py
 │   │   ├── application_workspace.py
+│   │   ├── authentication.py
 │   │   ├── jobs.py
 │   │   ├── resumes.py
-│   │   ├── views.py
-│   │   └── urls.py
-│   ├── backend/
+│   │   ├── serializers.py
+│   │   ├── urls.py
+│   │   └── views.py
+│   ├── incomeflow/
 │   ├── manage.py
 │   ├── requirements.txt
 │   └── .env.example
-│
 ├── frontend/
+│   ├── api/
+│   │   └── proxy.mjs
 │   ├── public/
 │   ├── src/
 │   │   ├── components/
@@ -261,53 +244,48 @@ Revnivo/
 │   │   ├── services/
 │   │   └── utils/
 │   ├── package.json
+│   ├── vite.config.js
 │   └── .env.example
-│
-└── .github/
-    └── workflows/
-        └── security.yml
+├── .github/
+│   └── workflows/
+│       └── security.yml
+├── docker-compose.yml
+└── README.md
 ```
 
 ---
 
 ## Local Development
 
-### Prerequisites
+### Requirements
 
-Install:
-
-- Python 3.11+ recommended
+- Python 3.10+
 - Node.js 20+
 - npm
-- MongoDB locally **or** a MongoDB Atlas connection string
+- MongoDB locally or MongoDB Atlas
 - Git
 
-Cloudinary is optional for local development. When it is not configured, Revnivo can use local media storage.
-
-### 1. Clone the repository
+### Clone
 
 ```bash
 git clone https://github.com/Shehab1001/Revnivo.git
 cd Revnivo
-git checkout V1.1
 ```
 
-### 2. Backend setup
+### Backend
 
 ```bash
 cd backend
 python -m venv .venv
 ```
 
-Activate the virtual environment.
-
-**Windows**
+Windows:
 
 ```bat
 .venv\Scripts\activate
 ```
 
-**macOS / Linux**
+macOS / Linux:
 
 ```bash
 source .venv/bin/activate
@@ -322,19 +300,15 @@ python -m pip install -r requirements.txt
 
 Create the environment file:
 
-**Windows**
-
-```bat
-copy .env.example .env
-```
-
-**macOS / Linux**
-
 ```bash
 cp .env.example .env
 ```
 
-At minimum, configure MongoDB and replace the example secrets in `.env`.
+On Windows:
+
+```bat
+copy .env.example .env
+```
 
 Start Django:
 
@@ -342,32 +316,11 @@ Start Django:
 python manage.py runserver 127.0.0.1:8000
 ```
 
-### 3. Frontend setup
-
-Open another terminal:
+### Frontend
 
 ```bash
 cd frontend
 npm install
-```
-
-Create the frontend environment file:
-
-**Windows**
-
-```bat
-copy .env.example .env
-```
-
-**macOS / Linux**
-
-```bash
-cp .env.example .env
-```
-
-Start Vite:
-
-```bash
 npm run dev
 ```
 
@@ -383,11 +336,60 @@ Local API:
 http://127.0.0.1:8000/api
 ```
 
-The frontend development server proxies `/api` requests to the local Django backend.
+Vite proxies local `/api` traffic to Django.
 
 ---
 
-## Environment Configuration
+## Production Deployment
+
+### Vercel
+
+The frontend is deployed on Vercel from the GitHub repository.
+
+Required frontend environment variable:
+
+```env
+VITE_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+```
+
+Keep `VITE_API_URL` blank when using the same-origin proxy.
+
+The production frontend routes browser API requests through the Vercel API proxy before forwarding them to Railway. This keeps authentication traffic same-origin from the browser's perspective.
+
+### Railway
+
+Recommended production values include:
+
+```env
+DJANGO_DEBUG=false
+FRONTEND_ORIGIN=https://revnivo.vercel.app
+CORS_ALLOWED_ORIGINS=https://revnivo.vercel.app
+CSRF_TRUSTED_ORIGINS=https://revnivo.vercel.app
+AUTH_COOKIE_SECURE=true
+GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+PAYMOB_REDIRECT_URL=https://revnivo.vercel.app/payments?provider=paymob
+```
+
+Keep MongoDB, Cloudinary, JWT/Django secrets, SMTP credentials, and payment credentials in deployment environment variables. Never commit real secrets.
+
+### Google Sign-In
+
+Google Cloud should include:
+
+```text
+https://revnivo.vercel.app
+```
+
+as an Authorized JavaScript Origin.
+
+Use the same Google OAuth client ID in:
+
+- Vercel: `VITE_GOOGLE_CLIENT_ID`
+- Railway: `GOOGLE_CLIENT_ID`
+
+---
+
+## Environment Variables
 
 ### Backend
 
@@ -396,38 +398,31 @@ Important variables are documented in `backend/.env.example`.
 | Variable | Purpose |
 | --- | --- |
 | `DJANGO_SECRET_KEY` | Django cryptographic secret |
-| `JWT_SECRET_KEY` | JWT signing secret |
-| `MONGODB_URI` | MongoDB / Atlas connection |
+| `JWT_SECRET_KEY` | JWT signing key |
+| `MONGODB_URI` | MongoDB connection |
 | `MONGODB_DB` | Database name |
 | `GOOGLE_CLIENT_ID` | Google authentication |
-| `SUPERADMIN_EMAIL` | Explicit superadmin account |
-| `CLOUDINARY_URL` | Cloudinary media configuration |
-| `CLOUDINARY_FOLDER` | Cloudinary root folder |
-| `MICRO1_API_KEY` | Optional expanded micro1 job sync |
-| `EMAIL_HOST_*` | SMTP configuration |
-| `PAYMOB_*` | Paymob payment configuration |
-| `FRONTEND_ORIGIN` | Trusted frontend origin |
+| `SUPERADMIN_EMAIL` | Superadmin account |
+| `CLOUDINARY_URL` | Cloudinary configuration |
+| `MICRO1_API_KEY` | Optional micro1 job integration |
+| `EMAIL_HOST_*` | SMTP settings |
+| `PAYMOB_*` | Paymob settings |
+| `FRONTEND_ORIGIN` | Frontend origin |
+| `CORS_ALLOWED_ORIGINS` | CORS origins |
 | `CSRF_TRUSTED_ORIGINS` | CSRF trusted origins |
-| `CORS_ALLOWED_ORIGINS` | Allowed CORS origins |
-
-Never commit real credentials or API secrets.
 
 ### Frontend
 
-`frontend/.env.example` contains:
+`frontend/.env.example` documents:
 
 ```env
 VITE_API_URL=
 VITE_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 ```
 
-For local development, leaving `VITE_API_URL` empty uses the Vite `/api` proxy.
-
 ---
 
 ## Main API Areas
-
-The backend exposes REST endpoints for the major product areas, including:
 
 ```text
 /api/auth/*
@@ -445,82 +440,82 @@ The backend exposes REST endpoints for the major product areas, including:
 /api/admin/*
 ```
 
-Resume and application-specific endpoints also cover versions, ATS analysis, job matching, tasks, interviews, documents, analytics, and materials linking.
-
 ---
 
 ## Security
 
-The project includes a GitHub Actions security workflow covering both frontend and backend.
+Current protections include:
 
-Current CI checks include:
-
-- `npm audit --audit-level=high`
-- Production frontend build
-- Python dependency installation
-- `pip-audit`
-- Django `check --deploy`
-
-Additional application protections include:
-
-- HttpOnly authentication cookies
-- Configurable Secure and SameSite cookie behavior
-- CSRF / CORS configuration
+- HttpOnly session cookies
+- CSRF protection
+- CORS controls
+- Secure-cookie support
 - API throttling
-- Private document and attachment delivery
-- Cloudinary authenticated assets for protected files
 - Role-aware backend authorization
-- Production-only security settings via environment variables
+- Private attachment/document delivery
+- Cloudinary support
+- Production Django security settings
+- GitHub Actions security workflow
+- `npm audit`
+- `pip-audit`
+- Django deployment checks
 
 ---
 
-## Media Storage
+## Testing & Validation
 
-Local development can use:
+Before promoting a production change, verify:
 
-```text
-backend/media/
-backend/private_media/
+- Register
+- Email/password login
+- Google Sign-In
+- Logout
+- Session persistence after refresh
+- Dashboard
+- Dashboard customization
+- Add/edit/delete income
+- Platform management
+- CSV import/export
+- Jobs
+- Application Tracker
+- Resume import
+- ATS analysis
+- Notes and attachments
+- Support Chat
+- Password reset
+- Payments when enabled
+
+Frontend build:
+
+```bash
+cd frontend
+npm run build
 ```
 
-Cloudinary can be enabled through `CLOUDINARY_URL`.
+Backend checks:
 
-Revnivo separates public assets from authenticated/private uploads. Application documents, notes attachments, and protected chat media use private delivery paths.
-
----
-
-## Development Notes
-
-- The active development branch is `V1.1`.
-- The frontend is currently configured for localhost API development through the Vite proxy.
-- Public job integrations can change when third-party websites update their HTML, public APIs, or access policies.
-- Resume import intentionally avoids OCR. Image-only scanned PDFs should be converted to a text-based document before import.
-- Generated ATS/relevance scores are decision-support signals only and should not be treated as employer-side scores.
+```bash
+cd backend
+python manage.py check
+```
 
 ---
 
-## Roadmap
+## Notes
 
-Areas planned or suitable for continued development include:
-
-- More robust CV parsing
-- Additional resume templates
-- Enhanced job-detail extraction
-- Application reminder notifications
-- Calendar integrations
-- More career analytics
-- Expanded job-source adapters
-- Production deployment automation
+- `main` is the current production branch.
+- Local development uses the Vite proxy to Django.
+- Production uses Vercel for the frontend and Railway for the backend.
+- Public job sources can change without notice.
+- Image-only scanned resumes are not OCR'd automatically.
+- ATS and job-match scores are heuristic tools, not hiring guarantees.
 
 ---
 
 ## Repository
 
-**Revnivo** is under active development.
+GitHub:
 
-For the newest implementation, use:
-
-```bash
-git checkout V1.1
+```text
+https://github.com/Shehab1001/Revnivo
 ```
-
