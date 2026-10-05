@@ -873,7 +873,6 @@ export default function ResumeStudio() {
           start_date: '',
           end_date: '',
           current: false,
-          summary: '',
           bullets: [],
         },
       ],
@@ -1712,20 +1711,6 @@ export default function ResumeStudio() {
                             placeholder="Present"
                           />
                         </div>
-
-                        <Textarea
-                          className="mt-3"
-                          label="Role summary"
-                          minRows={2}
-                          value={item.summary}
-                          onValueChange={(value) =>
-                            updateListItem(
-                              'experience',
-                              index,
-                              { summary: value }
-                            )
-                          }
-                        />
 
                         <Textarea
                           className="mt-3"
