@@ -164,7 +164,7 @@ export default function Landing() {
                   endContent={<ArrowRight size={15} />}
                   className="font-semibold"
                 >
-                  Get started
+                  Sign up
                 </Button>
               </>
             )}
