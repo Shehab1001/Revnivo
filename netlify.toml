@@ -7,11 +7,11 @@
   NODE_VERSION = "22"
 
 # Keep API requests same-origin in the browser. Netlify proxies them to
-# the existing Django backend on Render, which keeps Revnivo's cookie-based
+# the Django backend on Railway, which keeps Revnivo's cookie-based
 # authentication and CSRF flow reliable without third-party cookies.
 [[redirects]]
   from = "/api/*"
-  to = "https://revnivo.onrender.com/api/:splat"
+  to = "https://revnivo-production.up.railway.app/api/:splat"
   status = 200
   force = true
 
@@ -19,7 +19,7 @@
 # the backend. Production uploads may be served directly by Cloudinary.
 [[redirects]]
   from = "/media/*"
-  to = "https://revnivo.onrender.com/media/:splat"
+  to = "https://revnivo-production.up.railway.app/media/:splat"
   status = 200
   force = true
 
