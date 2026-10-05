@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
+import { getApiErrorMessage } from '../services/api'
 
 const GOOGLE_SCRIPT_ID = 'google-identity-services'
 const GOOGLE_SCRIPT_SRC = 'https://accounts.google.com/gsi/client'
@@ -69,29 +70,19 @@ export default function GoogleAuthButton() {
         await loginWithGoogle(credential)
         navigate('/dashboard')
       } catch (err) {
-        const backendDetail =
-          err.response?.data?.detail
-
-        if (backendDetail) {
-          setError(backendDetail)
-        } else if (!err.response) {
+        if (!err.response) {
           setError(
-            'Cannot reach the Revnivo backend. Make sure Django is running on 127.0.0.1:8000.'
+            'Cannot reach the Revnivo backend. Please try again shortly.'
           )
         } else {
           const status = err.response?.status
-          const statusText = err.response?.statusText
-          const suffix = [
-            status ? `HTTP ${status}` : '',
-            statusText || '',
-          ]
-            .filter(Boolean)
-            .join(' ')
-
           setError(
-            suffix
-              ? `Google sign-in request failed (${suffix}).`
-              : 'Google sign-in request failed.'
+            getApiErrorMessage(
+              err,
+              status
+                ? `Google sign-in request failed (HTTP ${status}).`
+                : 'Google sign-in request failed.'
+            )
           )
         }
       } finally {
