@@ -29,6 +29,7 @@ if not DEBUG and len(SECRET_KEY) < 32:
     raise RuntimeError("DJANGO_SECRET_KEY must be at least 32 characters in production.")
 
 RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
+RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
 
 ALLOWED_HOSTS = (
     ["localhost", "127.0.0.1"]
@@ -36,8 +37,12 @@ ALLOWED_HOSTS = (
     else env_list("ALLOWED_HOSTS")
 )
 
-if RENDER_EXTERNAL_HOSTNAME and RENDER_EXTERNAL_HOSTNAME not in ALLOWED_HOSTS:
-    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
+for platform_hostname in (
+    RENDER_EXTERNAL_HOSTNAME,
+    RAILWAY_PUBLIC_DOMAIN,
+):
+    if platform_hostname and platform_hostname not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(platform_hostname)
 
 if not DEBUG and not ALLOWED_HOSTS:
     raise RuntimeError("ALLOWED_HOSTS must be configured in production.")
