@@ -2,7 +2,6 @@
 
 <img src="frontend/public/logo.svg" alt="Revnivo" width="220" />
 
-# Revnivo
 
 **Income tracking, job discovery, application management, and career tools in one workspace.**
 
@@ -175,17 +174,6 @@ ATS and relevance scores are heuristic decision-support tools and are not employ
 - Conversation previews
 - User avatars
 - Branded support identity
-
-### Payments & Administration
-
-- Subscription plans
-- Coupons
-- Payment methods
-- Paymob integration
-- User administration
-- Subscription administration
-- Notifications
-- Role-aware navigation
 
 ---
 
