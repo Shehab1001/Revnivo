@@ -1,60 +1,270 @@
-import { BarChart3, CircleDollarSign, FileText, LogOut, Menu, Moon, PanelsTopLeft, Settings as SettingsIcon, Sun, WalletCards, X } from 'lucide-react'
-import { useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { Bell, BarChart3, BriefcaseBusiness, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, CreditCard, DollarSign, FileText, FileUser, LogOut, Menu, MessageCircle, Moon, PanelLeft, PanelsTopLeft, Settings as SettingsIcon, Sun, Trash2, Users, WalletCards } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
+import api from '../services/api'
+import { formatDateTime } from '../utils/format'
+import ProfileAvatar from './ProfileAvatar'
 
-const nav = [
-  { to: '/', label: 'Dashboard', icon: BarChart3 },
+const baseNav = [
   { to: '/platforms', label: 'Platforms', icon: PanelsTopLeft },
   { to: '/earnings', label: 'Earnings', icon: WalletCards },
   { to: '/notes', label: 'Notes', icon: FileText },
-  { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ]
+
+const jobsNav = [
+  { to: '/jobs', label: 'Job Board', icon: BriefcaseBusiness, end: true },
+  { to: '/jobs/applications', label: 'Applications', icon: ClipboardList },
+  { to: '/jobs/resume-studio', label: 'Resume Studio', icon: FileUser },
+]
+
+function formatNotificationDateTime(value) {
+  if (!value) return ''
+
+  return formatDateTime(value, 'en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
 
 export default function AppShell() {
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
+  const navigate = useNavigate()
+  const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [dashboardOpen, setDashboardOpen] = useState(true)
+  const [jobsOpen, setJobsOpen] = useState(true)
+  const [notifications, setNotifications] = useState([])
+  const [noticeOpen, setNoticeOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const noticeRef = useRef(null)
+  const profileRef = useRef(null)
+  const isAdmin = user?.role === 'admin' || user?.email?.toLowerCase() === 'dev.shehabsaid@gmail.com'
+
+  useEffect(() => {
+    const loadNotifications = () => api.get('/notifications/').then(({ data }) => setNotifications(data)).catch(() => { })
+    loadNotifications()
+    const timer = window.setInterval(loadNotifications, 5000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    const sortTable = (event) => {
+      const header = event.target.closest('th')
+      const table = header?.closest('table')
+      if (!header || !table || header.cellIndex === table.querySelectorAll('thead th').length - 1) return
+      const tbody = table.tBodies[0]
+      if (!tbody) return
+      const direction = header.dataset.sortDirection === 'desc' ? 'asc' : 'desc'
+      table.querySelectorAll('thead th').forEach((cell) => { delete cell.dataset.sortDirection })
+      header.dataset.sortDirection = direction
+      const rows = [...tbody.rows]
+      rows.sort((left, right) => {
+        const a = left.cells[header.cellIndex]?.textContent.trim() || ''
+        const b = right.cells[header.cellIndex]?.textContent.trim() || ''
+        const aNumber = Number(a.replace(/[^0-9.-]/g, ''))
+        const bNumber = Number(b.replace(/[^0-9.-]/g, ''))
+        const numeric = a !== '' && b !== '' && Number.isFinite(aNumber) && Number.isFinite(bNumber)
+        const result = numeric ? aNumber - bNumber : a.localeCompare(b, undefined, { sensitivity: 'base' })
+        return direction === 'asc' ? result : -result
+      })
+      rows.forEach((row) => tbody.appendChild(row))
+    }
+    document.addEventListener('click', sortTable)
+    return () => document.removeEventListener('click', sortTable)
+  }, [])
+
+  useEffect(() => {
+    const heartbeat = () => api.get('/chat-presence/').catch(() => { })
+    heartbeat()
+    const timer = window.setInterval(heartbeat, 30000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    const closeNotifications = (event) => {
+      if (noticeRef.current && !noticeRef.current.contains(event.target)) {
+        setNoticeOpen(false)
+      }
+      if (profileRef.current && !profileRef.current.contains(event.target)) {
+        setProfileOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', closeNotifications)
+    return () => document.removeEventListener('mousedown', closeNotifications)
+  }, [notifications])
+
+  useEffect(() => {
+    const markChatReadLocally = (event) => {
+      const chatUserId = String(event.detail?.chatUserId || '')
+      if (!chatUserId) return
+      setNotifications((items) => items.map((item) => String(item.chat_user_id || '') === chatUserId ? { ...item, read: true } : item))
+    }
+    window.addEventListener('chat-read', markChatReadLocally)
+    return () => window.removeEventListener('chat-read', markChatReadLocally)
+  }, [])
+
+  useEffect(() => {
+    const sortTable = (event) => {
+      const header = event.target.closest('th')
+      const table = header?.closest('table')
+      if (!header || !table || header.cellIndex === table.tHead.rows[0].cells.length - 1) return
+      const body = table.tBodies[0]
+      if (!body) return
+      const direction = header.dataset.sortDirection === 'desc' ? 'asc' : 'desc'
+      table.querySelectorAll('thead th').forEach((cell) => delete cell.dataset.sortDirection)
+      header.dataset.sortDirection = direction
+      const rows = [...body.rows]
+      rows.sort((a, b) => {
+        const left = a.cells[header.cellIndex]?.textContent.trim() || ''
+        const right = b.cells[header.cellIndex]?.textContent.trim() || ''
+        const leftNumber = Number(left.replace(/[^0-9.-]/g, ''))
+        const rightNumber = Number(right.replace(/[^0-9.-]/g, ''))
+        const comparison = left && right && Number.isFinite(leftNumber) && Number.isFinite(rightNumber) ? leftNumber - rightNumber : left.localeCompare(right, undefined, { sensitivity: 'base' })
+        return direction === 'asc' ? comparison : -comparison
+      })
+      rows.forEach((row) => body.appendChild(row))
+    }
+    document.addEventListener('click', sortTable)
+    return () => document.removeEventListener('click', sortTable)
+  }, [])
+
+  const linkClass = ({ isActive }) => `group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${isActive ? 'bg-[#1688ff]/12 text-[#1688ff] shadow-[inset_3px_0_0_#1688ff] dark:bg-[#1688ff]/15 dark:text-[#65b5ff]' : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-950 dark:text-[#9da0a8] dark:hover:bg-white/6 dark:hover:text-white'}`
+  const unread = notifications.filter((notification) => !notification.read).length
+  const unreadChat = notifications.filter((notification) => notification.kind === 'chat' && !notification.read).length
+  const markRead = async (notification) => { await api.patch('/notifications/', { id: notification.id }).catch(() => { }); setNotifications(notifications.map((item) => item.id === notification.id ? { ...item, read: true } : item)) }
+  const clearNotifications = async () => {
+    try {
+      await api.delete('/notifications/')
+      setNotifications([])
+    } catch {}
+  }
+  const openNotification = async (notification) => {
+    await markRead(notification)
+    setNoticeOpen(false)
+
+    if (notification.kind === 'chat') {
+      const target = notification.chat_user_id
+        ? `/support-chat?user=${encodeURIComponent(notification.chat_user_id)}`
+        : '/support-chat'
+      navigate(target)
+    } else if (notification.kind === 'user') {
+      navigate('/admin/users')
+    } else if (
+      notification.kind === 'subscription' &&
+      isAdmin
+    ) {
+      navigate('/admin/subscriptions')
+    }
+  }
 
   const Sidebar = () => (
-    <aside className="flex h-full w-64 flex-col border-r border-slate-200 bg-[#fffdf5] p-4 dark:border-[#45484d] dark:bg-[#333538]">
-      <div className="mb-8 flex items-center gap-3 px-2 py-2">
-        <div className="grid h-10 w-10 place-items-center rounded-xl bg-[#23C55E] text-white"><CircleDollarSign size={22}/></div>
-        <div><div className="font-extrabold tracking-tight text-slate-900 dark:text-white">IncomeFlow</div><div className="text-xs text-slate-500">Earnings dashboard</div></div>
+    <aside className={`${collapsed ? 'w-19' : 'w-64'} flex h-full min-h-0 flex-col overflow-hidden border-r border-default-200 bg-content1/90 p-3 shadow-[8px_0_30px_rgb(15_23_42_/_.03)] backdrop-blur-xl transition-all dark:border-white/8 dark:bg-[#101114]/95 dark:shadow-none`}>
+      <div className={`mb-7 flex shrink-0 items-center justify-center rounded-2xl border border-slate-200/80 bg-slate-50/80 ${collapsed ? 'p-2' : 'px-3 py-2.5'} dark:border-white/8 dark:bg-white/4`}>
+        <img src={collapsed ? '/logo-mark.svg' : '/logo.svg'} alt="Revnivo" className={`${collapsed ? 'h-10 w-10' : 'h-9 w-32'} brand-logo shrink-0 object-contain`} />
       </div>
-      <nav className="space-y-1">
-        {nav.map(({ to, label, icon: Icon }) => (
-          <NavLink key={to} to={to} end={to === '/'} onClick={() => setMobileOpen(false)} className={({ isActive }) => `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${isActive ? 'bg-[#e8f8ed] text-[#16843d] dark:bg-[#23462e] dark:text-[#7bea9d]' : 'text-slate-600 hover:bg-[#fffbea] dark:text-slate-300 dark:hover:bg-[#3b3e42]'}`}>
-            <Icon size={18}/>{label}
-          </NavLink>
-        ))}
-      </nav>
-      <div className="mt-auto border-t border-slate-200 pt-4 dark:border-slate-800">
-        <div className="mb-3 px-2">
-          <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{user?.name}</div>
-          <div className="truncate text-xs text-slate-500">{user?.email}</div>
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain pb-3 pr-1">
+        {!collapsed && <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-[#62656e]">Workspace</p>}
+        {isAdmin ? <div>
+          <button onClick={() => { setDashboardOpen(!dashboardOpen); if (collapsed) setCollapsed(false) }} className={`${linkClass({ isActive: false })} w-full ${collapsed ? 'justify-center' : ''}`} title="Dashboard"><BarChart3 size={18} />{!collapsed && <><span className="flex-1 text-left">Dashboard</span><ChevronDown size={16} className={dashboardOpen ? '' : '-rotate-90'} /></>}</button>
+          {dashboardOpen && <div className={collapsed ? 'mt-1 flex flex-col items-center gap-1' : 'ml-3 border-l border-slate-200 pl-3 dark:border-white/8'}><NavLink to="/dashboard" end className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`} title="Income"><DollarSign size={18} />{!collapsed && 'Income'}</NavLink><NavLink to="/admin/users" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`} title="Users"><Users size={18} />{!collapsed && 'Users'}</NavLink></div>}
+        </div> : <NavLink to="/dashboard" end className={linkClass}><BarChart3 size={18} />{!collapsed && 'Dashboard'}</NavLink>}
+        {baseNav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} onClick={() => setMobileOpen(false)} className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title={label}><span className="relative"><Icon size={18} />{label === 'Chat' && unreadChat > 0 && <span className="absolute -right-2 -top-2 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-0.5 text-[9px] font-bold text-white">{unreadChat}</span>}</span>{!collapsed && label}</NavLink>)}
+        <div>
+          <button
+            onClick={() => {
+              if (collapsed) setCollapsed(false)
+              setJobsOpen((open) => !open)
+            }}
+            className={`${linkClass({ isActive: false })} w-full ${collapsed ? 'justify-center' : ''}`}
+            title="Jobs"
+          >
+            <BriefcaseBusiness size={18} />
+            {!collapsed && (
+              <>
+                <span className="flex-1 text-left">Jobs</span>
+                <ChevronDown
+                  size={16}
+                  className={jobsOpen ? '' : '-rotate-90'}
+                />
+              </>
+            )}
+          </button>
+
+          {jobsOpen && (
+            <div className={collapsed ? 'mt-1 flex flex-col items-center gap-1' : 'ml-3 border-l border-slate-200 pl-3 dark:border-white/8'}>
+              {jobsNav.map(({ to, label, icon: Icon, end }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={Boolean(end)}
+                  onClick={() => setMobileOpen(false)}
+                  className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center p-2' : ''}`}
+                  title={label}
+                >
+                  <Icon size={17} />
+                  {!collapsed && label}
+                </NavLink>
+              ))}
+            </div>
+          )}
         </div>
-        <button onClick={logout} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"><LogOut size={18}/>Logout</button>
+
+
+        <NavLink
+          to="/support-chat"
+          onClick={() => setMobileOpen(false)}
+          className={({ isActive }) =>
+            `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`
+          }
+          title="Chat"
+        >
+          <span className="relative">
+            <MessageCircle size={18} />
+            {unreadChat > 0 && (
+              <span className="absolute -right-2 -top-2 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-0.5 text-[9px] font-bold text-white">
+                {unreadChat}
+              </span>
+            )}
+          </span>
+          {!collapsed && 'Chat'}
+        </NavLink>
+      </nav>
+      <div ref={profileRef} className="relative mt-auto shrink-0 border-t border-slate-200/80 bg-content1/95 pt-3 dark:border-white/8 dark:bg-[#101114]/95">
+        <button onClick={() => setProfileOpen((open) => !open)} className={`flex w-full items-center gap-2 rounded-xl p-2 text-left transition hover:bg-slate-100/80 dark:hover:bg-white/6 ${collapsed ? 'justify-center' : ''}`} aria-expanded={profileOpen} aria-label="Open account menu">
+          <ProfileAvatar user={user} className="h-9 w-9" />
+          {!collapsed && <div className="min-w-0"><div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{user?.name}</div><div className="truncate text-[11px] text-slate-500 dark:text-[#777a84]">{user?.email}</div></div>}
+        </button>
+        {profileOpen && <div className={`absolute bottom-14 z-50 w-56 rounded-xl border border-slate-200 bg-white p-1 shadow-xl dark:border-white/10 dark:bg-[#1b1c21] ${collapsed ? 'left-12' : 'left-0'}`}>
+          <NavLink to="/settings" onClick={() => setProfileOpen(false)} className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100 dark:text-[#d8d9dd] dark:hover:bg-white/8"><SettingsIcon size={16} />Settings</NavLink>
+          <button onClick={logout} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-rose-600 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-500/10"><LogOut size={16} />Log out</button>
+        </div>}
       </div>
     </aside>
   )
 
-  return (
-    <div className="min-h-screen bg-[#fffdf5] text-slate-900 dark:bg-[#292b2e] dark:text-slate-100">
-      <div className="fixed inset-y-0 left-0 hidden lg:block"><Sidebar/></div>
-      {mobileOpen && <div className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden" onClick={() => setMobileOpen(false)}><div className="h-full" onClick={(e) => e.stopPropagation()}><Sidebar/></div></div>}
-      <div className="lg:pl-64">
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-[#fffdf5]/90 px-4 backdrop-blur md:px-6 dark:border-[#45484d] dark:bg-[#333538]/90">
-          <button className="rounded-xl p-2 hover:bg-slate-100 lg:hidden dark:hover:bg-slate-900" onClick={() => setMobileOpen(true)}><Menu size={20}/></button>
-          <div className="ml-auto flex items-center gap-2">
-            <button onClick={toggleTheme} className="rounded-xl border border-slate-200 bg-white p-2.5 text-slate-600 shadow-sm hover:bg-[#fffbea] dark:border-[#555960] dark:bg-[#333538] dark:text-slate-200 dark:hover:bg-[#3b3e42]" title="Toggle theme">
-              {theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>} 
-            </button>
+  return <div className="min-h-screen bg-background text-foreground">
+    <div className={`fixed inset-y-0 left-0 z-40 hidden lg:block ${collapsed ? 'w-19' : 'w-64'}`}><Sidebar /></div>
+    {mobileOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setMobileOpen(false)}><div className="h-full w-64" onClick={(event) => event.stopPropagation()}><Sidebar /></div></div>}
+    <div className={`${collapsed ? 'lg:pl-19' : 'lg:pl-64'} transition-all`}>
+      <header className="light-header-shadow sticky top-0 z-30 flex h-16 items-center justify-between border-b border-default-200 bg-background/90 px-4 backdrop-blur md:px-6">
+        <div className="flex items-center gap-2"><button className="rounded-xl p-2 lg:hidden" onClick={() => setMobileOpen(true)} aria-label="Open menu"><Menu size={20} /></button><button className="hidden rounded-xl p-2 lg:block" onClick={() => setCollapsed(!collapsed)} title="Toggle sidebar" aria-label="Toggle sidebar"><PanelLeft size={20} /></button></div>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            <div ref={noticeRef} className="relative">
+              <button onClick={() => setNoticeOpen((open) => !open)} className="relative rounded-xl border border-default-200 bg-content1/90 p-2.5 shadow-small backdrop-blur" title="Notifications" aria-label="Notifications"><Bell size={18} />{unread > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-rose-500 px-1 text-[10px] text-white">{unread}</span>}</button>
+              {noticeOpen && <div className="absolute right-0 top-12 z-50 flex max-h-[min(70vh,32rem)] w-80 flex-col overflow-hidden rounded-xl border border-default-200 bg-content1 shadow-xl"><div className="shrink-0 border-b border-divider px-5 py-3 font-bold">Notifications</div>{notifications.length ? <><div className="min-h-0 flex-1 overflow-y-auto p-2">{notifications.map((notification) => <button key={notification.id} onClick={() => openNotification(notification)} className={`block w-full rounded-lg p-3 text-left hover:bg-default-100 ${notification.read ? '' : 'bg-primary/5'}`}><div className="text-sm font-semibold">{notification.title}</div><div className="mt-0.5 text-xs text-default-500">{notification.message}</div><time className="mt-2 block text-right text-[10px] text-default-400">{formatNotificationDateTime(notification.created_at)}</time></button>)}</div><div className="shrink-0 border-t border-divider bg-content1 p-2"><button onClick={clearNotifications} className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-danger transition-colors hover:bg-danger/10"><Trash2 size={15} />Clear notifications</button></div></> : <div className="p-3 text-sm text-default-500">No notifications.</div>}</div>}
+            </div>
+            <button onClick={toggleTheme} className="rounded-xl border border-default-200 bg-content1/90 p-2.5 shadow-small backdrop-blur" title="Toggle theme" aria-label="Toggle theme">{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
           </div>
-        </header>
-        <main className="p-4 md:p-6 lg:p-8"><Outlet/></main>
-      </div>
+        </div>
+      </header>
+      <main className="p-4 md:p-6 lg:p-8"><Outlet /></main>
     </div>
-  )
+  </div>
 }
