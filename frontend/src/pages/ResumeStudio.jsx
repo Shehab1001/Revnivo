@@ -894,7 +894,114 @@ export default function ResumeStudio() {
   }
 
   const printResume = () => {
-    window.print()
+    const resumeElement = document.getElementById(
+      'resume-print-area'
+    )
+
+    if (!resumeElement) {
+      window.print()
+      return
+    }
+
+    const printWindow = window.open(
+      '',
+      '_blank',
+      'width=900,height=1200'
+    )
+
+    if (!printWindow) {
+      window.print()
+      return
+    }
+
+    const headAssets = Array.from(
+      document.head.querySelectorAll(
+        'style, link[rel="stylesheet"]'
+      )
+    )
+      .map((node) => {
+        if (
+          node.tagName === 'LINK' &&
+          node.href
+        ) {
+          return `<link rel="stylesheet" href="${node.href}" />`
+        }
+
+        return node.outerHTML
+      })
+      .join('\n')
+
+    printWindow.document.open()
+    printWindow.document.write(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${draft?.name || 'Resume'}</title>
+    ${headAssets}
+    <style>
+      @page {
+        size: A4;
+        margin: 0;
+      }
+
+      html,
+      body {
+        width: 210mm;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: white !important;
+      }
+
+      body {
+        min-height: 0 !important;
+        overflow: visible !important;
+      }
+
+      #resume-print-area {
+        width: 210mm !important;
+        min-height: 297mm !important;
+        max-width: none !important;
+        margin: 0 !important;
+        box-shadow: none !important;
+        overflow: visible !important;
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+      }
+
+      @media print {
+        html,
+        body {
+          height: auto !important;
+          min-height: 0 !important;
+          overflow: visible !important;
+        }
+
+        #resume-print-area {
+          position: static !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    ${resumeElement.outerHTML}
+  </body>
+</html>`)
+    printWindow.document.close()
+
+    const runPrint = () => {
+      printWindow.focus()
+      printWindow.print()
+    }
+
+    if (printWindow.document.readyState === 'complete') {
+      window.setTimeout(runPrint, 150)
+    } else {
+      printWindow.addEventListener(
+        'load',
+        () => window.setTimeout(runPrint, 150),
+        { once: true }
+      )
+    }
   }
 
   if (loading) {
@@ -912,22 +1019,25 @@ export default function ResumeStudio() {
     <div className="space-y-5 text-foreground">
       <style>{`
         @media print {
-          body * {
-            visibility: hidden !important;
+          @page {
+            size: A4;
+            margin: 0;
           }
-          #resume-print-area,
-          #resume-print-area * {
-            visibility: visible !important;
+
+          html,
+          body {
+            margin: 0 !important;
+            padding: 0 !important;
           }
+
           #resume-print-area {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
             width: 210mm !important;
             min-height: 297mm !important;
             max-width: none !important;
             box-shadow: none !important;
             margin: 0 !important;
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
           }
         }
       `}</style>
