@@ -169,11 +169,11 @@ export default function AppShell() {
   }
 
   const Sidebar = () => (
-    <aside className={`${collapsed ? 'w-19' : 'w-64'} flex h-full flex-col border-r border-default-200 bg-content1/90 p-3 shadow-[8px_0_30px_rgb(15_23_42_/_.03)] backdrop-blur-xl transition-all dark:border-white/8 dark:bg-[#101114]/95 dark:shadow-none`}>
-      <div className={`mb-7 flex items-center justify-center rounded-2xl border border-slate-200/80 bg-slate-50/80 ${collapsed ? 'p-2' : 'px-3 py-2.5'} dark:border-white/8 dark:bg-white/4`}>
+    <aside className={`${collapsed ? 'w-19' : 'w-64'} flex h-full min-h-0 flex-col overflow-hidden border-r border-default-200 bg-content1/90 p-3 shadow-[8px_0_30px_rgb(15_23_42_/_.03)] backdrop-blur-xl transition-all dark:border-white/8 dark:bg-[#101114]/95 dark:shadow-none`}>
+      <div className={`mb-7 flex shrink-0 items-center justify-center rounded-2xl border border-slate-200/80 bg-slate-50/80 ${collapsed ? 'p-2' : 'px-3 py-2.5'} dark:border-white/8 dark:bg-white/4`}>
         <img src={collapsed ? '/logo-mark.svg' : '/logo.svg'} alt="Revnivo" className={`${collapsed ? 'h-10 w-10' : 'h-9 w-32'} brand-logo shrink-0 object-contain`} />
       </div>
-      <nav className="space-y-1">
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain pb-3 pr-1">
         {!collapsed && <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-[#62656e]">Workspace</p>}
         {isAdmin ? <div>
           <button onClick={() => { setDashboardOpen(!dashboardOpen); if (collapsed) setCollapsed(false) }} className={`${linkClass({ isActive: false })} w-full ${collapsed ? 'justify-center' : ''}`} title="Dashboard"><BarChart3 size={18} />{!collapsed && <><span className="flex-1 text-left">Dashboard</span><ChevronDown size={16} className={dashboardOpen ? '' : '-rotate-90'} /></>}</button>
@@ -223,7 +223,7 @@ export default function AppShell() {
         {!isAdmin && userOnlyNav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} onClick={() => setMobileOpen(false)} className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title={label}><Icon size={18} />{!collapsed && label}</NavLink>)}
         {isAdmin && <>{!collapsed && <p className="mb-2 mt-7 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-[#62656e]">Administration</p>}<NavLink to="/admin/subscriptions" className={({ isActive }) => `${linkClass({ isActive })} ${collapsed ? 'justify-center' : ''}`} title="Subscriptions"><WalletCards size={18} />{!collapsed && 'Subscriptions'}</NavLink></>}
       </nav>
-      <div ref={profileRef} className="relative mt-auto border-t border-slate-200/80 pt-3 dark:border-white/8">
+      <div ref={profileRef} className="relative mt-auto shrink-0 border-t border-slate-200/80 bg-content1/95 pt-3 dark:border-white/8 dark:bg-[#101114]/95">
         <button onClick={() => setProfileOpen((open) => !open)} className={`flex w-full items-center gap-2 rounded-xl p-2 text-left transition hover:bg-slate-100/80 dark:hover:bg-white/6 ${collapsed ? 'justify-center' : ''}`} aria-expanded={profileOpen} aria-label="Open account menu">
           <ProfileAvatar user={user} className="h-9 w-9" />
           {!collapsed && <div className="min-w-0"><div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{user?.name}</div><div className="truncate text-[11px] text-slate-500 dark:text-[#777a84]">{user?.email}</div></div>}
