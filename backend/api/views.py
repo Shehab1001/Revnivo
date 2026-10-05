@@ -7,6 +7,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import logging
 import mimetypes
 import re
 import secrets
@@ -56,6 +57,8 @@ from .utils import (
     serialize_platform,
     utcnow,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def owner_oid(request):
@@ -362,6 +365,7 @@ def health(request):
     try:
         get_db().command("ping")
     except Exception:
+        logger.exception("MongoDB health check failed")
         return Response({"status": "unavailable"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     return Response({"status": "ok"})
 
