@@ -1454,7 +1454,8 @@ ATS_NOISE_WORDS = {
     "preferred", "qualification", "qualifications", "required",
     "requirement", "requirements", "responsibilities", "responsibility",
     "role", "strong", "successful", "support", "team", "teams",
-    "understanding", "work", "working", "years", "year",
+    "understanding", "work", "working", "years", "year", "must",
+    "proficient", "proficiency", "familiarity", "hands", "hands-on",
 }
 
 REQUIREMENT_MARKERS = (
@@ -3435,7 +3436,6 @@ def _ats_readiness_report(
         "profile",
         {},
     )
-
     experience = resume.get(
         "experience",
         [],
@@ -3448,23 +3448,54 @@ def _ats_readiness_report(
         "skills",
         [],
     )
+    projects = resume.get(
+        "projects",
+        [],
+    )
+    certifications = resume.get(
+        "certifications",
+        [],
+    )
+
+    email = str(
+        profile.get("email") or ""
+    ).strip()
+    phone = str(
+        profile.get("phone") or ""
+    ).strip()
+    phone_digits = re.sub(
+        r"\D",
+        "",
+        phone,
+    )
+
+    experience_bullets = [
+        str(bullet).strip()
+        for item in experience
+        for bullet in item.get(
+            "bullets",
+            [],
+        )
+        if str(bullet).strip()
+    ]
 
     experience_text = " ".join(
-        " ".join(
-            [
+        [
+            str(
                 item.get(
                     "summary",
                     "",
-                ),
-                " ".join(
-                    item.get(
-                        "bullets",
-                        [],
-                    )
-                ),
-            ]
-        )
-        for item in experience
+                )
+            )
+            + " "
+            + " ".join(
+                item.get(
+                    "bullets",
+                    [],
+                )
+            )
+            for item in experience
+        ]
     )
 
     quantified = bool(
@@ -3475,63 +3506,158 @@ def _ats_readiness_report(
         )
     )
 
+    raw_word_count = len(
+        re.findall(
+            r"\b\w+\b",
+            str(raw_text or ""),
+        )
+    )
+
+    structured_experience = any(
+        str(
+            item.get("title") or ""
+        ).strip()
+        and str(
+            item.get("company") or ""
+        ).strip()
+        for item in experience
+    )
+
+    structured_education = any(
+        str(
+            item.get("school") or ""
+        ).strip()
+        and (
+            str(
+                item.get("degree") or ""
+            ).strip()
+            or str(
+                item.get("field") or ""
+            ).strip()
+        )
+        for item in education
+    )
+
+    populated_sections = sum(
+        [
+            bool(experience),
+            bool(education),
+            bool(skills),
+            bool(projects),
+            bool(certifications),
+        ]
+    )
+
     checks = {
         "name": bool(
-            profile.get("full_name")
+            str(
+                profile.get(
+                    "full_name"
+                )
+                or ""
+            ).strip()
         ),
         "email": bool(
-            profile.get("email")
-        ),
-        "phone": bool(
-            profile.get("phone")
-        ),
-        "headline": bool(
-            profile.get("headline")
-        ),
-        "summary": len(
-            resume.get(
-                "summary",
-                "",
+            re.fullmatch(
+                r"[^\s@]+@[^\s@]+\.[^\s@]+",
+                email,
             )
-        ) >= 80,
-        "experience": bool(experience),
-        "education": bool(education),
-        "skills": len(skills) >= 5,
-        "quantified_results": quantified,
-        "parseable_text": len(
-            raw_text.strip()
-        ) >= 300,
+        ),
+        "phone": (
+            8 <= len(phone_digits) <= 16
+        ),
+        "headline": (
+            8
+            <= len(
+                str(
+                    profile.get(
+                        "headline"
+                    )
+                    or ""
+                ).strip()
+            )
+            <= 180
+        ),
+        "summary": (
+            60
+            <= len(
+                str(
+                    resume.get(
+                        "summary"
+                    )
+                    or ""
+                ).strip()
+            )
+            <= 1200
+        ),
+        "experience": (
+            structured_experience
+        ),
+        "experience_detail": (
+            len(
+                experience_bullets
+            )
+            >= 3
+        ),
+        "education": (
+            structured_education
+        ),
+        "skills": (
+            5 <= len(skills) <= 40
+        ),
+        "quantified_results": (
+            quantified
+        ),
+        "parseable_text": (
+            180
+            <= raw_word_count
+            <= 1800
+        ),
+        "section_balance": (
+            populated_sections >= 3
+        ),
     }
 
     weights = {
-        "name": 5,
-        "email": 8,
-        "phone": 5,
-        "headline": 8,
-        "summary": 12,
-        "experience": 20,
-        "education": 8,
-        "skills": 12,
-        "quantified_results": 12,
-        "parseable_text": 10,
+        "name": 4,
+        "email": 7,
+        "phone": 4,
+        "headline": 7,
+        "summary": 10,
+        "experience": 14,
+        "experience_detail": 14,
+        "education": 7,
+        "skills": 10,
+        "quantified_results": 8,
+        "parseable_text": 8,
+        "section_balance": 7,
     }
 
-    score = sum(
+    raw_score = sum(
         weights[key]
-        for key, passed in checks.items()
+        for key, passed
+        in checks.items()
         if passed
+    )
+
+    # This is intentionally not presented as an employer ATS score. Without a
+    # target job description, the highest meaningful result is general resume
+    # readiness, so cap it below 100 to prevent a misleading "perfect ATS" UI.
+    score = min(
+        95,
+        raw_score,
     )
 
     warnings = []
 
     if not checks["email"]:
         warnings.append(
-            "Add an email address."
+            "Add a valid email address."
         )
 
     if not checks["phone"]:
         warnings.append(
-            "Add a phone number."
+            "Add a valid phone number."
         )
 
     if not checks["headline"]:
@@ -3541,17 +3667,29 @@ def _ats_readiness_report(
 
     if not checks["summary"]:
         warnings.append(
-            "Add a concise professional summary of at least a few sentences."
+            "Use a concise professional summary of roughly 60–1200 characters."
         )
 
     if not checks["experience"]:
         warnings.append(
-            "Review the imported Experience section; no structured experience was detected."
+            "Review Experience: at least one role should include both a job title and company."
+        )
+
+    if not checks[
+        "experience_detail"
+    ]:
+        warnings.append(
+            "Add at least three concrete experience bullets so the resume contains enough evidence."
+        )
+
+    if not checks["education"]:
+        warnings.append(
+            "Review Education: include a school plus a degree or field where applicable."
         )
 
     if not checks["skills"]:
         warnings.append(
-            "Add at least five relevant skills."
+            "Keep the skills section focused: about 5–40 relevant skills."
         )
 
     if not checks[
@@ -3561,13 +3699,32 @@ def _ats_readiness_report(
             "Where accurate, add measurable outcomes to experience bullets."
         )
 
+    if not checks[
+        "parseable_text"
+    ]:
+        warnings.append(
+            "The resume text looks unusually short or long; review parsing and overall length."
+        )
+
+    if not checks[
+        "section_balance"
+    ]:
+        warnings.append(
+            "Add enough structured sections for a balanced resume."
+        )
+
     return {
         "score": score,
+        "raw_score": raw_score,
+        "max_general_score": 95,
+        "kind": "resume_readiness",
         "checks": checks,
         "warnings": warnings,
+        "word_count": raw_word_count,
         "disclaimer": (
-            "ATS Readiness is a heuristic formatting/content completeness "
-            "check. It is not an employer ATS score or hiring prediction."
+            "Resume Readiness measures general structure and parseability only. "
+            "It is capped at 95 because no target job description is involved. "
+            "Use Job-specific ATS Match for resume-to-role relevance."
         ),
     }
 
