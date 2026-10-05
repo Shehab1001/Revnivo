@@ -2,6 +2,7 @@
 
 <img src="frontend/public/logo.svg" alt="Revnivo" width="220" />
 
+<br/>
 
 **Income tracking, job discovery, application management, and career tools in one workspace.**
 
