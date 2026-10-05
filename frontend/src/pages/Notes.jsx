@@ -684,6 +684,157 @@ export default function Notes() {
     scheduleSave(draftTitleRef.current, html)
   }
 
+  const placeCaretAtStart = (node) => {
+    if (!node) return
+
+    const range = document.createRange()
+    range.selectNodeContents(node)
+    range.collapse(true)
+
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    lastRangeRef.current = range.cloneRange()
+  }
+
+  const createParagraphAfter = (node) => {
+    if (!node || !editorRef.current) return null
+
+    const paragraph = document.createElement('p')
+    paragraph.innerHTML = '<br>'
+    node.after(paragraph)
+    placeCaretAtStart(paragraph)
+    handleEditorInput()
+
+    return paragraph
+  }
+
+  const closestEditorBlock = (node) => {
+    if (!node || !editorRef.current) return null
+
+    const element =
+      node.nodeType === Node.ELEMENT_NODE
+        ? node
+        : node.parentElement
+
+    return element?.closest?.(
+      'blockquote,p,div,h1,h2,h3,li,pre'
+    ) || null
+  }
+
+  const caretIsAtEndOf = (container) => {
+    const selection = window.getSelection()
+
+    if (
+      !selection ||
+      !selection.rangeCount ||
+      !container
+    ) {
+      return false
+    }
+
+    const range = selection.getRangeAt(0)
+
+    if (!container.contains(range.endContainer)) {
+      return false
+    }
+
+    const trailing = range.cloneRange()
+    trailing.selectNodeContents(container)
+    trailing.setStart(
+      range.endContainer,
+      range.endOffset
+    )
+
+    return (
+      trailing
+        .cloneContents()
+        .textContent
+        ?.replace(/\u200B/g, '')
+        .trim() === ''
+    )
+  }
+
+  const handleEditorKeyDown = (event) => {
+    if (
+      event.key !== 'Enter' ||
+      event.shiftKey
+    ) {
+      return
+    }
+
+    const selection = window.getSelection()
+    const block = closestEditorBlock(
+      selection?.anchorNode
+    )
+    const quote = block?.closest?.('blockquote')
+
+    /*
+     * Treat a quote like a single writing block. Pressing Enter at the
+     * end leaves the quote and creates a normal paragraph underneath,
+     * instead of trapping the caret inside the quotation.
+     */
+    if (
+      quote &&
+      editorRef.current?.contains(quote) &&
+      caretIsAtEndOf(quote)
+    ) {
+      event.preventDefault()
+      createParagraphAfter(quote)
+    }
+  }
+
+  const handleEditorClick = (event) => {
+    if (
+      !event.target.closest(
+        '[data-note-attachment]'
+      )
+    ) {
+      setSelectedAttachmentId('')
+    }
+
+    const editor = editorRef.current
+    if (!editor || event.target !== editor) {
+      return
+    }
+
+    const children = Array.from(editor.children)
+    const lastChild = children.at(-1)
+
+    /*
+     * Clicking the empty canvas below the last block should always give the
+     * user a normal paragraph to type into. This is especially important
+     * when the last block is a quote, list, code block, or attachment.
+     */
+    if (
+      !lastChild ||
+      event.clientY >
+        lastChild.getBoundingClientRect().bottom + 4
+    ) {
+      const reusableParagraph =
+        lastChild?.tagName === 'P' &&
+        !(lastChild.textContent || '').trim() &&
+        !lastChild.querySelector(
+          '[data-note-attachment]'
+        )
+          ? lastChild
+          : null
+
+      if (reusableParagraph) {
+        placeCaretAtStart(reusableParagraph)
+      } else if (lastChild) {
+        createParagraphAfter(lastChild)
+      } else {
+        const paragraph =
+          document.createElement('p')
+        paragraph.innerHTML = '<br>'
+        editor.appendChild(paragraph)
+        placeCaretAtStart(paragraph)
+        handleEditorInput()
+      }
+    }
+  }
+
   const runCommand = (command, value = null) => {
     editorRef.current?.focus()
     document.execCommand(command, false, value)
@@ -1333,17 +1484,10 @@ export default function Notes() {
                   suppressContentEditableWarning
                   onInput={handleEditorInput}
                   onMouseUp={rememberSelection}
+                  onKeyDown={handleEditorKeyDown}
                   onKeyUp={rememberSelection}
                   onFocus={rememberSelection}
-                  onClick={(event) => {
-                    if (
-                      !event.target.closest(
-                        '[data-note-attachment]'
-                      )
-                    ) {
-                      setSelectedAttachmentId('')
-                    }
-                  }}
+                  onClick={handleEditorClick}
                   data-placeholder="Start writing…"
                   className={`note-editor mt-4 min-h-[220px] w-full min-w-0 max-w-full overflow-x-hidden text-[15px] leading-7 text-foreground outline-none sm:mt-7 sm:min-h-[300px] ${resizingAttachment ? 'select-none' : ''}`}
                 />
