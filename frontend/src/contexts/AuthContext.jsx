@@ -10,11 +10,25 @@ import api from '../services/api'
 
 const AuthContext = createContext(null)
 
+function isValidUser(value) {
+  return Boolean(
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    value.id &&
+    value.email
+  )
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [sessionChecked, setSessionChecked] = useState(false)
 
   const saveUser = (data) => {
+    if (!isValidUser(data?.user)) {
+      throw new Error('Invalid authentication response.')
+    }
+
     setUser(data.user)
     return data
   }
@@ -83,8 +97,13 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('incomeflow_user')
 
     api
-      .get('/auth/me/')
-      .then(({ data }) => setUser(data))
+      .get('/auth/me/', {
+        headers: {
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+      })
+      .then(({ data }) => setUser(isValidUser(data) ? data : null))
       .catch(() => setUser(null))
       .finally(() => setSessionChecked(true))
   }, [])
