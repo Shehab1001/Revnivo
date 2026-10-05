@@ -1,5 +1,5 @@
 import { Button, Card, CardBody, Chip, Input, Textarea } from '@heroui/react'
-import { ChevronLeft, Mic, MessageCircle, Paperclip, Pause, Play, Search, Smile, Trash2, Volume2, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { ChevronLeft, Mic, MessageCircle, Paperclip, Pause, Play, Search, Send, Smile, Trash2, Volume2, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
@@ -417,6 +417,7 @@ export default function SupportChat() {
   const [messages, setMessages] = useState([])
   const [content, setContent] = useState('')
   const [attachment, setAttachment] = useState(null)
+  const [sending, setSending] = useState(false)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [recording, setRecording] = useState(false)
@@ -822,24 +823,33 @@ export default function SupportChat() {
      * at the new message.
      */
     scrollToLatestRef.current = true
+    setSending(true)
 
-    await api.post(
-      '/support-chat/',
-      form,
-      {
-        headers: {
-          'Content-Type':
-            'multipart/form-data',
-        },
-      }
-    )
+    try {
+      await api.post(
+        '/support-chat/',
+        form,
+        {
+          headers: {
+            'Content-Type':
+              'multipart/form-data',
+          },
+        }
+      )
 
-    clearTyping()
-    setContent('')
-    setAttachment(null)
+      clearTyping()
+      setContent('')
+      setAttachment(null)
 
-    await loadMessages()
-    await loadContacts().catch(() => {})
+      /*
+       * Reload only after the upload succeeds, so an attachment remains
+       * visible as a draft until the user explicitly sends it.
+       */
+      await loadMessages()
+      await loadContacts().catch(() => {})
+    } finally {
+      setSending(false)
+    }
   }
 
   const handleAttachmentChange = (event) => {
@@ -864,8 +874,9 @@ export default function SupportChat() {
     }
 
     if (
-      !content.trim() &&
-      !attachment
+      sending ||
+      (!content.trim() &&
+        !attachment)
     ) {
       return
     }
@@ -1888,25 +1899,40 @@ export default function SupportChat() {
                 )}
 
                 {attachment && (
-                  <div className="mt-2 flex items-center gap-2 text-xs text-default-500">
-                    <AttachmentPreview
-                      file={
-                        attachment
-                      }
-                      own
-                    />
+                  <div className="mt-3 flex flex-col gap-3 rounded-2xl border border-divider bg-default-50/70 p-3 dark:bg-white/[0.02] sm:flex-row sm:items-end sm:justify-between">
+                    <div className="min-w-0">
+                      <AttachmentPreview
+                        file={attachment}
+                        own={false}
+                      />
 
-                    <button
-                      type="button"
-                      className="text-default-500 transition-colors hover:text-foreground"
-                      onClick={() =>
-                        setAttachment(
-                          null
-                        )
-                      }
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="max-w-[min(70vw,420px)] truncate text-xs text-default-500">
+                          {attachment.name}
+                        </span>
+
+                        <button
+                          type="button"
+                          className="shrink-0 text-xs font-medium text-default-500 transition-colors hover:text-danger"
+                          onClick={() => setAttachment(null)}
+                          disabled={sending}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+
+                    <Button
+                      type="submit"
+                      color="primary"
+                      radius="full"
+                      isLoading={sending}
+                      isDisabled={sending}
+                      startContent={!sending ? <Send size={17} /> : null}
+                      className="h-11 min-w-[112px] self-end px-5 font-semibold shadow-[0_8px_24px_rgba(0,111,238,0.22)]"
                     >
-                      Remove
-                    </button>
+                      {sending ? 'Sending...' : 'Send'}
+                    </Button>
                   </div>
                 )}
               </form>
