@@ -3,6 +3,10 @@ import axios from 'axios'
 const CSRF_STORAGE_KEY = 'revnivo_csrf'
 const CSRF_COOKIE_NAME = 'revnivo_csrf'
 
+const USE_VERCEL_API_PROXY =
+  typeof window !== 'undefined' &&
+  window.location.hostname.endsWith('.vercel.app')
+
 
 export function getApiErrorMessage(error, fallback = 'Request failed.') {
   const data = error?.response?.data
@@ -77,6 +81,24 @@ const api = axios.create({
 
 api.interceptors.request.use((config) => {
   const method = String(config.method || 'get').toLowerCase()
+
+  // Vercel is currently serving the Vite app without applying the external
+  // rewrite rules. Route browser API traffic through a same-origin Vercel
+  // Function instead. The function forwards the request to Railway while
+  // keeping Revnivo auth cookies first-party on revnivo.vercel.app.
+  if (
+    USE_VERCEL_API_PROXY &&
+    String(config.baseURL || '').replace(/\/+$/, '') === '/api' &&
+    config.url &&
+    !String(config.url).startsWith('/proxy')
+  ) {
+    const backendPath = String(config.url).replace(/^\/+/, '')
+    config.url = '/proxy'
+    config.params = {
+      path: backendPath,
+      ...(config.params || {}),
+    }
+  }
 
   if (!['get', 'head', 'options'].includes(method)) {
     const csrf =
