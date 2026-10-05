@@ -19,11 +19,11 @@ const DEFAULT_DASHBOARD_WIDGETS = [
   'net_income',
   'this_month',
   'platforms',
-  'goals',
   'sales_performance',
   'income_by_platform',
   'platform_mix',
   'recent_earnings',
+  'goals',
 ]
 
 const DASHBOARD_WIDGET_LABELS = {
