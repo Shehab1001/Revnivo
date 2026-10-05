@@ -3,6 +3,45 @@ import axios from 'axios'
 const CSRF_STORAGE_KEY = 'revnivo_csrf'
 const CSRF_COOKIE_NAME = 'revnivo_csrf'
 
+
+export function getApiErrorMessage(error, fallback = 'Request failed.') {
+  const data = error?.response?.data
+
+  const flattenMessages = (value) => {
+    if (value == null) return []
+
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+    ) {
+      return [String(value)]
+    }
+
+    if (Array.isArray(value)) {
+      return value.flatMap(flattenMessages)
+    }
+
+    if (typeof value === 'object') {
+      return Object.values(value).flatMap(flattenMessages)
+    }
+
+    return []
+  }
+
+  const detail = flattenMessages(data?.detail).filter(Boolean)
+
+  if (detail.length) {
+    return detail.join(' ')
+  }
+
+  const messages = flattenMessages(data).filter(Boolean)
+
+  return messages.length
+    ? messages.join(' ')
+    : fallback
+}
+
 function getCookie(name) {
   const prefix = `${encodeURIComponent(name)}=`
   const value = document.cookie
