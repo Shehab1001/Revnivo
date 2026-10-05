@@ -521,21 +521,37 @@ export default function Applications() {
     setError('')
 
     try {
-      const [{ data }, statsResponse] =
-        await Promise.all([
-          api.get('/applications/', {
-            params: {
-              archived: showArchived
-                ? 'only'
-                : 'false',
-            },
-          }),
-          api.get('/applications/stats/'),
-        ])
+      const { data } = await api.get(
+        '/applications/',
+        {
+          params: {
+            archived: showArchived
+              ? 'only'
+              : 'false',
+          },
+        }
+      )
 
       setApplications(data.applications || [])
-      setStats(statsResponse.data || {})
+
+      try {
+        const statsResponse = await api.get(
+          '/applications/stats/'
+        )
+        setStats(statsResponse.data || {})
+      } catch {
+        setStats({
+          total: (data.applications || []).length,
+          active: 0,
+          response_rate: 0,
+          offer_rate: 0,
+          by_status: {},
+          upcoming_interviews: [],
+          upcoming_deadlines: [],
+        })
+      }
     } catch (requestError) {
+      setApplications([])
       setError(
         requestError.response?.data?.detail ||
           'Could not load applications.'
