@@ -18,7 +18,6 @@ const platformLineColors = ['#48a4ff', '#b993ff', '#28d8e9', '#37dc8d', '#ffb020
 const DEFAULT_DASHBOARD_WIDGETS = [
   'net_income',
   'this_month',
-  'transactions',
   'platforms',
   'goals',
   'sales_performance',
@@ -30,7 +29,6 @@ const DEFAULT_DASHBOARD_WIDGETS = [
 const DASHBOARD_WIDGET_LABELS = {
   net_income: 'Net income',
   this_month: 'This month income',
-  transactions: 'Transactions',
   platforms: 'Platforms',
   goals: 'Income goals',
   sales_performance: 'Sales performance',
@@ -42,7 +40,6 @@ const DASHBOARD_WIDGET_LABELS = {
 const DASHBOARD_WIDGET_SPANS = {
   net_income: 'xl:col-span-4',
   this_month: 'xl:col-span-4',
-  transactions: 'xl:col-span-4',
   platforms: 'xl:col-span-4',
   goals: 'sm:col-span-2 xl:col-span-12',
   sales_performance: 'sm:col-span-2 xl:col-span-7',
@@ -441,10 +438,6 @@ export default function Dashboard() {
 
     if (widgetId === 'this_month') {
       return <Metric label="This month income" value={formatMoney(currentMonthIncome, effectiveCurrency)} note="vs last month" trend={monthTrend} icon={TrendingUp} accent="green" visible={dataVisible}/>
-    }
-
-    if (widgetId === 'transactions') {
-      return <Metric label="Transactions" value={summary.transactions || 0} note="Paid transactions" icon={ReceiptText} accent="violet" visible={dataVisible}/>
     }
 
     if (widgetId === 'platforms') {
