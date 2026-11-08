@@ -6,7 +6,6 @@
 
 **Income tracking, job discovery, application management, and career tools in one workspace.**
 
-[![Security checks](https://github.com/Shehab1001/Revnivo/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/Shehab1001/Revnivo/actions/workflows/security.yml)
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)
 ![Django](https://img.shields.io/badge/Django-5.2-092E20?logo=django&logoColor=white)
 ![MongoDB](https://img.shields.io/badge/MongoDB-PyMongo-47A248?logo=mongodb&logoColor=white)
